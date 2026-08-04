@@ -1,5 +1,14 @@
 import "./styles.css";
 import { facts, design, portfolio } from "./profile";
+import { renderHero, renderAbout, renderExperience, renderHobbies, renderFooter } from "./sections";
+
+const SECTION_RENDERERS: Record<string, (section: HTMLElement) => void> = {
+  hero: renderHero,
+  about: renderAbout,
+  experience: renderExperience,
+  hobbies: renderHobbies,
+  footer: renderFooter
+};
 
 function applyDesignTokens() {
   const palette = design.palette;
@@ -18,8 +27,13 @@ function renderShell(app: HTMLElement) {
     const section = document.createElement("section");
     section.id = id;
     section.className = "section";
-    const title = portfolio.sections.find((s) => s.id === id)?.title ?? id;
-    section.innerHTML = `<div class="placeholder">${title}</div>`;
+    const render = SECTION_RENDERERS[id];
+    if (render) {
+      render(section);
+    } else {
+      const title = portfolio.sections.find((s) => s.id === id)?.title ?? id;
+      section.innerHTML = `<div class="placeholder">${title}</div>`;
+    }
     main.append(section);
   }
   app.append(main);
