@@ -1,0 +1,24 @@
+# Copy to backend.private.hcl (gitignored) and fill in real values, then:
+#   terraform init -backend-config=backend.private.hcl
+#
+# Credentials come from the environment, never from this file. Create an R2 API
+# token scoped to the state bucket and export it as:
+#   AWS_ACCESS_KEY_ID     = <r2-access-key-id>
+#   AWS_SECRET_ACCESS_KEY = <r2-secret-access-key>
+
+bucket = "<project-slug>-tf-state"
+key    = "production/terraform.tfstate"
+region = "auto"
+
+endpoints = {
+  s3 = "https://<cloudflare-account-id>.r2.cloudflarestorage.com"
+}
+
+# R2 speaks S3 but is not AWS, so the AWS-specific preflight checks and the
+# newer checksum algorithms have to be skipped.
+skip_credentials_validation = true
+skip_region_validation      = true
+skip_requesting_account_id  = true
+skip_metadata_api_check     = true
+skip_s3_checksum            = true
+use_path_style              = true
