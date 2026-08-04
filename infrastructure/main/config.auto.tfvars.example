@@ -1,0 +1,23 @@
+# Copy to config.auto.tfvars (gitignored) and fill in real values.
+# Export CLOUDFLARE_API_TOKEN before running terraform.
+
+cloudflare_account_id = "<cloudflare-account-id>"
+cloudflare_zone_id    = "<cloudflare-zone-id>"
+project_slug          = "<project-slug>"
+root_domain           = "<example.com>"
+
+# Leave site_subdomain empty to serve the site from the apex domain.
+# When set, github_pages_owner must also be set.
+# site_subdomain     = "www"
+# github_pages_owner = "<github-owner>"
+
+# content_subdomain = "content"
+# media_subdomain   = "media"
+# worker_subdomain  = "worker"
+
+# draft_retention_days = 7
+# r2_location_hint     = "weur"
+
+# Flip to true only after Wrangler has deployed the Worker once.
+# worker_enabled = true
+# worker_name    = "<worker-name>"
