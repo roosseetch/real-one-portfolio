@@ -8,9 +8,9 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 
 ## Phase 1 — Profile Generator and design inputs
 - [x] Task 2: Profile JSON schemas + validation script
-- [ ] Task 3: Fable generation prompt
-- [ ] Task 4: Generate and approve the author's profile files
-- [ ] Checkpoint A: profile files approved, repo clean of personal deployment values
+- [x] Task 3: Fable generation prompt
+- [x] Task 4: Generate and approve the author's profile files
+- [x] Checkpoint A: profile files approved, repo clean of personal deployment values
 
 ## Phase 2 — Static portfolio site
 - [ ] Task 5: Vite + vanilla TS site scaffold
