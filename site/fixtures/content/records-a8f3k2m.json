@@ -1,0 +1,20 @@
+[
+  {
+    "id": "rec-001",
+    "title": "An afternoon at the museum",
+    "summary": "A visit focused on contemporary art and photography.",
+    "body": "Spent the afternoon exploring a photography exhibition and picked up a few ideas about framing and light.",
+    "eventDate": "2026-07-30",
+    "tags": ["Art", "Photography"],
+    "media": []
+  },
+  {
+    "id": "rec-002",
+    "title": "Morning run by the river",
+    "summary": "An easy 8 km before work.",
+    "body": "Cool air, quiet paths, and a good pace. The best way to start a Tuesday.",
+    "eventDate": "2026-07-28",
+    "tags": ["Jogging"],
+    "media": []
+  }
+]
