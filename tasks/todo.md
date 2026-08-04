@@ -21,10 +21,12 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Checkpoint B: portfolio live on Pages (Activity states verified against local fixtures; live feed pending Cloudflare content bucket)
 
 ## Phase 3 — Cloudflare infrastructure (Terraform)
-- [ ] Task 10: Bootstrap stack
-- [ ] Task 11: Main stack — buckets, lifecycle, domains, DNS
-- [ ] Task 12: Worker foundation in Terraform + Terraform CI workflows
+- [x] Task 10: Bootstrap stack
+- [x] Task 11: Main stack — buckets, lifecycle, domains, DNS
+- [x] Task 12: Worker foundation in Terraform + Terraform CI workflows
 - [ ] Checkpoint C: terraform apply succeeds, buckets/domains live
+      (blocked on a registered domain + Cloudflare credentials; code is
+      plan-verified against provider 5.22.0)
 
 ## Phase 4 — Telegram text-only publishing
 - [ ] Task 13: Worker scaffold + wrangler template + generate-wrangler script
