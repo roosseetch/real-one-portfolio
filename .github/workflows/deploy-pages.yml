@@ -1,0 +1,57 @@
+name: Deploy site to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "profile/**"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+      - name: Build site
+        working-directory: site
+        env:
+          # PAGES_BASE_PATH: set as a repository variable when serving from a
+          # custom domain (use "/"); defaults to the project-pages subpath.
+          VITE_BASE: ${{ vars.PAGES_BASE_PATH || format('/{0}/', github.event.repository.name) }}
+          # CONTENT_BASE_URL: public content bucket base URL; unset until the
+          # Cloudflare infrastructure exists, which the site handles gracefully.
+          VITE_CONTENT_BASE_URL: ${{ vars.CONTENT_BASE_URL }}
+        run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
