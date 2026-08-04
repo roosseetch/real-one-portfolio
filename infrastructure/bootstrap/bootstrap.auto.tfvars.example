@@ -1,0 +1,7 @@
+# Copy to bootstrap.auto.tfvars (gitignored) and fill in real values.
+# Export CLOUDFLARE_API_TOKEN before running terraform.
+
+cloudflare_account_id = "<cloudflare-account-id>"
+project_slug          = "<project-slug>"
+
+# r2_location_hint = "weur"
