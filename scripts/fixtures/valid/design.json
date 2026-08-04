@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "heroImageRef": "hero",
+  "paletteInspiration": "Light-yellow jacket in the hero photo as the palette anchor",
+  "palette": {
+    "accent": "#e8c547",
+    "background": "#faf7f0",
+    "text": "#3a3a38",
+    "surface": "#ffffff",
+    "muted": "#8a8578"
+  },
+  "typographyDirection": "Modern humanist sans, editorial spacing",
+  "pageDensity": "spacious",
+  "motionLevel": "subtle",
+  "imageTreatment": "Natural photography, no heavy filters, editorial crops",
+  "accessibility": {
+    "minContrast": "AA",
+    "reducedMotionSupport": true,
+    "keyboardNavigation": true
+  },
+  "mediaPrivacy": {
+    "stripOriginalMetadata": true,
+    "injectDecoyMetadata": true
+  },
+  "feel": ["warm", "personal", "editorial", "modern", "optimistic", "spacious", "authentic"],
+  "avoid": ["traditional resume page", "corporate employee directory", "AI startup", "generic portfolio template", "dark developer portfolio"]
+}

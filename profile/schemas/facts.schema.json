@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "portfolio/facts.schema.json",
+  "title": "Profile facts",
+  "description": "Verified facts only. Uncertain values remain null; private facts must not be added.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "displayName", "headline", "location", "languages", "experience", "education", "skills", "hobbies", "mediaReferences"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "displayName": { "type": ["string", "null"], "minLength": 1 },
+    "headline": { "type": ["string", "null"], "minLength": 1 },
+    "location": { "type": ["string", "null"], "minLength": 1 },
+    "languages": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "experience": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "organization", "start", "end", "summary"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "organization": { "type": ["string", "null"] },
+          "start": { "type": ["string", "null"], "pattern": "^[0-9]{4}(-[0-9]{2})?$" },
+          "end": { "type": ["string", "null"], "pattern": "^([0-9]{4}(-[0-9]{2})?|present)$" },
+          "summary": { "type": ["string", "null"] },
+          "highlights": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "education": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["institution", "degree", "year"],
+        "properties": {
+          "institution": { "type": "string", "minLength": 1 },
+          "degree": { "type": ["string", "null"] },
+          "year": { "type": ["string", "null"], "pattern": "^[0-9]{4}$" }
+        }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "hobbies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "description", "mediaRef"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "title": { "type": "string", "minLength": 1 },
+          "description": { "type": ["string", "null"] },
+          "mediaRef": { "type": ["string", "null"] },
+          "relatedActivities": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "mediaReferences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "file", "alt"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "role": { "enum": ["hero", "hobby", "other"] },
+          "file": { "type": ["string", "null"], "description": "Relative reference within private inputs or processed media; never an absolute URL." },
+          "alt": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "pageGoals": ["Introduce the person warmly", "Show selected experience and interests", "Surface recent activities"],
+  "audiences": ["Colleagues", "Professional network", "Potential collaborators"],
+  "navigation": ["Home", "About", "Experience", "Hobbies", "Recent Activities"],
+  "landingPageOrder": ["hero", "about", "experience", "hobbies", "activity", "footer"],
+  "sections": [
+    { "id": "hero", "title": "Hi, I'm Alex.", "notes": "Portrait, name, short personal introduction, one or two actions." },
+    { "id": "about", "title": "About", "notes": "Warm About text from personality.aboutText." },
+    { "id": "experience", "title": "Selected Experience", "notes": null },
+    { "id": "hobbies", "title": "Hobbies", "notes": "Cards with approved images." },
+    { "id": "activity", "title": "Recent Activities", "notes": "Static loader, manifest + chunks." },
+    { "id": "footer", "title": "Contact", "notes": "Footer contact links." }
+  ],
+  "activity": {
+    "enabled": true,
+    "defaultSort": "descending",
+    "recordsPerChunk": 10,
+    "previewBehavior": "Telegram preview shows exactly what becomes public."
+  },
+  "generationNotes": "Build only from profile files; never invent facts; keep deployment values outside the profile."
+}
