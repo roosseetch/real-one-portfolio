@@ -1,11 +1,16 @@
+# The account and zone identifiers are marked sensitive so Terraform redacts
+# them from plan and apply output. This repository is public, which makes its
+# Actions logs public too, and these identifiers appear in R2 endpoint URLs.
 variable "cloudflare_account_id" {
   description = "Cloudflare account that owns the R2 buckets and the Worker."
   type        = string
+  sensitive   = true
 }
 
 variable "cloudflare_zone_id" {
   description = "Zone hosting the root domain."
   type        = string
+  sensitive   = true
 }
 
 variable "project_slug" {

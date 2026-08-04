@@ -1,0 +1,78 @@
+name: Terraform apply
+
+# The only workflow allowed to change infrastructure. It runs against the
+# protected "production" environment, so it waits for whatever reviewers that
+# environment requires.
+#
+# The bootstrap stack is deliberately absent: it keeps local state and creates
+# the bucket this workflow's backend depends on, so a human runs it once by
+# hand before this workflow can work at all.
+#
+# Repository variables and secrets are the same as terraform-plan.yml, except
+# that the credentials here may write:
+#   CLOUDFLARE_API_TOKEN, R2_STATE_RW_ACCESS_KEY_ID,
+#   R2_STATE_RW_SECRET_ACCESS_KEY
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infrastructure/**"
+      - ".github/workflows/terraform-apply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# R2 gives Terraform no state locking, so overlapping applies are prevented by
+# serializing them here instead. Never cancel a run in progress: interrupting
+# an apply mid-write is exactly what the lock would have protected against.
+concurrency:
+  group: terraform-production
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: infrastructure/main
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_STATE_RW_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_STATE_RW_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL_S3: https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      AWS_REGION: auto
+      TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+      TF_VAR_project_slug: ${{ vars.PROJECT_SLUG }}
+      TF_VAR_root_domain: ${{ vars.ROOT_DOMAIN }}
+      TF_VAR_site_subdomain: ${{ vars.SITE_SUBDOMAIN }}
+      TF_VAR_github_pages_owner: ${{ vars.GITHUB_PAGES_OWNER }}
+      TF_VAR_worker_enabled: ${{ vars.WORKER_ENABLED || 'false' }}
+      TF_VAR_worker_name: ${{ vars.WORKER_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+          terraform_wrapper: false
+      - name: Initialize with the R2 state backend
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=production/terraform.tfstate" \
+            -backend-config="region=auto" \
+            -backend-config="skip_credentials_validation=true" \
+            -backend-config="skip_region_validation=true" \
+            -backend-config="skip_requesting_account_id=true" \
+            -backend-config="skip_metadata_api_check=true" \
+            -backend-config="skip_s3_checksum=true" \
+            -backend-config="use_path_style=true"
+      - name: Plan
+        run: terraform plan -input=false -no-color -out=tfplan
+      - name: Apply
+        run: terraform apply -input=false -no-color -auto-approve tfplan
