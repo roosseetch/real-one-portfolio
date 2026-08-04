@@ -17,8 +17,8 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Task 6: Hero + About sections
 - [x] Task 7: Experience + Hobbies sections
 - [x] Task 8: Static Activity loader
-- [ ] Task 9: GitHub Pages deployment
-- [ ] Checkpoint B: portfolio live on Pages, Activity renders fixture data
+- [x] Task 9: GitHub Pages deployment
+- [x] Checkpoint B: portfolio live on Pages (Activity states verified against local fixtures; live feed pending Cloudflare content bucket)
 
 ## Phase 3 — Cloudflare infrastructure (Terraform)
 - [ ] Task 10: Bootstrap stack
