@@ -1,0 +1,5 @@
+Placeholder — written in Task 3.
+
+This file will contain the generation instructions for a design model (Fable or
+another) to build the portfolio site from the approved files in profile/ without
+inventing facts and without embedding deployment-specific values.

@@ -1,0 +1,26 @@
+# Personalized / secret files — never tracked (reusable-repo rule)
+*.auto.tfvars
+backend.private.hcl
+worker/.dev.vars
+worker/.env
+worker/wrangler.generated.json
+
+# Terraform local state (bootstrap stack)
+terraform.tfstate
+terraform.tfstate.backup
+**/terraform.tfstate
+**/terraform.tfstate.backup
+.terraform/
+**/.terraform/
+
+# Private source material (raw CV, photos, reflections)
+private-inputs/
+
+# Build + deps
+node_modules/
+dist/
+.wrangler/
+
+# Editor / OS noise
+.DS_Store
+*.log
