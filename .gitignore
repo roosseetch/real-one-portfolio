@@ -4,6 +4,15 @@ backend.private.hcl
 worker/.dev.vars
 worker/.env
 worker/wrangler.generated.json
+site/.env
+site/.env.*
+!site/.env.example
+
+# Local credential files at any level
+.env
+.env.*
+!.env.example
+.envrc
 
 # Terraform local state (bootstrap stack)
 terraform.tfstate
