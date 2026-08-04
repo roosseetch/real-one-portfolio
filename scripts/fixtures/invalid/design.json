@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "heroImageRef": "hero",
+  "paletteInspiration": null,
+  "palette": {
+    "accent": "yellow",
+    "background": "#faf7f0",
+    "text": "#3a3a38"
+  },
+  "typographyDirection": null,
+  "pageDensity": "spacious",
+  "motionLevel": "subtle",
+  "imageTreatment": null,
+  "accessibility": null,
+  "mediaPrivacy": {
+    "stripOriginalMetadata": true,
+    "injectDecoyMetadata": true
+  },
+  "rootDomain": "example-person.dev",
+  "feel": [],
+  "avoid": []
+}

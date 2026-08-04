@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "displayName": "Alex Example",
+  "headline": "Operations Lead",
+  "location": "See alex-example.com",
+  "languages": ["English"],
+  "experience": [
+    {
+      "title": "Operations Lead",
+      "organization": "Example Research",
+      "start": "March 2020",
+      "end": "present",
+      "summary": "Contact me at alex@example-mail.net for details."
+    }
+  ],
+  "education": [],
+  "skills": [],
+  "hobbies": [],
+  "mediaReferences": []
+}

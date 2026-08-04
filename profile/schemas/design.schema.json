@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "portfolio/design.schema.json",
+  "title": "Profile design direction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "heroImageRef", "paletteInspiration", "palette", "typographyDirection", "pageDensity", "motionLevel", "imageTreatment", "accessibility", "mediaPrivacy", "feel", "avoid"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "heroImageRef": { "type": ["string", "null"], "description": "Media reference id from facts.json mediaReferences." },
+    "paletteInspiration": { "type": ["string", "null"] },
+    "palette": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["accent", "background", "text"],
+      "properties": {
+        "accent": { "$ref": "#/$defs/hexColor" },
+        "background": { "$ref": "#/$defs/hexColor" },
+        "text": { "$ref": "#/$defs/hexColor" },
+        "surface": { "$ref": "#/$defs/hexColor" },
+        "muted": { "$ref": "#/$defs/hexColor" }
+      }
+    },
+    "typographyDirection": { "type": ["string", "null"] },
+    "pageDensity": { "enum": ["spacious", "normal", "dense", null] },
+    "motionLevel": { "enum": ["none", "subtle", "moderate", null] },
+    "imageTreatment": { "type": ["string", "null"] },
+    "accessibility": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "minContrast": { "type": "string" },
+        "reducedMotionSupport": { "type": "boolean" },
+        "keyboardNavigation": { "type": "boolean" }
+      }
+    },
+    "mediaPrivacy": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["stripOriginalMetadata", "injectDecoyMetadata"],
+      "properties": {
+        "stripOriginalMetadata": { "const": true },
+        "injectDecoyMetadata": { "type": "boolean" }
+      }
+    },
+    "feel": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "avoid": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "hexColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+  }
+}

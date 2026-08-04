@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "displayName": "Alex Example",
+  "headline": "Operations Lead",
+  "location": "Zurich, Switzerland",
+  "languages": ["English", "German"],
+  "experience": [
+    {
+      "title": "Operations Lead",
+      "organization": "Example Research",
+      "start": "2020-03",
+      "end": "present",
+      "summary": "Leads operational tracking and reporting for multi-country studies.",
+      "highlights": ["Built executive KPI reporting", "Improved milestone tracking"]
+    }
+  ],
+  "education": [
+    { "institution": "Example University", "degree": "MSc Life Sciences", "year": "2012" }
+  ],
+  "skills": ["Process optimization", "Data visualization", "Team enablement"],
+  "hobbies": [
+    {
+      "id": "jogging",
+      "title": "Jogging",
+      "description": "Morning runs along the lake.",
+      "mediaRef": "hobby-jogging",
+      "relatedActivities": ["Sunrise 10k"]
+    }
+  ],
+  "mediaReferences": [
+    { "id": "hero", "role": "hero", "file": "main_foto.jpeg", "alt": "Portrait in a light-yellow jacket" },
+    { "id": "hobby-jogging", "role": "hobby", "file": "hobby_jogging.jpeg", "alt": "Jogging by the lake" }
+  ]
+}

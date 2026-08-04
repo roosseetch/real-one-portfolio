@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "verifiedObservations": [
+    "Consistently refines processes across iterations",
+    "Validates values and asks for source-level checks"
+  ],
+  "provisionalInterpretations": [
+    "May prefer visual summaries over long prose"
+  ],
+  "approvedCharacteristics": [
+    { "name": "Curious and improvement-oriented", "description": "Looks for better ways to work, learn, and communicate." },
+    { "name": "Detail-oriented", "description": "Pays close attention to accuracy, consistency, and traceability." }
+  ],
+  "communicationStyle": [
+    { "name": "Direct and clear", "description": "Focuses on the objective and moves quickly toward a solution." },
+    { "name": "Structured", "description": "Prefers tables, summaries, and visual organization." }
+  ],
+  "learningAttitude": "Lifelong learner who applies new ideas in practice.",
+  "interests": [
+    "Operational excellence",
+    "Leadership and team engagement",
+    "Data visualization",
+    "Practical AI tools"
+  ],
+  "values": [
+    { "name": "Accuracy", "description": "Prioritizes correctness and validation." },
+    { "name": "Collaboration", "description": "Frames improvements as team assets." }
+  ],
+  "motivations": ["Making work easier and more effective", "Helping teams succeed"],
+  "aboutText": "I enjoy finding better ways of working, especially where people, processes, and data come together.",
+  "aboutGuidance": "Warm, authentic, curious, approachable; AI is one practical interest among several, not the whole identity."
+}

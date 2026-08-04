@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "portfolio/portfolio.schema.json",
+  "title": "Profile site information architecture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "pageGoals", "audiences", "navigation", "landingPageOrder", "sections", "activity"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "pageGoals": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "audiences": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "navigation": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Ordered top navigation labels, e.g. Home, About, Experience, Hobbies, Recent Activities."
+    },
+    "landingPageOrder": {
+      "type": "array",
+      "items": { "enum": ["hero", "about", "experience", "hobbies", "activity", "footer"] },
+      "minItems": 1
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title"],
+        "properties": {
+          "id": { "enum": ["hero", "about", "experience", "hobbies", "activity", "footer"] },
+          "title": { "type": "string", "minLength": 1 },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "defaultSort", "recordsPerChunk"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "defaultSort": { "const": "descending" },
+        "recordsPerChunk": { "const": 10 },
+        "previewBehavior": { "type": ["string", "null"], "description": "Telegram preview behavior notes." }
+      }
+    },
+    "generationNotes": { "type": ["string", "null"], "description": "Instructions for the design model (Fable) generation step." }
+  }
+}

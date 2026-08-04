@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "verifiedObservations": ["Reach the bot at https://t.me/example_bot", "Chat id is 1234567890"],
+  "provisionalInterpretations": [],
+  "approvedCharacteristics": [],
+  "communicationStyle": [],
+  "learningAttitude": null,
+  "interests": [],
+  "values": [],
+  "motivations": [],
+  "aboutText": null,
+  "aboutGuidance": null
+}
