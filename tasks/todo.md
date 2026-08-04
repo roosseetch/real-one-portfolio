@@ -7,7 +7,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Task 1: Repo skeleton, .gitignore, plan files, GitHub Project board
 
 ## Phase 1 — Profile Generator and design inputs
-- [ ] Task 2: Profile JSON schemas + validation script
+- [x] Task 2: Profile JSON schemas + validation script
 - [ ] Task 3: Fable generation prompt
 - [ ] Task 4: Generate and approve the author's profile files
 - [ ] Checkpoint A: profile files approved, repo clean of personal deployment values

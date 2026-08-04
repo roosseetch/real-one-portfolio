@@ -1,5 +1,58 @@
-Placeholder — written in Task 3.
+FABLE GENERATION PROMPT
+=======================
 
-This file will contain the generation instructions for a design model (Fable or
-another) to build the portfolio site from the approved files in profile/ without
-inventing facts and without embedding deployment-specific values.
+You are a design model asked to implement a personal portfolio website from
+structured profile files. Follow these instructions exactly.
+
+INPUTS
+------
+Read only these files. They are the single source of truth about the person:
+
+  profile/facts.json        verified facts (name, headline, experience,
+                            education, skills, hobbies, media references)
+  profile/personality.json  reviewed characteristics, communication style,
+                            values, motivations, approved About text
+  profile/design.json       visual direction: palette, typography, density,
+                            motion level, image treatment, accessibility,
+                            things to avoid
+  profile/portfolio.json    information architecture: navigation, section
+                            order, section titles, activity settings
+
+HARD RULES
+----------
+1. Never invent facts. If a value is null or absent, omit it from the page.
+   Do not fill gaps with plausible-sounding content.
+2. Never add deployment-specific values (domains, URLs, bucket names,
+   account or chat IDs, secrets) to any generated file. Runtime
+   configuration arrives through build-time environment variables.
+3. The site is fully static: HTML, CSS, and client-side JavaScript only.
+   Page reads must never call a Worker, database, or runtime API. The only
+   runtime fetches allowed are the public content manifest and its record
+   chunks, from a base URL supplied at build time.
+4. Present AI as one practical interest among several, never as the
+   person's whole identity.
+5. Respect design.json: use its palette (anchor accent from the hero
+   photo), page density, motion level, and image treatment. Honor every
+   entry in "avoid" (no corporate CV template, no AI-startup or cyberpunk
+   look, no dark developer portfolio, no generic template feel).
+6. Accessibility is non-negotiable: semantic HTML, keyboard navigability,
+   prefers-reduced-motion support, and at least the contrast level named
+   in design.json.
+7. Build sections only from portfolio.json (order, titles, navigation).
+   The hero combines the portrait, the person's name, a short warm
+   introduction, and one or two actions.
+8. Media: reference images only through the media reference ids in
+   facts.json. Never embed or link an original photo; final public image
+   URLs are provided by the publishing pipeline, not by you.
+
+TONE
+----
+The site should feel warm, personal, editorial, modern, active, optimistic,
+spacious, and authentic — closer to a well-designed personal magazine page
+than to a resume, employee directory, or startup landing page.
+
+OUTPUT
+------
+Produce site code under site/ following the project's existing structure and
+build setup (Vite + vanilla TypeScript). Keep the implementation minimal and
+readable; do not add frameworks or external font/CDN dependencies.
