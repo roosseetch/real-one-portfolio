@@ -13,9 +13,9 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Checkpoint A: profile files approved, repo clean of personal deployment values
 
 ## Phase 2 — Static portfolio site
-- [ ] Task 5: Vite + vanilla TS site scaffold
-- [ ] Task 6: Hero + About sections
-- [ ] Task 7: Experience + Hobbies sections
+- [x] Task 5: Vite + vanilla TS site scaffold
+- [x] Task 6: Hero + About sections
+- [x] Task 7: Experience + Hobbies sections
 - [ ] Task 8: Static Activity loader
 - [ ] Task 9: GitHub Pages deployment
 - [ ] Checkpoint B: portfolio live on Pages, Activity renders fixture data

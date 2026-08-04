@@ -181,6 +181,62 @@ main {
   margin: 0;
 }
 
+/* Activity */
+.activity-note {
+  color: var(--muted);
+}
+
+.activity-sort {
+  background: none;
+  border: 1px solid var(--muted);
+  border-radius: 999px;
+  padding: 0.4rem 1rem;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  margin-bottom: var(--space);
+}
+
+.activity-list {
+  display: grid;
+  gap: var(--space);
+}
+
+.activity-card {
+  background: var(--surface);
+  border-radius: 1rem;
+  padding: var(--space);
+}
+
+.activity-date {
+  color: var(--muted);
+  margin-top: 0;
+}
+
+.activity-media img {
+  border-radius: 0.75rem;
+}
+
+.activity-media figcaption {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 0.4rem;
+}
+
+.activity-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+.activity-tag {
+  background: color-mix(in srgb, var(--accent) 30%, var(--surface));
+  border-radius: 999px;
+  padding: 0.15rem 0.7rem;
+  font-size: 0.85rem;
+}
+
 /* Footer */
 .footer {
   text-align: center;

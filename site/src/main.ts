@@ -1,12 +1,15 @@
 import "./styles.css";
 import { facts, design, portfolio } from "./profile";
 import { renderHero, renderAbout, renderExperience, renderHobbies, renderFooter } from "./sections";
+import { renderActivity } from "./activity";
 
 const SECTION_RENDERERS: Record<string, (section: HTMLElement) => void> = {
   hero: renderHero,
   about: renderAbout,
   experience: renderExperience,
   hobbies: renderHobbies,
+  activity: (section) =>
+    renderActivity(section, portfolio.sections.find((s) => s.id === "activity")?.title ?? "Recent Activities"),
   footer: renderFooter
 };
 
