@@ -8,8 +8,10 @@
  * true once.
  */
 import { editRecord, regenerateRecord } from "../ai/generate";
+import { toPublicRecord } from "../content/records";
 import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
+import { publishRecord, type PublishEnv } from "../publishing/publish";
 import { setPendingEdit } from "./pending";
 import {
   answerCallback,
@@ -38,9 +40,12 @@ const NOT_YET = "Not available yet.";
 const EDIT_PROMPT = "What should change? Send it as a message, and the whole entry comes back for approval.";
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
+const PUBLISH_FAILED_MESSAGE = "Publication failed. The draft is still here — try again in a moment.";
 
-export interface ApprovalEnv extends TelegramApiEnv, AiEnv {
+export interface ApprovalEnv extends TelegramApiEnv, AiEnv, PublishEnv {
   PRIVATE_BUCKET: R2Bucket;
+  /** Where the published record becomes visible, for the link sent back to the author. */
+  SITE_BASE_URL: string;
 }
 
 /**
@@ -126,15 +131,20 @@ export async function handlePreviewCallback(
     return;
   }
 
+  // State before token, so a finished draft says what actually happened.
+  // Acting on a terminal draft is refused either way, and "this preview has
+  // been replaced" would send the author looking for a newer one that does not
+  // exist. Nothing is given away by saying so: reaching here already required
+  // an allowlisted sender and an unguessable draft id.
+  if (draft.state !== "awaiting_approval") {
+    await answerCallback(env, query.id, `Already ${draft.state.replace("_", " ")}.`);
+    return;
+  }
+
   // A press from a superseded preview, or from one whose token was never
   // stored. Either way the message it came from is not describing this draft.
   if (draft.preview === null || !timingSafeEqual(parsed.token, draft.preview.token)) {
     await answerCallback(env, query.id, "This preview has been replaced. Use the newest one.");
-    return;
-  }
-
-  if (draft.state !== "awaiting_approval") {
-    await answerCallback(env, query.id, `Already ${draft.state.replace("_", " ")}.`);
     return;
   }
 
@@ -159,10 +169,61 @@ export async function handlePreviewCallback(
     return;
   }
 
-  // Publish lands with the publication task and media with the photo pipeline.
-  // The buttons stay live rather than being stripped, because nothing has been
-  // acted on yet.
+  if (parsed.action === "publish") {
+    await answerCallback(env, query.id, "Publishing…");
+    await publishDraft(env, draft);
+    return;
+  }
+
+  // Media lands with the photo pipeline. The buttons stay live rather than
+  // being stripped, because nothing has been acted on yet.
   await answerCallback(env, query.id, NOT_YET);
+}
+
+/**
+ * Publishes the approved record and retires the draft.
+ *
+ * The draft is marked published straight after the content write, and its
+ * preview dropped, so the state check above refuses any later press. A record
+ * already published short-circuits back to the link it produced: chunks are
+ * immutable, so a duplicate could not simply be edited out afterwards.
+ */
+async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
+  if (draft.record === null) return;
+
+  if (draft.published !== null) {
+    await sendMessage(env, draft.source.chatId, `Already published. ${draft.published.url}`);
+    return;
+  }
+
+  const result = await publishRecord(env, toPublicRecord(draft.record));
+
+  if (result.status !== "published") {
+    await sendMessage(env, draft.source.chatId, PUBLISH_FAILED_MESSAGE);
+    return;
+  }
+
+  const url = `${env.SITE_BASE_URL.replace(/\/$/, "")}/#activity`;
+  const published: Draft = {
+    ...transition(draft, "published"),
+    preview: null,
+    published: { recordId: result.record.id, url },
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, published);
+  } catch {
+    // The record is live; only the bookkeeping failed. Stripping the keyboard
+    // below is what stops a second press from publishing it twice, so say
+    // nothing to the author about a problem that no longer affects them.
+    console.error("Published, but could not record it on the draft");
+  }
+
+  if (draft.preview !== null) {
+    await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
+  }
+  await sendMessage(env, draft.source.chatId, `Published. ${url}`);
 }
 
 /**

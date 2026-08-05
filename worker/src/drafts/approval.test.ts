@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { aiRecord, createFakeAi, type AiStep } from "../test-support/ai";
+import { chunkKey } from "../content/chunks";
+import { createManifest, emptyManifest, readManifest } from "../content/manifest";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import type { TelegramCallbackQuery } from "../telegram/types";
 import { handlePreviewCallback, parseCallbackData, sendPreview } from "./approval";
@@ -17,11 +19,13 @@ const RECORD: DraftRecord = {
 };
 
 let storage: FakeBucket;
+let content: FakeBucket;
 /** Every Telegram call, as {method, body}. */
 let calls: Array<{ method: string; body: Record<string, unknown> }>;
 
 beforeEach(() => {
   storage = createFakeBucket();
+  content = createFakeBucket();
   calls = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     calls.push({
@@ -40,6 +44,8 @@ function env(...steps: AiStep[]) {
   return {
     PRIVATE_BUCKET: storage.bucket,
     TELEGRAM_BOT_TOKEN: "test-token",
+    CONTENT_BUCKET: content.bucket,
+    SITE_BASE_URL: "https://site.example",
     AI: createFakeAi(...(steps.length > 0 ? steps : [aiRecord()])).AI,
   };
 }
@@ -188,21 +194,21 @@ describe("handlePreviewCallback", () => {
 
     await handlePreviewCallback(press(draft, "c"), env());
 
-    expect(answers()).toEqual(["This preview has been replaced. Use the newest one."]);
+    // Says what happened rather than sending the author after a newer preview
+    // that does not exist.
+    expect(answers()).toEqual(["Already cancelled."]);
   });
 
-  it("acknowledges the buttons whose flows land later, without touching the draft", async () => {
-    for (const code of ["p", "m"]) {
-      const draft = await awaitingApproval();
-      calls.length = 0;
+  it("acknowledges Change media, whose flow lands with the photo pipeline", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
 
-      await handlePreviewCallback(press(draft, code), env());
+    await handlePreviewCallback(press(draft, "m"), env());
 
-      expect(answers()).toEqual(["Not available yet."]);
-      // Still approvable: nothing was acted on, so the buttons stay live.
-      expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("awaiting_approval");
-      expect(calls.map((c) => c.method)).not.toContain("editMessageReplyMarkup");
-    }
+    expect(answers()).toEqual(["Not available yet."]);
+    // Still approvable: nothing was acted on, so the buttons stay live.
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("awaiting_approval");
+    expect(calls.map((c) => c.method)).not.toContain("editMessageReplyMarkup");
   });
 });
 
@@ -251,11 +257,7 @@ describe("regenerate", () => {
     const fake = createFakeAi(aiRecord());
     const draft = await awaitingApproval();
 
-    await handlePreviewCallback(press(draft, "r"), {
-      PRIVATE_BUCKET: storage.bucket,
-      TELEGRAM_BOT_TOKEN: "t",
-      AI: fake.AI,
-    });
+    await handlePreviewCallback(press(draft, "r"), { ...env(), AI: fake.AI });
 
     const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content;
     expect(prompt).toContain("an easy 8k");
@@ -287,5 +289,106 @@ describe("edit", () => {
     expect(storage.objects.has("drafts/pending/99.json")).toBe(true);
     // Nothing has changed yet, so the buttons stay live.
     expect(calls.map((c) => c.method)).not.toContain("editMessageReplyMarkup");
+  });
+});
+
+describe("publish", () => {
+  beforeEach(async () => {
+    await createManifest(content.bucket, emptyManifest());
+  });
+
+  it("publishes the record and sends back the link", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    const loaded = await readManifest(content.bucket);
+    expect(loaded?.manifest.totalRecords).toBe(1);
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toBe(
+      "Published. https://site.example/#activity",
+    );
+  });
+
+  it("retires the draft so no later press can act on it", async () => {
+    const draft = await awaitingApproval();
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("published");
+    expect(stored?.preview).toBeNull();
+    expect(stored?.published?.url).toBe("https://site.example/#activity");
+  });
+
+  it("strips the buttons off the approved preview", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect(calls.map((c) => c.method)).toContain("editMessageReplyMarkup");
+  });
+
+  it("publishes once however often the button is pressed", async () => {
+    // Spec §24. Chunks are immutable, so a duplicate could not be edited out.
+    const draft = await awaitingApproval();
+    await handlePreviewCallback(press(draft, "p"), env());
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(1);
+    expect(answers()).toEqual(["Already published."]);
+  });
+
+  it("hands back the existing link if the draft is somehow re-published", async () => {
+    // The narrower guard: state says awaiting_approval but the record is
+    // already live, which is what a failed bookkeeping write would leave.
+    const draft = await awaitingApproval();
+    await handlePreviewCallback(press(draft, "p"), env());
+    const published = await loadDraft(storage.bucket, draft.draftId);
+    await saveDraft(storage.bucket, { ...published!, state: "awaiting_approval", preview: draft.preview });
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(1);
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toContain("Already published.");
+  });
+
+  it("keeps the draft approvable when publication fails", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    // No manifest in this bucket, so publication refuses.
+    await handlePreviewCallback(press(draft, "p"), {
+      ...env(),
+      CONTENT_BUCKET: createFakeBucket().bucket,
+    });
+
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("awaiting_approval");
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toContain("Publication failed");
+  });
+
+  it("publishes only what the site is allowed to see", async () => {
+    // Spec §24: public JSON contains only publishable fields. Asserted on the
+    // key set rather than by substring — a random record id can contain a chat
+    // id by coincidence, which would make a substring check pass or fail for
+    // no reason.
+    const draft = await awaitingApproval();
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    const m = (await readManifest(content.bucket))!.manifest;
+    const body = content.objects.get(chunkKey(m.latest!)) as unknown as string;
+    const [published] = JSON.parse(body);
+
+    expect(Object.keys(published).sort()).toEqual(
+      ["body", "eventDate", "id", "media", "summary", "tags", "title"],
+    );
+    expect(published.title).toBe("Morning run by the river");
+    // The private side of the draft never crosses over.
+    expect(published.id).not.toBe(draft.draftId);
+    expect(body).not.toContain(draft.draftId);
+    expect(body).not.toContain("an easy 8k");
   });
 });

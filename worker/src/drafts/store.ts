@@ -91,6 +91,7 @@ export async function createDraft(
     record: null,
     // No preview has been sent, so there is no live button anywhere.
     preview: null,
+    published: null,
   };
 
   await saveDraft(bucket, draft);

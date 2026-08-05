@@ -10,6 +10,7 @@ export interface Env {
   // Plain vars, generated into the Wrangler config at build time.
   CONTENT_BASE_URL: string;
   MEDIA_BASE_URL: string;
+  SITE_BASE_URL: string;
   GITHUB_REPOSITORY: string;
   MEDIA_WORKFLOW_FILE: string;
 

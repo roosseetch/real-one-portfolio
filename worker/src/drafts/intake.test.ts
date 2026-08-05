@@ -11,11 +11,13 @@ const SENDER = 4242;
 const AI_UNAVAILABLE = "The draft has been saved. AI processing can continue later.";
 
 let storage: FakeBucket;
+let content: FakeBucket;
 let sent: string[];
 let keyboards: unknown[];
 
 beforeEach(() => {
   storage = createFakeBucket();
+  content = createFakeBucket();
   sent = [];
   keyboards = [];
   // Records what the author would have been shown, without reaching Telegram.
@@ -39,6 +41,8 @@ function env(...steps: AiStep[]) {
     PRIVATE_BUCKET: storage.bucket,
     AI: createFakeAi(...(steps.length > 0 ? steps : [aiRecord()])).AI,
     TELEGRAM_BOT_TOKEN: "test-token",
+    CONTENT_BUCKET: content.bucket,
+    SITE_BASE_URL: "https://site.example",
   };
 }
 
