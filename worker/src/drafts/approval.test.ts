@@ -252,16 +252,20 @@ describe("regenerate", () => {
     expect(answers()).toEqual(["Rewriting…"]);
   });
 
-  it("rewrites from the author's note, not from the last generation", async () => {
-    // Regenerating from the previous output would compound its drift.
+  it("rewrites from the author's note, showing the last attempt only as something to avoid", async () => {
+    // The note stays the source of truth -- regenerating *from* the previous
+    // output would compound its drift. The previous record goes in separately,
+    // labelled as rejected, because temperature alone left a short note coming
+    // back word-for-word identical.
     const fake = createFakeAi(aiRecord());
     const draft = await awaitingApproval();
 
     await handlePreviewCallback(press(draft, "r"), { ...env(), AI: fake.AI });
 
-    const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content;
+    const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content ?? "";
     expect(prompt).toContain("an easy 8k");
-    expect(prompt).not.toContain("Morning run by the river");
+    expect(prompt).toContain("You already suggested this");
+    expect(prompt).toContain("genuinely different");
   });
 
   it("keeps the existing record when the model is unavailable", async () => {

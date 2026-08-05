@@ -116,6 +116,24 @@ describe("generateRecord", () => {
     expect(temp(second)).toBeGreaterThan(temp(first));
   });
 
+  it("shows the model what it already produced, so Regenerate changes something", async () => {
+    // Temperature alone did not do it: constrained JSON decoding collapses the
+    // variance, and a short note came back word-for-word identical however hot
+    // it ran. The button has to tell the model what was rejected.
+    const fake = createFakeAi(aiRecord());
+    await regenerateRecord({ AI: fake.AI }, NOTE, RECORD);
+
+    const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content ?? "";
+    expect(prompt).toContain("Morning run by the river");
+    expect(prompt).toContain("genuinely different");
+  });
+
+  it("still works for a first regeneration with nothing to avoid", async () => {
+    const fake = createFakeAi(aiRecord());
+    const result = await regenerateRecord({ AI: fake.AI }, NOTE, null);
+    expect(result.status).toBe("generated");
+  });
+
   it("honours a smaller attempt budget", async () => {
     const fake = createFakeAi({ response: "{not json" });
     await generateRecord({ AI: fake.AI }, NOTE, new Date(), 1);

@@ -234,7 +234,7 @@ async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
  * attempt starts from what the author actually wrote.
  */
 async function regenerateDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
-  const generated = await regenerateRecord(env, draft.input.text);
+  const generated = await regenerateRecord(env, draft.input.text, draft.record);
 
   if (generated.status !== "generated") {
     await sendMessage(env, draft.source.chatId, AI_UNAVAILABLE_MESSAGE);
