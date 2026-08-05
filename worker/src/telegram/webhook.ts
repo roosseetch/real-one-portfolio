@@ -6,6 +6,7 @@
  * all; the allowlist proves it came from someone permitted to author content.
  * Nothing downstream — drafts, AI, publication — runs until both pass.
  */
+import { intakeUpdate, type IntakeEnv } from "../drafts/intake";
 import type { TelegramUpdate } from "./types";
 
 /** Telegram echoes the secret given to setWebhook back on every delivery. */
@@ -24,6 +25,9 @@ export interface TelegramEnv {
   TELEGRAM_WEBHOOK_SECRET: string | undefined;
   TELEGRAM_ALLOWED_USER_IDS: string | undefined;
 }
+
+/** What the route needs on top of the gate: somewhere to put the draft. */
+export interface WebhookEnv extends TelegramEnv, IntakeEnv {}
 
 export type WebhookAuthorization =
   | { status: "authorized"; update: TelegramUpdate; senderId: number }
@@ -152,7 +156,7 @@ export async function authorizeWebhook(request: Request, env: TelegramEnv): Prom
  * re-litigated by retry. An unauthorized sender gets silence rather than a
  * refusal: no reply, no side effect, nothing that confirms the bot exists.
  */
-export async function handleTelegramWebhook(request: Request, env: TelegramEnv): Promise<Response> {
+export async function handleTelegramWebhook(request: Request, env: WebhookEnv): Promise<Response> {
   const authorization = await authorizeWebhook(request, env);
 
   if (authorization.status === "unauthenticated") {
@@ -167,9 +171,17 @@ export async function handleTelegramWebhook(request: Request, env: TelegramEnv):
     return new Response(null, { status: 200 });
   }
 
-  // Task 15 turns an authorized update into a draft. Until then it is accepted
-  // and dropped, because any non-2xx here would have Telegram redelivering for
-  // hours and then throttling — and once drafts exist, that backlog becomes a
-  // pile of duplicates.
+  try {
+    await intakeUpdate(authorization.update, authorization.senderId, env);
+  } catch (error) {
+    // The one case where redelivery is worth having. Everything above this is a
+    // decision that will not change on retry; a failed R2 write is a transient
+    // fault, and letting Telegram send the message again is how it survives.
+    console.error(`Could not store the draft: ${(error as Error).message}`);
+    return new Response("Storage unavailable", { status: 503 });
+  }
+
+  // Task 16 hands the stored draft to Workers AI and Task 17 sends the preview
+  // back. Until then the author gets no reply, only a draft in R2.
   return new Response(null, { status: 200 });
 }
