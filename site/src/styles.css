@@ -5,7 +5,9 @@
   --background: #faf7ef;
   --text: #33312e;
   --surface: #ffffff;
-  --muted: #8b8474;
+  /* Meets WCAG AA (4.5:1) against both the page background and card surfaces;
+     the previous tone measured 3.47:1 and failed for body-sized text. */
+  --muted: #726c5d;
 
   --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --content-width: 68rem;
@@ -25,6 +27,9 @@ body {
   color: var(--text);
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
+  /* A long unbroken word (a URL, a place name) should wrap rather than push
+     the layout wider than the screen. */
+  overflow-wrap: break-word;
 }
 
 img {
@@ -43,9 +48,77 @@ h3 {
   margin: 0 0 0.5em;
 }
 
+/* Visible only once focused, so keyboard users can jump past the navigation
+   without it intruding on the design for everyone else. */
+/* Clipped rather than pushed off-screen. Parking it at a large negative offset
+   took it out of Chrome's sequential focus order entirely, which defeats the
+   whole point of a skip link; clipping leaves it in place and focusable. */
+.skip-link {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 20;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--text);
+  clip-path: inset(50%);
+}
+
+.skip-link:focus {
+  clip-path: none;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid color-mix(in srgb, var(--muted) 22%, transparent);
+}
+
+.site-header nav {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 0.75rem var(--space);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+}
+
+.nav-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.95rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid transparent;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+main:focus {
+  outline: none;
+}
+
 /* Spacious editorial rhythm */
 main {
   display: block;
+}
+
+/* Sections are jump targets, so keep their headings clear of the sticky bar. */
+.section {
+  scroll-margin-top: 4.5rem;
+}
+
+:where(a, button):focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+  border-radius: 0.25rem;
 }
 
 .section {
@@ -169,27 +242,110 @@ main {
   padding-left: 1.2rem;
 }
 
-/* Hobbies */
-.hobby-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: var(--space);
-}
-
-.hobby-card {
-  background: var(--surface);
-  border-radius: 1rem;
-  padding: 1rem;
-}
-
-.hobby-photo {
-  aspect-ratio: 4 / 3;
-  margin-bottom: 0.75rem;
-}
-
+/* Hobbies carousel */
 .hobby-description {
   color: var(--muted);
   margin: 0;
+}
+
+.carousel-track {
+  display: flex;
+  gap: var(--space);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+
+.carousel-track::-webkit-scrollbar {
+  display: none;
+}
+
+.carousel-slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  display: grid;
+  gap: var(--space);
+  align-content: start;
+  background: var(--surface);
+  border-radius: 1rem;
+  padding: var(--space);
+}
+
+/* contain, not cover: a portrait photo in a landscape frame would otherwise
+   lose its top and bottom, which is exactly what cropped the ballet shot. */
+.media-photo.carousel-photo {
+  height: 24rem;
+  object-fit: contain;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
+@media (min-width: 48rem) {
+  .carousel-slide {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    align-items: center;
+  }
+
+  .media-photo.carousel-photo {
+    height: 26rem;
+  }
+}
+
+.carousel-text h3 {
+  margin-bottom: 0.35em;
+}
+
+.carousel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: var(--space);
+}
+
+.carousel-arrow {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--text);
+  /* Stated explicitly rather than left transparent, so contrast is verifiable
+     rather than depending on whatever happens to sit behind the control. */
+  background: var(--background);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.carousel-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.carousel-dots {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.carousel-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--muted);
+  background: none;
+  cursor: pointer;
+}
+
+.carousel-dot.is-current {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.carousel-arrow:focus-visible,
+.carousel-dot:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 
 /* Activity */
@@ -211,6 +367,24 @@ main {
 .activity-list {
   display: grid;
   gap: var(--space);
+}
+
+.activity-skeleton-card {
+  height: 8rem;
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--muted) 12%, var(--surface));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .activity-skeleton-card {
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    50% {
+      opacity: 0.55;
+    }
+  }
 }
 
 .activity-card {
