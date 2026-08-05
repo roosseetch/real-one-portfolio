@@ -10,13 +10,14 @@
 import { generateRecord, type AiEnv } from "../ai/generate";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import type { TelegramUpdate } from "../telegram/types";
+import { sendPreview, type ApprovalEnv } from "./approval";
 import { createDraft, saveDraft } from "./store";
 import type { Draft } from "./types";
 
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 
-export interface IntakeEnv extends AiEnv, TelegramApiEnv {
+export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
 
@@ -57,10 +58,9 @@ export async function intakeUpdate(
     try {
       await saveDraft(env.PRIVATE_BUCKET, withRecord);
 
-      // The draft stays in state `draft`. It only becomes `awaiting_approval`
-      // once the preview has been sent, which is the next task's job — there is
-      // nothing to approve until the author has seen it.
-      return { status: "created", draft: withRecord };
+      // sendPreview is what moves the draft to awaiting_approval: there is
+      // nothing to approve until the author has actually seen it.
+      return { status: "created", draft: await sendPreview(env, withRecord) };
     } catch {
       // Deliberately swallowed, unlike the first write. Once a draft exists,
       // letting this throw would answer 503, and Telegram would redeliver the

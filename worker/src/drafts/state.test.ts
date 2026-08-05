@@ -22,6 +22,7 @@ function draftIn(state: DraftState): Draft {
     source: { chatId: 99, senderId: 42, messageId: 7 },
     input: { text: "a morning run by the river" },
     record: null,
+    preview: null,
   };
 }
 

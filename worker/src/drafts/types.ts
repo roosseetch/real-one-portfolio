@@ -57,6 +57,15 @@ export interface Draft {
   input: { text: string };
   /** Null until Workers AI proposes one, which is why a quota failure can leave a usable draft. */
   record: DraftRecord | null;
+  /**
+   * The preview currently awaiting a decision, if there is one.
+   *
+   * `token` is minted fresh for every preview sent, so the buttons under an
+   * older preview stop working the moment a newer one replaces them — a
+   * regenerated draft must not be publishable from the superseded message.
+   * `messageId` is what lets those buttons be stripped once one is used.
+   */
+  preview: { messageId: number; token: string } | null;
 }
 
 export const DRAFT_SCHEMA_VERSION = 1;
