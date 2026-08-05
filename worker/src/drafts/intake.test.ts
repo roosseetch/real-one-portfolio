@@ -11,14 +11,21 @@ const AI_UNAVAILABLE = "The draft has been saved. AI processing can continue lat
 
 let storage: FakeBucket;
 let sent: string[];
+let keyboards: unknown[];
 
 beforeEach(() => {
   storage = createFakeBucket();
   sent = [];
-  // Records what the author would have been told, without reaching Telegram.
+  keyboards = [];
+  // Records what the author would have been shown, without reaching Telegram.
+  // The message_id matters: without one, sendPreview treats the send as failed
+  // and leaves the draft untouched, which would let these tests pass for the
+  // wrong reason.
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
-    sent.push(JSON.parse(String(init?.body)).text);
-    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    const body = JSON.parse(String(init?.body));
+    if (body.text !== undefined) sent.push(body.text);
+    if (body.reply_markup !== undefined) keyboards.push(body.reply_markup);
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }), { status: 200 });
   });
 });
 
@@ -56,13 +63,22 @@ describe("intakeUpdate", () => {
     expect(await loadDraft(storage.bucket, result.draft.draftId)).toEqual(result.draft);
   });
 
-  it("leaves the draft awaiting nothing yet", async () => {
-    // There is nothing to approve until the preview has been sent, so the
-    // draft does not reach awaiting_approval here.
+  it("reaches awaiting_approval only once the preview is on screen", async () => {
+    const result = await intakeUpdate(textMessage("an easy 8k"), SENDER, env());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.state).toBe("awaiting_approval");
+    expect(result.draft.preview).toEqual({ messageId: 4242, token: expect.any(String) });
+  });
+
+  it("stays in draft when the preview could not be delivered", async () => {
+    // Nothing was shown, so nothing is awaiting approval.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 500 }));
     const result = await intakeUpdate(textMessage("an easy 8k"), SENDER, env());
 
     if (result.status !== "created") throw new Error("expected a draft");
     expect(result.draft.state).toBe("draft");
+    expect(result.draft.preview).toBeNull();
   });
 
   it("records where the message came from so the preview can be sent back", async () => {
@@ -118,9 +134,13 @@ describe("intakeUpdate", () => {
     expect(storage.objects.size).toBe(1);
   });
 
-  it("does not reply when generation worked", async () => {
+  it("sends the preview with its buttons when generation worked", async () => {
     await intakeUpdate(textMessage("an easy 8k"), SENDER, env());
-    expect(sent).toEqual([]);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("Is this the information and media that should become public?");
+    expect(sent[0]).toContain("Morning run by the river");
+    expect(keyboards).toHaveLength(1);
   });
 });
 

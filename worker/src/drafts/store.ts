@@ -89,6 +89,8 @@ export async function createDraft(
     // Task 16 fills this in from Workers AI. It stays null if the model is
     // unavailable, which is what lets the draft survive a quota failure.
     record: null,
+    // No preview has been sent, so there is no live button anywhere.
+    preview: null,
   };
 
   await saveDraft(bucket, draft);

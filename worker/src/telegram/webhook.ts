@@ -6,13 +6,13 @@
  * all; the allowlist proves it came from someone permitted to author content.
  * Nothing downstream — drafts, AI, publication — runs until both pass.
  */
+import { timingSafeEqual } from "../crypto";
+import { handlePreviewCallback, type ApprovalEnv } from "../drafts/approval";
 import { intakeUpdate, type IntakeEnv } from "../drafts/intake";
 import type { TelegramUpdate } from "./types";
 
 /** Telegram echoes the secret given to setWebhook back on every delivery. */
 const SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
-
-const encoder = new TextEncoder();
 
 /**
  * Only the two secrets this module reads, rather than the Worker's whole `Env`.
@@ -26,8 +26,8 @@ export interface TelegramEnv {
   TELEGRAM_ALLOWED_USER_IDS: string | undefined;
 }
 
-/** What the route needs on top of the gate: somewhere to put the draft. */
-export interface WebhookEnv extends TelegramEnv, IntakeEnv {}
+/** What the route needs on top of the gate: somewhere to put the draft, and a way to reply. */
+export interface WebhookEnv extends TelegramEnv, IntakeEnv, ApprovalEnv {}
 
 export type WebhookAuthorization =
   | { status: "authorized"; update: TelegramUpdate; senderId: number }
@@ -77,26 +77,6 @@ function parseUpdate(data: unknown): TelegramUpdate | null {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
   const update = data as TelegramUpdate;
   return typeof update.update_id === "number" ? update : null;
-}
-
-/**
- * Constant-time string comparison.
- *
- * A timing attack against V8 string equality, across the public internet and
- * through Cloudflare's edge, is not a credible threat. This is six lines and it
- * compares a secret, which is cheaper than defending `===` on a secret later.
- * Hand-rolled because crypto.subtle.timingSafeEqual is a workerd extension the
- * tests could not run, and node:crypto would drag a polyfill in for one call.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  const left = encoder.encode(a);
-  const right = encoder.encode(b);
-  // Length is not the secret here — it is a configuration choice — and unequal
-  // lengths can never match anyway.
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let i = 0; i < left.length; i++) difference |= left[i] ^ right[i];
-  return difference === 0;
 }
 
 /**
@@ -168,6 +148,19 @@ export async function handleTelegramWebhook(request: Request, env: WebhookEnv): 
     // `reason` is a closed union of literals, so no part of the update — no
     // sender ID, no message text — can reach the log through it.
     console.warn(`Ignored a Telegram update: ${authorization.reason}`);
+    return new Response(null, { status: 200 });
+  }
+
+  // A button press acts on a draft that already exists, so it never runs the
+  // intake path — which would otherwise read the callback as a new message.
+  const callbackQuery = authorization.update.callback_query;
+  if (callbackQuery) {
+    try {
+      await handlePreviewCallback(callbackQuery, env);
+    } catch (error) {
+      console.error(`Could not handle a button press: ${(error as Error).message}`);
+      return new Response("Storage unavailable", { status: 503 });
+    }
     return new Response(null, { status: 200 });
   }
 

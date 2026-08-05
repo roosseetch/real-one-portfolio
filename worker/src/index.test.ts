@@ -125,6 +125,19 @@ describe("POST /telegram/webhook", () => {
     expect(storage.objects.size).toBe(0);
   });
 
+  it("routes a button press without treating it as a new message", async () => {
+    // A callback carries no text, so the intake path would read it as an
+    // unsupported update and silently do nothing.
+    const update = {
+      update_id: 9,
+      callback_query: { id: "cb-1", from: { id: ALLOWED_ID }, data: "c:aaaaaaaaaaaaaaaa:tok123456789" },
+    };
+    const response = await worker.fetch(webhookRequest(update), testEnv());
+
+    expect(response.status).toBe(200);
+    expect(storage.objects.size).toBe(0);
+  });
+
   it("asks Telegram to redeliver when storage fails", async () => {
     // The one place a retry is worth having: the decision was fine, the write
     // was not. Everything above this point would decide the same way again.
