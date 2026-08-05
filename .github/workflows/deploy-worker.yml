@@ -5,13 +5,12 @@ name: Deploy Worker
 # name and URL arrives as a variable, every credential as a secret.
 #
 # Repository variables:
-#   PROJECT_SLUG, WORKER_NAME, CONTENT_BASE_URL, MEDIA_BASE_URL, SITE_BASE_URL,
-#   and optionally MEDIA_WORKFLOW_FILE
+#   CLOUDFLARE_ACCOUNT_ID, PROJECT_SLUG, WORKER_NAME, CONTENT_BASE_URL,
+#   MEDIA_BASE_URL, SITE_BASE_URL, and optionally MEDIA_WORKFLOW_FILE
 #
 # Repository secrets:
-#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, TELEGRAM_BOT_TOKEN,
-#   TELEGRAM_WEBHOOK_SECRET, TELEGRAM_ALLOWED_USER_IDS, GITHUB_DISPATCH_TOKEN,
-#   CALLBACK_HMAC_SECRET
+#   CLOUDFLARE_API_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+#   TELEGRAM_ALLOWED_USER_IDS, GITHUB_DISPATCH_TOKEN, CALLBACK_HMAC_SECRET
 #
 # The Worker's custom domain belongs to Terraform, but Terraform can only route
 # a hostname to a script that already exists. Run this workflow once, then set
@@ -45,7 +44,9 @@ jobs:
         working-directory: worker
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # A variable rather than a secret, matching the Terraform workflows: the
+      # account id identifies the deployment, it does not authenticate it.
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       # Consumed by scripts/generate-wrangler.ts, which fails loudly rather
       # than deploying a Worker wired to the wrong bucket.
       WORKER_NAME: ${{ vars.WORKER_NAME }}
