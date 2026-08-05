@@ -1,0 +1,142 @@
+name: Process media
+
+# Strips every trace of the original metadata off a draft's photos and injects
+# the configured decoy values (spec §11), in a runner that is destroyed
+# afterwards. Nothing durable ever holds a raw original outside the private
+# bucket, and nothing public is written until the output has been checked.
+#
+# Dispatched by the Worker when the author approves a draft that has media. It
+# receives a draft id and a job token and nothing else — workflow inputs are
+# visible in the Actions UI, so anything passed here is effectively published.
+#
+# Repository variables:
+#   CLOUDFLARE_ACCOUNT_ID, PROJECT_SLUG
+#
+# Repository secrets:
+#   R2_PRIVATE_RO_ACCESS_KEY_ID, R2_PRIVATE_RO_SECRET_ACCESS_KEY
+#     — read-only on the private bucket. This job reads originals and writes
+#       nothing there, so credentials that could write are credentials that
+#       could destroy the only copy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      draftId:
+        description: "Draft to process"
+        required: true
+        type: string
+      jobToken:
+        description: "Proves the callback belongs to this dispatch"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One run per draft. Two jobs sanitising the same originals would race to
+# produce the same derivatives, and the loser could land after the winner.
+concurrency:
+  group: process-media-${{ inputs.draftId }}
+  cancel-in-progress: false
+
+jobs:
+  sanitize:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_PRIVATE_RO_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_PRIVATE_RO_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL_S3: https://${{ vars.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      AWS_REGION: auto
+      PRIVATE_BUCKET: ${{ vars.PROJECT_SLUG }}-private
+      DRAFT_ID: ${{ inputs.draftId }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install exiftool and Pillow
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libimage-exiftool-perl
+          python -m pip install --quiet Pillow
+
+      # Everything below stays under the runner's temp directory, which is
+      # discarded with the runner. Never the workspace: the workspace is a git
+      # checkout, and a raw original must not be one `git add` away from a
+      # commit (spec §10.3).
+      - name: Prepare ephemeral storage
+        run: |
+          echo "WORK=$(mktemp -d)" >> "$GITHUB_ENV"
+
+      - name: Fetch the draft
+        run: |
+          aws s3 cp "s3://${PRIVATE_BUCKET}/drafts/${DRAFT_ID}/draft.json" "$WORK/draft.json" --quiet
+          # Only what this job needs. The draft also holds the chat id and the
+          # author's text, and neither belongs in a job log.
+          jq -r '"originals: \(.originals | length), activity: \(.activityId)"' "$WORK/draft.json"
+
+      - name: Download the originals
+        run: |
+          mkdir -p "$WORK/originals"
+          jq -r '.originals[] | select(.type == "image") | .key' "$WORK/draft.json" > "$WORK/keys.txt"
+          while read -r key; do
+            [ -n "$key" ] || continue
+            aws s3 cp "s3://${PRIVATE_BUCKET}/${key}" "$WORK/originals/$(basename "$key")" --quiet
+          done < "$WORK/keys.txt"
+          echo "downloaded $(find "$WORK/originals" -type f | wc -l) file(s)"
+
+      - name: Build the id-to-file mapping
+        run: |
+          jq '[.originals[] | select(.type == "image") | {(.mediaId): (.key | split("/") | last)}] | add // {}' \
+            "$WORK/draft.json" > "$WORK/mapping.json"
+
+      # The sanitizer removes everything first and only then injects the decoy
+      # values from config/media-decoy.json, and exits non-zero if any
+      # identifying tag survived into an output. A failure here must fail the
+      # job: a half-scrubbed photo is worse than no photo.
+      - name: Strip metadata and inject decoys
+        run: |
+          python scripts/sanitize-media.py "$WORK/originals" "$WORK/public" "$WORK/mapping.json" \
+            --widths 1600,800
+
+      - name: Verify nothing identifying survived
+        run: |
+          fail=0
+          for f in "$WORK"/public/*.webp; do
+            # Anything tying the file to a real camera, person or place. The
+            # decoy GPS is expected; an original serial number is not.
+            leaked=$(exiftool -s -SerialNumber -OwnerName -Artist -Copyright -Software \
+                              -ImageDescription -UserComment -HostComputer "$f" | wc -l)
+            if [ "$leaked" -ne 0 ]; then
+              echo "::error file=$(basename "$f")::identifying metadata survived sanitisation"
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] || exit 1
+
+      # Filenames, sizes and the decoy values only. Never a source path, a
+      # bucket name, a signed URL or anything from the draft's text.
+      - name: Summarise the output
+        run: |
+          {
+            echo "### Sanitised media"
+            echo
+            echo "| file | size | camera | taken |"
+            echo "| --- | --- | --- | --- |"
+            for f in "$WORK"/public/*.webp; do
+              printf '| %s | %s KiB | %s | %s |\n' \
+                "$(basename "$f")" \
+                "$(( $(stat -c%s "$f") / 1024 ))" \
+                "$(exiftool -s3 -Make -Model "$f" | paste -sd' ')" \
+                "$(exiftool -s3 -DateTimeOriginal "$f")"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Uploading the derivatives and calling the Worker back are the next two
+      # tasks. Until then the job proves the sanitisation itself, and the runner
+      # takes every original with it when it goes.
+      - name: Confirm nothing was left behind
+        if: always()
+        run: rm -rf "$WORK"

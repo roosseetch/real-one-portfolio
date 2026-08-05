@@ -11,6 +11,7 @@ import { editRecord, regenerateRecord } from "../ai/generate";
 import { toPublicRecord } from "../content/records";
 import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
+import { dispatchMediaProcessing, newJobToken, type DispatchEnv } from "../publishing/dispatch";
 import { publishRecord, type PublishEnv } from "../publishing/publish";
 import { setPendingEdit } from "./pending";
 import {
@@ -45,8 +46,9 @@ const EDIT_PROMPT = "What should change? Send it as a message, and the whole ent
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 const PUBLISH_FAILED_MESSAGE = "Publication failed. The draft is still here — try again in a moment.";
+const PROCESSING_MESSAGE = "Processing the media. This takes a couple of minutes; the link follows when it is done.";
 
-export interface ApprovalEnv extends TelegramApiEnv, AiEnv, PublishEnv {
+export interface ApprovalEnv extends TelegramApiEnv, AiEnv, PublishEnv, DispatchEnv {
   PRIVATE_BUCKET: R2Bucket;
   /** Where the published record becomes visible, for the link sent back to the author. */
   SITE_BASE_URL: string;
@@ -239,6 +241,14 @@ async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
     return;
   }
 
+  // Media goes the long way round: the files have to be stripped of their
+  // metadata before anything of them becomes public, and that happens in a
+  // GitHub Actions runner rather than here (spec §10.2).
+  if (draft.originals.length > 0) {
+    await startMediaProcessing(env, draft);
+    return;
+  }
+
   const result = await publishRecord(env, toPublicRecord(draft.record));
 
   if (result.status !== "published") {
@@ -331,6 +341,48 @@ async function replaceRecord(env: ApprovalEnv, draft: Draft, record: DraftRecord
   }
 
   await sendPreview(env, updated);
+}
+
+/**
+ * Moves the draft into `processing` and asks GitHub Actions to sanitise it.
+ *
+ * The state is written before the dispatch. A draft marked `processing` with no
+ * job running is recoverable — the failure flows retry it — whereas a job
+ * running against a draft that still says `awaiting_approval` would publish
+ * behind the author's back.
+ */
+async function startMediaProcessing(env: ApprovalEnv, draft: Draft): Promise<void> {
+  const jobToken = newJobToken();
+  const processing: Draft = {
+    ...transition(draft, "processing"),
+    // The buttons go with the preview: there is nothing left to decide until
+    // the media comes back.
+    preview: null,
+    job: { jobToken, dispatchedAt: new Date().toISOString() },
+  };
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, processing);
+  } catch {
+    console.error("Could not mark the draft as processing; nothing was dispatched");
+    await sendMessage(env, draft.source.chatId, PUBLISH_FAILED_MESSAGE);
+    return;
+  }
+
+  if (draft.preview !== null) {
+    await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
+  }
+
+  const dispatched = await dispatchMediaProcessing(env, draft.draftId, jobToken);
+
+  if (!dispatched) {
+    // The draft stays in `processing` on purpose: the retry flow picks it up
+    // from there, and silently reverting would hide that anything went wrong.
+    await sendMessage(env, draft.source.chatId, PUBLISH_FAILED_MESSAGE);
+    return;
+  }
+
+  await sendMessage(env, draft.source.chatId, PROCESSING_MESSAGE);
 }
 
 async function cancelDraft(env: ApprovalEnv, draft: Draft): Promise<void> {

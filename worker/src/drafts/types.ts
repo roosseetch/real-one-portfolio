@@ -105,6 +105,12 @@ export interface Draft {
    * immutable, so a duplicate cannot simply be edited out afterwards.
    */
   published: { recordId: string; url: string } | null;
+  /**
+   * Set while GitHub Actions is sanitising this draft's media. The token is the
+   * only thing tying a callback back to the job that was dispatched, so a
+   * replayed or forged one can be refused without trusting the draft id alone.
+   */
+  job: { jobToken: string; dispatchedAt: string } | null;
 }
 
 export const DRAFT_SCHEMA_VERSION = 1;
