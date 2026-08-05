@@ -24,7 +24,7 @@ const SYSTEM_PROMPT = [
   "- Keep the author's voice and first person. Do not make it sound like a press release.",
   "- The body may tidy grammar and phrasing, but must not add events that are not in the note.",
   "- Set eventDate only if the note states or clearly implies a date. Otherwise an empty string.",
-  "- Tags are short topics, one to five of them, capitalised.",
+  "- Tags are short topics, one to five of them, each Capitalised Like This rather than in capitals.",
 ].join("\n");
 
 const EDIT_SYSTEM_PROMPT = [
@@ -167,14 +167,41 @@ export function generateRecord(
   return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), STEADY, maxAttempts, [text]);
 }
 
-/** Same note, another attempt at it — run hotter so the result is actually different. */
+/**
+ * Another go at the same note.
+ *
+ * Temperature alone does not deliver this. Constrained JSON decoding collapses
+ * most of the variance a higher temperature would give, so regenerating a short
+ * note returned a word-for-word identical record however hot it ran. Showing
+ * the model what it already produced, and asking for something different, is
+ * what actually makes the button do anything -- and it matches what the author
+ * means by pressing it.
+ */
 export function regenerateRecord(
   env: AiEnv,
   text: string,
+  previous: DraftRecord | null = null,
   today: Date = new Date(),
   maxAttempts: number = MAX_ATTEMPTS,
 ): Promise<GenerationResult> {
-  return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), VARIED, maxAttempts, [text]);
+  const rejected = previous === null ? [] : [
+    "",
+    "You already suggested this, and the author asked for another version:",
+    JSON.stringify({ title: previous.title, summary: previous.summary, body: previous.body }, null, 2),
+    "",
+    "Write a genuinely different one. Change the wording and the angle, but never the facts.",
+  ];
+
+  const authorText = [text, ...(previous === null ? [] : [previous.title, previous.summary ?? "", previous.body ?? ""])];
+
+  return requestRecord(
+    env,
+    SYSTEM_PROMPT,
+    [notePrompt(text, today), ...rejected].join("\n"),
+    VARIED,
+    maxAttempts,
+    authorText.filter((entry) => entry !== ""),
+  );
 }
 
 /**
