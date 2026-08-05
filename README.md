@@ -21,3 +21,37 @@ scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 .github/         workflows: terraform-plan/apply, deploy-worker, process-media, deploy-pages
 tasks/           implementation plan and task checklist
 ```
+
+## Telegram webhook
+
+The Worker accepts an update only if it carries the shared secret Telegram was
+given at registration *and* comes from a user on the allowlist. Everything else
+is dropped without a reply.
+
+Set it up in this order — step 3 in particular is hard to undo out of sequence:
+
+1. Create the bot with [BotFather](https://t.me/BotFather) and put the token in
+   `worker/.dev.vars` as `TELEGRAM_BOT_TOKEN`.
+2. `openssl rand -hex 32` → `TELEGRAM_WEBHOOK_SECRET`. Hex satisfies Telegram's
+   charset for this field; a base64 secret does not.
+3. Message the bot once, then read your own numeric ID from
+   `curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getUpdates"` and put
+   it in `TELEGRAM_ALLOWED_USER_IDS` (comma-separated for several people).
+   **Do this before registering the webhook:** Telegram refuses `getUpdates`
+   while a webhook is active, and the Worker never logs sender IDs, so afterwards
+   you would have to delete the webhook to recover the value.
+4. Put the Worker's public origin in `worker/.env` as `WORKER_BASE_URL`, then:
+
+   ```
+   set -a; . ./worker/.env; . ./worker/.dev.vars; set +a
+   npm --prefix worker run webhook
+   ```
+
+   The script registers the webhook and prints what Telegram reports back,
+   including the last delivery error — expected until the Worker is deployed.
+
+To unregister: `curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"`.
+
+In production these values are Worker secrets (`wrangler secret put NAME`), set
+by the deploy workflow from GitHub secrets. `worker/.dev.vars` is local only and
+gitignored.

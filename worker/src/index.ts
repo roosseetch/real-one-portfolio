@@ -1,3 +1,5 @@
+import { handleTelegramWebhook } from "./telegram/webhook";
+
 export interface Env {
   // Bindings. There is deliberately no media bucket binding: the Worker never
   // writes media, GitHub Actions does, after sanitizing it.
@@ -24,11 +26,11 @@ export interface Env {
  * reads published JSON and media straight from public R2.
  */
 export default {
-  async fetch(request: Request, _env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     if (request.method === "POST" && pathname === "/telegram/webhook") {
-      return new Response("Telegram webhook not implemented yet", { status: 501 });
+      return handleTelegramWebhook(request, env);
     }
 
     if (request.method === "POST" && pathname === "/callbacks/media-processed") {

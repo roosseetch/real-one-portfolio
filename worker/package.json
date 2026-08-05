@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "config": "tsx ../scripts/generate-wrangler.ts",
+    "webhook": "tsx ../scripts/set-telegram-webhook.ts",
     "dev": "npm run config && wrangler dev --config wrangler.generated.json",
     "build": "npm run config && wrangler deploy --dry-run --outdir=dist --config wrangler.generated.json",
     "deploy": "npm run config && wrangler deploy --config wrangler.generated.json",
