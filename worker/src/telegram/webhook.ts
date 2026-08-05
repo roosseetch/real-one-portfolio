@@ -1,0 +1,175 @@
+/**
+ * The gate in front of every Telegram update (spec §24: "verify webhook
+ * secret", "restrict allowed Telegram user IDs").
+ *
+ * Two independent checks. The secret proves the request came from Telegram at
+ * all; the allowlist proves it came from someone permitted to author content.
+ * Nothing downstream — drafts, AI, publication — runs until both pass.
+ */
+import type { TelegramUpdate } from "./types";
+
+/** Telegram echoes the secret given to setWebhook back on every delivery. */
+const SECRET_HEADER = "X-Telegram-Bot-Api-Secret-Token";
+
+const encoder = new TextEncoder();
+
+/**
+ * Only the two secrets this module reads, rather than the Worker's whole `Env`.
+ * Importing `Env` from ../index would make a type-only import cycle that every
+ * future module repeats, and this states the module's least privilege outright.
+ */
+export interface TelegramEnv {
+  // Declared as possibly undefined because a secret that was never set arrives
+  // that way at runtime, whatever the Env interface claims.
+  TELEGRAM_WEBHOOK_SECRET: string | undefined;
+  TELEGRAM_ALLOWED_USER_IDS: string | undefined;
+}
+
+export type WebhookAuthorization =
+  | { status: "authorized"; update: TelegramUpdate; senderId: number }
+  | { status: "unauthenticated" }
+  | { status: "ignored"; reason: "unparseable" | "no-sender" | "sender-not-allowed" };
+
+/**
+ * Reads the comma-separated allowlist into a set of user IDs.
+ *
+ * Malformed entries are skipped rather than thrown on: a bad entry can never
+ * match anyone, so skipping is already fail-closed, while throwing would answer
+ * a configuration mistake with a 500 and put Telegram into a retry loop. An
+ * unset or empty list therefore denies everyone, which is the safe direction.
+ */
+export function parseAllowedUserIds(raw: string | undefined): Set<number> {
+  const ids = new Set<number>();
+  for (const entry of (raw ?? "").split(",")) {
+    const trimmed = entry.trim();
+    // Digits only. Number() would happily turn "1e3", "0x2a" or " 1.5 " into
+    // something that either matches nobody or, worse, matches the wrong person.
+    if (!/^\d+$/.test(trimmed)) continue;
+    const id = Number(trimmed);
+    if (!Number.isSafeInteger(id)) continue;
+    ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * The user behind an update, across every type the webhook subscribes to.
+ *
+ * Null means the update carries no sender at all — a channel post, say — which
+ * can never be authorized.
+ */
+export function senderId(update: TelegramUpdate): number | null {
+  const from = update.message?.from ?? update.edited_message?.from ?? update.callback_query?.from;
+  return typeof from?.id === "number" ? from.id : null;
+}
+
+/**
+ * Deliberately shallow: an object with a numeric update_id is enough to route
+ * on. Whoever later reads message.text or callback_query.data validates the
+ * field it actually consumes, so this never has to grow into a copy of
+ * Telegram's schema that the media tasks would need to edit.
+ */
+function parseUpdate(data: unknown): TelegramUpdate | null {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const update = data as TelegramUpdate;
+  return typeof update.update_id === "number" ? update : null;
+}
+
+/**
+ * Constant-time string comparison.
+ *
+ * A timing attack against V8 string equality, across the public internet and
+ * through Cloudflare's edge, is not a credible threat. This is six lines and it
+ * compares a secret, which is cheaper than defending `===` on a secret later.
+ * Hand-rolled because crypto.subtle.timingSafeEqual is a workerd extension the
+ * tests could not run, and node:crypto would drag a polyfill in for one call.
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  const left = encoder.encode(a);
+  const right = encoder.encode(b);
+  // Length is not the secret here — it is a configuration choice — and unequal
+  // lengths can never match anyway.
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let i = 0; i < left.length; i++) difference |= left[i] ^ right[i];
+  return difference === 0;
+}
+
+/**
+ * Decides what to do with an incoming webhook request without acting on it.
+ *
+ * Returns a result rather than throwing so the three outcomes stay
+ * exhaustively checkable, and so callers can act on the decision instead of
+ * wrapping every future draft call in a try/catch.
+ */
+export async function authorizeWebhook(request: Request, env: TelegramEnv): Promise<WebhookAuthorization> {
+  const configured = env.TELEGRAM_WEBHOOK_SECRET;
+  if (!configured) {
+    // Worth one line: it can only happen in a deployment where every delivery
+    // fails anyway, and it turns an otherwise mystifying blanket 401 into a
+    // one-line diagnosis.
+    console.error("TELEGRAM_WEBHOOK_SECRET is not configured; rejecting every Telegram update");
+    return { status: "unauthenticated" };
+  }
+
+  // Nothing is logged on a mismatch. Anyone who finds this URL could otherwise
+  // drive unbounded log volume, and the operator already sees the 401 in
+  // getWebhookInfo's last_error_message.
+  const presented = request.headers.get(SECRET_HEADER);
+  if (presented === null || !timingSafeEqual(presented, configured)) {
+    return { status: "unauthenticated" };
+  }
+
+  // Past this point the caller knows the secret, so log volume is bounded.
+  let payload: unknown;
+  try {
+    payload = await request.json();
+  } catch {
+    return { status: "ignored", reason: "unparseable" };
+  }
+
+  const update = parseUpdate(payload);
+  if (update === null) return { status: "ignored", reason: "unparseable" };
+
+  const sender = senderId(update);
+  if (sender === null) return { status: "ignored", reason: "no-sender" };
+
+  const allowed = parseAllowedUserIds(env.TELEGRAM_ALLOWED_USER_IDS);
+  if (allowed.size === 0) {
+    console.error("TELEGRAM_ALLOWED_USER_IDS is empty; no sender can author content");
+  }
+  if (!allowed.has(sender)) return { status: "ignored", reason: "sender-not-allowed" };
+
+  return { status: "authorized", update, senderId: sender };
+}
+
+/**
+ * Turns that decision into a response.
+ *
+ * The secret gate decides the status code; everything past it answers 200.
+ * Telegram redelivers on any non-2xx with escalating backoff and eventually
+ * throttles a failing webhook, so a decision already made must never be
+ * re-litigated by retry. An unauthorized sender gets silence rather than a
+ * refusal: no reply, no side effect, nothing that confirms the bot exists.
+ */
+export async function handleTelegramWebhook(request: Request, env: TelegramEnv): Promise<Response> {
+  const authorization = await authorizeWebhook(request, env);
+
+  if (authorization.status === "unauthenticated") {
+    // No WWW-Authenticate header: there is no scheme worth advertising.
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  if (authorization.status === "ignored") {
+    // `reason` is a closed union of literals, so no part of the update — no
+    // sender ID, no message text — can reach the log through it.
+    console.warn(`Ignored a Telegram update: ${authorization.reason}`);
+    return new Response(null, { status: 200 });
+  }
+
+  // Task 15 turns an authorized update into a draft. Until then it is accepted
+  // and dropped, because any non-2xx here would have Telegram redelivering for
+  // hours and then throttling — and once drafts exist, that backlog becomes a
+  // pile of duplicates.
+  return new Response(null, { status: 200 });
+}
