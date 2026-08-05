@@ -13,6 +13,10 @@ import type { TelegramUpdate } from "./telegram/types";
 import { aiRecord, createFakeAi } from "./test-support/ai";
 import { createFakeBucket, type FakeBucket } from "./test-support/r2";
 
+/** Runs deferred work inline, so a test sees the same result the runtime would. */
+const ctx = (): ExecutionContext =>
+  ({ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} }) as ExecutionContext;
+
 const SECRET = "test-webhook-secret";
 const ALLOWED_ID = 4242;
 const WEBHOOK_URL = "https://worker.example/telegram/webhook";
@@ -64,33 +68,33 @@ function messageFrom(id: number): TelegramUpdate {
 
 describe("POST /telegram/webhook", () => {
   it("rejects a request with no secret header", async () => {
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), null), testEnv());
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), null), testEnv(), ctx());
     expect(response.status).toBe(401);
   });
 
   it("rejects the wrong secret", async () => {
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), "wrong"), testEnv());
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), "wrong"), testEnv(), ctx());
     expect(response.status).toBe(401);
   });
 
   it("rejects a secret that is only a prefix of the real one", async () => {
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), SECRET.slice(0, -1)), testEnv());
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), SECRET.slice(0, -1)), testEnv(), ctx());
     expect(response.status).toBe(401);
   });
 
   it("rejects everything when the secret is not configured", async () => {
     const env = testEnv({ TELEGRAM_WEBHOOK_SECRET: undefined });
-    expect((await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), ""), env)).status).toBe(401);
-    expect((await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), env)).status).toBe(401);
+    expect((await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), ""), env, ctx())).status).toBe(401);
+    expect((await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), env, ctx())).status).toBe(401);
   });
 
   it("does not advertise an authentication scheme", async () => {
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), "wrong"), testEnv());
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), "wrong"), testEnv(), ctx());
     expect(response.headers.get("WWW-Authenticate")).toBeNull();
   });
 
   it("accepts an allowlisted sender and stores the draft", async () => {
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv());
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv(), ctx());
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
     expect([...storage.objects.keys()]).toEqual([expect.stringMatching(/^drafts\/[0-9a-z]{16}\/draft\.json$/)]);
@@ -100,7 +104,7 @@ describe("POST /telegram/webhook", () => {
   // redelivering a decision we have already made, with escalating backoff,
   // until it throttles the webhook.
   it("ignores a sender who is not on the allowlist", async () => {
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID + 1)), testEnv());
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID + 1)), testEnv(), ctx());
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
     // The half of "ignored" that matters: nothing was written.
@@ -109,19 +113,19 @@ describe("POST /telegram/webhook", () => {
 
   it("ignores everyone when the allowlist is empty", async () => {
     const env = testEnv({ TELEGRAM_ALLOWED_USER_IDS: "" });
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), env);
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), env, ctx());
     expect(response.status).toBe(200);
     expect(storage.objects.size).toBe(0);
   });
 
   it("ignores a body that is not JSON", async () => {
-    const response = await worker.fetch(webhookRequest("{not json"), testEnv());
+    const response = await worker.fetch(webhookRequest("{not json"), testEnv(), ctx());
     expect(response.status).toBe(200);
     expect(storage.objects.size).toBe(0);
   });
 
   it("writes nothing when the secret is wrong", async () => {
-    await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), "wrong"), testEnv());
+    await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), "wrong"), testEnv(), ctx());
     expect(storage.objects.size).toBe(0);
   });
 
@@ -132,7 +136,7 @@ describe("POST /telegram/webhook", () => {
       update_id: 9,
       callback_query: { id: "cb-1", from: { id: ALLOWED_ID }, data: "c:aaaaaaaaaaaaaaaa:tok123456789" },
     };
-    const response = await worker.fetch(webhookRequest(update), testEnv());
+    const response = await worker.fetch(webhookRequest(update), testEnv(), ctx());
 
     expect(response.status).toBe(200);
     expect(storage.objects.size).toBe(0);
@@ -142,7 +146,7 @@ describe("POST /telegram/webhook", () => {
     // The one place a retry is worth having: the decision was fine, the write
     // was not. Everything above this point would decide the same way again.
     storage.failNextPut();
-    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv());
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv(), ctx());
     expect(response.status).toBe(503);
     expect(storage.objects.size).toBe(0);
   });
@@ -152,19 +156,19 @@ describe("POST /telegram/webhook", () => {
       update_id: 2,
       message: { message_id: 11, date: 1_700_000_000, chat: { id: 99, type: "channel" }, text: "hi" },
     };
-    const response = await worker.fetch(webhookRequest(channelPost), testEnv());
+    const response = await worker.fetch(webhookRequest(channelPost), testEnv(), ctx());
     expect(response.status).toBe(200);
   });
 });
 
 describe("routing", () => {
   it("does not answer GET on the webhook path", async () => {
-    const response = await worker.fetch(new Request(WEBHOOK_URL), testEnv());
+    const response = await worker.fetch(new Request(WEBHOOK_URL), testEnv(), ctx());
     expect(response.status).toBe(404);
   });
 
   it("says nothing useful about unknown paths", async () => {
-    const response = await worker.fetch(new Request("https://worker.example/", { method: "POST" }), testEnv());
+    const response = await worker.fetch(new Request("https://worker.example/", { method: "POST" }), testEnv(), ctx());
     expect(response.status).toBe(404);
   });
 });

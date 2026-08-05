@@ -40,7 +40,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [ ] Checkpoint D: full text-only loop works in production
 
 ## Phase 5 — Photo pipeline
-- [ ] Task 21: Photo intake + originals in private R2 + media preview
+- [x] Task 21: Photo intake + originals in private R2 + media preview
 - [ ] Task 22: GitHub Actions dispatch + process-media workflow — sanitization
 - [ ] Task 23: Derivatives, validation, public upload
 - [ ] Task 24: HMAC callback endpoint + media publication

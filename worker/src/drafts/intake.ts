@@ -8,8 +8,9 @@
  * the work can be picked up later.
  */
 import { generateRecord, type AiEnv } from "../ai/generate";
+import { intakeMedia, type MediaIntakeEnv } from "../media/intake";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
-import type { TelegramUpdate } from "../telegram/types";
+import type { TelegramMessage, TelegramUpdate } from "../telegram/types";
 import { applyEditInstruction, sendPreview, type ApprovalEnv } from "./approval";
 import { takePendingEdit } from "./pending";
 import { createDraft, loadDraft, saveDraft } from "./store";
@@ -18,9 +19,16 @@ import type { Draft } from "./types";
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 
-export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv {
+export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv, MediaIntakeEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
+
+/**
+ * Long enough for the rest of an album to arrive, short enough that the author
+ * is not left wondering. Telegram delivers the items of a group within about a
+ * second of each other; this waits past that before describing what arrived.
+ */
+const ALBUM_SETTLE_MS = 4000;
 
 export type IntakeResult =
   | { status: "created"; draft: Draft }
@@ -64,9 +72,13 @@ export async function intakeUpdate(
   update: TelegramUpdate,
   senderId: number,
   env: IntakeEnv,
+  /** Lets an album keep collecting after the webhook has already answered. */
+  waitUntil: (promise: Promise<unknown>) => void = () => {},
 ): Promise<IntakeResult> {
   const message = update.message;
   if (!message) return { status: "unsupported" };
+
+  if (message.photo || message.video) return intakeMediaMessage(message, senderId, env, waitUntil);
 
   const text = message.text?.trim();
   if (!text) return { status: "unsupported" };
@@ -82,7 +94,55 @@ export async function intakeUpdate(
     text,
   );
 
-  const generated = await generateRecord(env, text);
+  return describeAndPreview(env, draft, text);
+}
+
+/**
+ * Files the media, then previews the draft it belongs to.
+ *
+ * Only the item that created the draft previews it. An album arrives as several
+ * updates seconds apart, so the first one waits for the rest to land before
+ * describing what the author actually sent — otherwise the preview shows one
+ * photo of three, and re-previewing on each arrival would send three previews.
+ */
+async function intakeMediaMessage(
+  message: TelegramMessage,
+  senderId: number,
+  env: IntakeEnv,
+  waitUntil: (promise: Promise<unknown>) => void,
+): Promise<IntakeResult> {
+  const filed = await intakeMedia(message, senderId, env);
+  if (filed.status === "unsupported") return { status: "unsupported" };
+
+  // A later item of an album: the first one owns the preview.
+  if (filed.status === "appended") return { status: "created", draft: filed.draft };
+
+  const draft = filed.draft;
+
+  if (draft.mediaGroupId === null) {
+    return describeAndPreview(env, draft, draft.input.text);
+  }
+
+  // Answer the webhook now and let the album settle in the background: holding
+  // the response open for four seconds invites Telegram to redeliver.
+  waitUntil(
+    (async () => {
+      await new Promise((resolve) => setTimeout(resolve, ALBUM_SETTLE_MS));
+      const settled = (await loadDraft(env.PRIVATE_BUCKET, draft.draftId)) ?? draft;
+      if (settled.state !== "draft") return;
+      await describeAndPreview(env, settled, settled.input.text);
+    })(),
+  );
+
+  return { status: "created", draft };
+}
+
+/** Asks the model for a record, stores it, and shows the author the result. */
+async function describeAndPreview(env: IntakeEnv, draft: Draft, text: string): Promise<IntakeResult> {
+  // A photo with no caption still deserves a record, so the model is given
+  // something to work from rather than an empty prompt.
+  const source = text.trim() === "" ? "A photo, with no caption. Describe only that it was shared." : text;
+  const generated = await generateRecord(env, source);
 
   if (generated.status === "generated") {
     const withRecord: Draft = { ...draft, record: generated.record, updatedAt: new Date().toISOString() };

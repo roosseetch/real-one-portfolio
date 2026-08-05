@@ -16,7 +16,9 @@ import { setPendingEdit } from "./pending";
 import {
   answerCallback,
   removeKeyboard,
+  sendMediaGroup,
   sendMessage,
+  sendPhoto,
   type TelegramApiEnv,
 } from "../telegram/api";
 import {
@@ -37,6 +39,8 @@ const TOKEN_LENGTH = 12;
 
 const CANCELLED_MESSAGE = "Cancelled. Nothing was published.";
 const NOT_YET = "Not available yet.";
+/** Telegram truncates a photo caption past this, which would hide part of what is being approved. */
+const PHOTO_CAPTION_LIMIT = 1024;
 const EDIT_PROMPT = "What should change? Send it as a message, and the whole entry comes back for approval.";
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
@@ -60,12 +64,9 @@ export async function sendPreview(env: ApprovalEnv, draft: Draft): Promise<Draft
   if (!hasPreviewableRecord(draft)) return draft;
 
   const token = randomId(TOKEN_LENGTH);
-  const messageId = await sendMessage(
-    env,
-    draft.source.chatId,
-    formatPreview(draft.record),
-    previewKeyboard(draft.draftId, token),
-  );
+  const text = formatPreview(draft.record);
+  const keyboard = previewKeyboard(draft.draftId, token);
+  const messageId = await sendPreviewMessages(env, draft, text, keyboard);
 
   // Nothing was shown, so nothing is awaiting approval. Leaving the draft alone
   // keeps it in a state a retry can still work from.
@@ -86,6 +87,48 @@ export async function sendPreview(env: ApprovalEnv, draft: Draft): Promise<Draft
   }
 
   return next;
+}
+
+/**
+ * Puts the preview on screen in whichever shape spec §7.2 calls for, and
+ * returns the id of the message carrying the buttons.
+ *
+ * The originals are re-sent by Telegram file reference, so nothing is read back
+ * out of R2 and, more importantly, no public object exists yet: approval is
+ * what starts the media pipeline.
+ */
+async function sendPreviewMessages(
+  env: ApprovalEnv,
+  draft: Draft,
+  text: string,
+  keyboard: ReturnType<typeof previewKeyboard>,
+): Promise<number | null> {
+  const originals = draft.originals;
+
+  if (originals.length === 0) {
+    return sendMessage(env, draft.source.chatId, text, keyboard);
+  }
+
+  if (originals.length === 1) {
+    // One item: the preview travels as the photo's caption, so the author sees
+    // the picture and the words it would be published with together.
+    const only = originals[0];
+    if (only.type === "image" && text.length <= PHOTO_CAPTION_LIMIT) {
+      return sendPhoto(env, draft.source.chatId, only.fileId, text, keyboard);
+    }
+  }
+
+  // Several items, a video, or a caption too long for one: Telegram allows no
+  // buttons on an album and caps a caption well below a message, so the media
+  // goes first and a separate control message carries the full text and the
+  // decision.
+  await sendMediaGroup(
+    env,
+    draft.source.chatId,
+    originals.map((original) => ({ type: original.type === "video" ? "video" : "photo", media: original.fileId })),
+  );
+
+  return sendMessage(env, draft.source.chatId, text, keyboard);
 }
 
 export interface ParsedCallback {

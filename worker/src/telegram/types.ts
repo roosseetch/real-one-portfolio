@@ -16,6 +16,30 @@ export interface TelegramChat {
   type: string;
 }
 
+/**
+ * One rendition of a photo. Telegram sends several sizes of the same image and
+ * the largest is last, which is the only one worth keeping: the originals are
+ * the input to sanitisation, so a thumbnail would throw away the resolution the
+ * published derivatives are generated from.
+ */
+export interface TelegramPhotoSize {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
+export interface TelegramVideo {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
 export interface TelegramMessage {
   message_id: number;
   date: number;
@@ -24,6 +48,17 @@ export interface TelegramMessage {
   // case the sender check has to reject rather than crash on.
   from?: TelegramUser;
   text?: string;
+  /** Sizes of a single photo, smallest first. */
+  photo?: TelegramPhotoSize[];
+  video?: TelegramVideo;
+  /** The text sent alongside media, which arrives here rather than in `text`. */
+  caption?: string;
+  /**
+   * Present when the author sent several files at once. Telegram delivers an
+   * album as one update per item, all carrying the same id, so this is the only
+   * thing tying them together.
+   */
+  media_group_id?: string;
 }
 
 export interface TelegramCallbackQuery {

@@ -109,3 +109,47 @@ export async function answerCallback(
   });
   return result !== null;
 }
+
+/**
+ * Sends one photo with the preview as its caption (spec §7.2).
+ *
+ * `fileId` re-sends a file Telegram already holds, so the original never has to
+ * be read back out of R2 to be shown.
+ */
+export async function sendPhoto(
+  env: TelegramApiEnv,
+  chatId: number,
+  fileId: string,
+  caption: string,
+  replyMarkup?: InlineKeyboardMarkup,
+): Promise<number | null> {
+  const result = await call<{ message_id: number }>(env, "sendPhoto", {
+    chat_id: chatId,
+    photo: fileId,
+    caption,
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+
+  return result?.message_id ?? null;
+}
+
+export interface MediaGroupItem {
+  type: "photo" | "video";
+  media: string;
+}
+
+/**
+ * Sends several files as one album.
+ *
+ * Albums carry no buttons — Telegram does not allow a reply markup on a media
+ * group — which is exactly why spec §7.2 pairs one with a separate control
+ * message holding the full text and the buttons.
+ */
+export async function sendMediaGroup(
+  env: TelegramApiEnv,
+  chatId: number,
+  items: MediaGroupItem[],
+): Promise<boolean> {
+  const result = await call(env, "sendMediaGroup", { chat_id: chatId, media: items });
+  return result !== null;
+}

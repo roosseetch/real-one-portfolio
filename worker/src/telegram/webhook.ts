@@ -136,7 +136,12 @@ export async function authorizeWebhook(request: Request, env: TelegramEnv): Prom
  * re-litigated by retry. An unauthorized sender gets silence rather than a
  * refusal: no reply, no side effect, nothing that confirms the bot exists.
  */
-export async function handleTelegramWebhook(request: Request, env: WebhookEnv): Promise<Response> {
+export async function handleTelegramWebhook(
+  request: Request,
+  env: WebhookEnv,
+  /** Lets an album keep collecting after this response has gone back to Telegram. */
+  ctx?: ExecutionContext,
+): Promise<Response> {
   const authorization = await authorizeWebhook(request, env);
 
   if (authorization.status === "unauthenticated") {
@@ -165,7 +170,7 @@ export async function handleTelegramWebhook(request: Request, env: WebhookEnv): 
   }
 
   try {
-    await intakeUpdate(authorization.update, authorization.senderId, env);
+    await intakeUpdate(authorization.update, authorization.senderId, env, (p) => ctx?.waitUntil(p));
   } catch (error) {
     // The one case where redelivery is worth having. Everything above this is a
     // decision that will not change on retry; a failed R2 write is a transient
