@@ -92,3 +92,25 @@ describe("parseRecord", () => {
     expect(record?.body).toHaveLength(4000);
   });
 });
+
+describe("grammar compatibility", () => {
+  it("declares no union types anywhere", () => {
+    // Workers AI compiles this into a decoding grammar and rejects unions with
+    // `AiError: 5024: JSON Model couldn't be met` before generating a token.
+    // Every attempt then fails identically, which is what took production down.
+    const unions: string[] = [];
+    const walk = (node: unknown, path: string) => {
+      if (Array.isArray(node) || typeof node !== "object" || node === null) return;
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "type" && Array.isArray(value)) unions.push(path);
+        walk(value, `${path}/${key}`);
+      }
+    };
+    walk(RECORD_JSON_SCHEMA, "");
+    expect(unions).toEqual([]);
+  });
+
+  it("turns the empty-string stand-in for null back into null", () => {
+    expect(parseRecord({ title: "Morning run", eventDate: "" })?.eventDate).toBeNull();
+  });
+});

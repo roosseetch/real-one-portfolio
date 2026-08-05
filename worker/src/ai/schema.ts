@@ -24,9 +24,15 @@ export const RECORD_JSON_SCHEMA = {
     title: { type: "string", description: "A short, specific title. No trailing punctuation." },
     summary: { type: "string", description: "One sentence describing what happened." },
     body: { type: "string", description: "The activity written out, in the author's own voice." },
+    // A plain string, not ["string", "null"]. Workers AI compiles this schema
+    // into a decoding grammar and rejects union types outright — the failure is
+    // `AiError: 5024: JSON Model couldn't be met`, raised before the model
+    // produces a single token, so every attempt fails identically. Nullability
+    // is expressed as the empty string here and turned back into null by
+    // parseRecord, which has to validate the date format anyway.
     eventDate: {
-      type: ["string", "null"],
-      description: "The date the activity happened, as YYYY-MM-DD. Null if the text does not say.",
+      type: "string",
+      description: "The date the activity happened, as YYYY-MM-DD. An empty string if the text does not say.",
     },
     tags: {
       type: "array",

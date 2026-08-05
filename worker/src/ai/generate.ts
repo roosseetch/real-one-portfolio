@@ -23,7 +23,7 @@ const SYSTEM_PROMPT = [
   "- Use only what the note says. Never invent places, people, distances, times or achievements.",
   "- Keep the author's voice and first person. Do not make it sound like a press release.",
   "- The body may tidy grammar and phrasing, but must not add events that are not in the note.",
-  "- Set eventDate only if the note states or clearly implies a date. Otherwise null.",
+  "- Set eventDate only if the note states or clearly implies a date. Otherwise an empty string.",
   "- Tags are short topics, one to five of them, capitalised.",
 ].join("\n");
 
@@ -35,7 +35,7 @@ const EDIT_SYSTEM_PROMPT = [
   "- The instruction is the author's, so follow it even where it contradicts your own judgement.",
   "- Never invent places, people, distances, times or achievements the entry does not already contain.",
   "- Keep the author's voice and first person.",
-  "- Set eventDate only if the entry or the instruction states one. Otherwise null.",
+  "- Set eventDate only if the entry or the instruction states one. Otherwise an empty string.",
 ].join("\n");
 
 export interface AiEnv {
