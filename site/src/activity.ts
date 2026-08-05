@@ -110,6 +110,15 @@ export function renderActivity(section: HTMLElement, title: string) {
   const list = el("div", "activity-list");
   section.append(list);
 
+  // Placeholder cards rather than a spinner: they occupy roughly the space the
+  // real records will, so the page does not lurch when the feed arrives.
+  const skeleton = el("div", "activity-list activity-skeleton");
+  skeleton.setAttribute("role", "status");
+  skeleton.setAttribute("aria-busy", "true");
+  skeleton.setAttribute("aria-label", "Loading recent activities");
+  for (let i = 0; i < 2; i++) skeleton.append(el("div", "activity-skeleton-card"));
+  section.append(skeleton);
+
   let records: ActivityRecord[] = [];
   let ascending = false;
 
@@ -119,6 +128,7 @@ export function renderActivity(section: HTMLElement, title: string) {
 
   loadRecords()
     .then((loaded) => {
+      skeleton.remove();
       records = loaded;
       if (records.length === 0) {
         note(section, "No activities published yet.");
@@ -134,6 +144,7 @@ export function renderActivity(section: HTMLElement, title: string) {
       paint();
     })
     .catch((error) => {
+      skeleton.remove();
       console.warn("Activity feed unavailable:", error);
       note(section, "Activities are unavailable right now. Please check back later.");
     });
