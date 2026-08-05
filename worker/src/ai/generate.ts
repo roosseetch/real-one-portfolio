@@ -59,6 +59,25 @@ function isQuotaError(error: unknown): boolean {
 }
 
 /**
+ * What a model failure may say in a log.
+ *
+ * The first version of this logged nothing but an attempt number, on the
+ * reasoning that an error could quote the prompt back — and the prompt is what
+ * the author wrote. That turned out to make a real production failure
+ * undiagnosable: three attempts failed and there was no way to learn why
+ * without redeploying.
+ *
+ * So: the prompt is removed from the message rather than the message being
+ * withheld. Nothing the author typed can survive that, and Cloudflare's own
+ * error codes and descriptions come through intact.
+ */
+function safeErrorDetail(error: unknown, prompts: string[]): string {
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const scrubbed = prompts.reduce((text, prompt) => text.split(prompt).join("[prompt]"), raw);
+  return scrubbed.slice(0, 300);
+}
+
+/**
  * Workers AI returns the JSON already parsed when a schema constrains it, but
  * documents `response` as a string. Accept both rather than depending on which.
  */
@@ -92,6 +111,8 @@ async function requestRecord(
   userPrompt: string,
   temperature: number,
   maxAttempts: number,
+  /** Author-written text, scrubbed out of anything the model says on the way to a log. */
+  authorText: string[],
 ): Promise<GenerationResult> {
   // Remembers why the last attempt failed, so a model that is simply
   // unreachable is not reported as one producing malformed records.
@@ -116,9 +137,9 @@ async function requestRecord(
         // draft is already saved, so this is recoverable tomorrow.
         return { status: "unavailable", reason: "quota" };
       }
-      // Constant string: a model error can quote the prompt back, and the
-      // prompt contains what the author wrote.
-      console.warn(`Workers AI call failed on attempt ${attempt}`);
+      console.warn(
+        `Workers AI call failed on attempt ${attempt}: ${safeErrorDetail(error, [userPrompt, ...authorText])}`,
+      );
       failure = "error";
       continue;
     }
@@ -143,7 +164,7 @@ export function generateRecord(
   today: Date = new Date(),
   maxAttempts: number = MAX_ATTEMPTS,
 ): Promise<GenerationResult> {
-  return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), STEADY, maxAttempts);
+  return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), STEADY, maxAttempts, [text]);
 }
 
 /** Same note, another attempt at it — run hotter so the result is actually different. */
@@ -153,7 +174,7 @@ export function regenerateRecord(
   today: Date = new Date(),
   maxAttempts: number = MAX_ATTEMPTS,
 ): Promise<GenerationResult> {
-  return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), VARIED, maxAttempts);
+  return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), VARIED, maxAttempts, [text]);
 }
 
 /**
@@ -185,5 +206,5 @@ export function editRecord(
     "Apply only that change. Return the whole entry, with every other field exactly as it was.",
   ].join("\n");
 
-  return requestRecord(env, EDIT_SYSTEM_PROMPT, userPrompt, STEADY, maxAttempts);
+  return requestRecord(env, EDIT_SYSTEM_PROMPT, userPrompt, STEADY, maxAttempts, [instruction, JSON.stringify(editable)]);
 }

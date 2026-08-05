@@ -51,7 +51,27 @@ for (const [name, value] of values) {
   rendered = rendered.replaceAll(`__${name}__`, value);
 }
 
-const config = JSON.parse(rendered);
+/**
+ * Drops "//"-prefixed keys. JSON has no comments, but the template needs to
+ * explain choices that would otherwise look arbitrary — and Wrangler warns
+ * about any top-level field it does not recognise, so they cannot survive
+ * into the generated file.
+ */
+function stripComments(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripComments);
+  if (typeof value !== "object" || value === null) return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !key.startsWith("//"))
+      .map(([key, entry]) => [key, stripComments(entry)]),
+  );
+}
+
+const config = stripComments(JSON.parse(rendered)) as Record<string, unknown> & {
+  name: string;
+  r2_buckets?: Array<{ binding: string; bucket_name: string }>;
+};
 writeFileSync(outputPath, `${JSON.stringify(config, null, 2)}\n`);
 
 console.log(`Wrote worker/wrangler.generated.json for Worker "${config.name}"`);
