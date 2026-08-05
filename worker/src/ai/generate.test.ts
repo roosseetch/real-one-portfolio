@@ -225,3 +225,40 @@ describe("author context in the prompts", () => {
     }
   });
 });
+
+describe("invented quotations", () => {
+  it("rejects a record quoting something the note never said", async () => {
+    // The exact failure that reached production: prompted not to invent, the
+    // model invented anyway, so the check has to be deterministic.
+    const invented = aiRecord({
+      body: "A good morning. As Simon Sinek says, 'When we feel safe, we are more likely to relax', and so it was.",
+    });
+    const fake = createFakeAi(invented, invented, aiRecord());
+    const result = await generateRecord({ AI: fake.AI }, NOTE);
+
+    // Retried past both bad attempts and accepted the clean third.
+    expect(result.status).toBe("generated");
+    if (result.status === "generated") expect(result.record.body).not.toContain("Simon Sinek");
+    expect(fake.calls).toHaveLength(3);
+  });
+
+  it("gives up rather than publishing an invented quotation", async () => {
+    const invented = aiRecord({ body: "As someone says, 'a quotation the author never wrote at all here'." });
+    const fake = createFakeAi(invented);
+    const result = await generateRecord({ AI: fake.AI }, NOTE);
+
+    expect(result).toEqual({ status: "unavailable", reason: "invalid" });
+  });
+
+  it("tells the model not to quote anyone, in both prompts", async () => {
+    const gen = createFakeAi(aiRecord());
+    await generateRecord({ AI: gen.AI }, NOTE);
+    const edit = createFakeAi(aiRecord());
+    await editRecord({ AI: edit.AI }, RECORD, "shorten it");
+
+    for (const fake of [gen, edit]) {
+      const system = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages[0].content;
+      expect(system).toContain("Never quote anyone");
+    }
+  });
+});

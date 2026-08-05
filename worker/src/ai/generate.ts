@@ -8,6 +8,7 @@
  */
 import type { DraftRecord } from "../drafts/types";
 import { AUTHOR_CONTEXT } from "./author";
+import { inventedQuotation } from "./quotes";
 import { RECORD_JSON_SCHEMA, parseRecord } from "./schema";
 
 
@@ -27,6 +28,7 @@ const SYSTEM_PROMPT = [
   "- Keep the author's voice and first person. Do not make it sound like a press release.",
   "- The body may tidy grammar and phrasing, but must not add events that are not in the note.",
   "- Set eventDate only if the note states or clearly implies a date. Otherwise an empty string.",
+  "- Never quote anyone and never attribute words to a person, book, talk or article. Do not name a person or a work the note does not name, however well known.",
   "- Tags are short topics, one to five of them, each Capitalised Like This rather than in capitals.",
 ].join("\n");
 
@@ -40,6 +42,7 @@ const EDIT_SYSTEM_PROMPT = [
   "- The instruction is the author's, so follow it even where it contradicts your own judgement.",
   "- Never invent places, people, distances, times or achievements the entry does not already contain.",
   "- Keep the author's voice and first person.",
+  "- Never quote anyone and never attribute words to a person, book, talk or article. Do not name a person or a work the note does not name, however well known.",
   "- Set eventDate only if the entry or the instruction states one. Otherwise an empty string.",
 ].join("\n");
 
@@ -150,7 +153,18 @@ async function requestRecord(
     }
 
     const record = parseRecord(readResponse(output));
-    if (record !== null) return { status: "generated", record };
+    if (record !== null) {
+      // Prompting alone already failed once, in production, on the first record
+      // ever published. This is the half the model cannot talk its way past.
+      const invented = inventedQuotation(record, authorText);
+      if (invented === null) return { status: "generated", record };
+
+      // The span itself is the model's invention rather than the author's
+      // words, but it is quoted prose either way and does not belong in a log.
+      console.warn(`Workers AI invented a quotation on attempt ${attempt}; rejected`);
+      failure = "invalid";
+      continue;
+    }
 
     console.warn(`Workers AI returned an unusable record on attempt ${attempt}`);
     failure = "invalid";
