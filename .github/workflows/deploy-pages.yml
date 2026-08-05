@@ -41,6 +41,14 @@ jobs:
           # Cloudflare infrastructure exists, which the site handles gracefully.
           VITE_CONTENT_BASE_URL: ${{ vars.CONTENT_BASE_URL }}
         run: npm run build
+      # Pages drops the custom domain on some deploys unless the artifact
+      # carries a CNAME. The value comes from a repository variable so no
+      # domain is ever written into a tracked file.
+      - name: Write CNAME when a custom domain is configured
+        if: vars.PAGES_CUSTOM_DOMAIN != ''
+        env:
+          CUSTOM_DOMAIN: ${{ vars.PAGES_CUSTOM_DOMAIN }}
+        run: printf '%s\n' "$CUSTOM_DOMAIN" > site/dist/CNAME
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
