@@ -396,3 +396,61 @@ describe("publish", () => {
     expect(body).not.toContain("an easy 8k");
   });
 });
+
+describe("previewing media", () => {
+  const withOriginals = async (count: number, type: "image" | "video" = "image") => {
+    const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "at the campus");
+    const originals = Array.from({ length: count }, (_, i) => ({
+      mediaId: `media${i}`,
+      type,
+      fileId: `file-${i}`,
+      key: `originals/${created.activityId}/media${i}.jpg`,
+    }));
+    return sendPreview(env(), { ...created, record: RECORD, originals });
+  };
+
+  it("sends a single photo with the preview as its caption", async () => {
+    // Spec §7.2: the author sees the picture and the words together.
+    await withOriginals(1);
+
+    const photo = calls.find((c) => c.method === "sendPhoto");
+    expect(photo?.body.photo).toBe("file-0");
+    expect(String(photo?.body.caption)).toContain("Is this the information and media that should become public?");
+    expect(photo?.body.reply_markup).toBeDefined();
+    expect(calls.map((c) => c.method)).not.toContain("sendMediaGroup");
+  });
+
+  it("sends several as an album plus a separate control message", async () => {
+    // Telegram allows no buttons on a media group, which is exactly why the
+    // spec pairs one with a control message carrying the text and the decision.
+    await withOriginals(3);
+
+    const album = calls.find((c) => c.method === "sendMediaGroup");
+    expect((album?.body.media as unknown[]).length).toBe(3);
+    expect(album?.body.reply_markup).toBeUndefined();
+
+    const control = calls.find((c) => c.method === "sendMessage");
+    expect(String(control?.body.text)).toContain("should become public?");
+    expect(control?.body.reply_markup).toBeDefined();
+  });
+
+  it("puts the buttons on the control message, so they can be stripped later", async () => {
+    const draft = await withOriginals(2);
+    // messageId is what removeKeyboard needs; the album has no keyboard to strip.
+    expect(draft.preview?.messageId).toBe(4242);
+    expect(draft.state).toBe("awaiting_approval");
+  });
+
+  it("uses the album path for a video even on its own", async () => {
+    // sendPhoto cannot carry a video, and a video caption is capped lower still.
+    await withOriginals(1, "video");
+    expect(calls.map((c) => c.method)).toContain("sendMediaGroup");
+    expect(calls.map((c) => c.method)).not.toContain("sendPhoto");
+  });
+
+  it("falls back to a plain message when there is no media", async () => {
+    await awaitingApproval();
+    expect(calls.map((c) => c.method)).toContain("sendMessage");
+    expect(calls.map((c) => c.method)).not.toContain("sendPhoto");
+  });
+});

@@ -27,11 +27,11 @@ export interface Env {
  * reads published JSON and media straight from public R2.
  */
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     if (request.method === "POST" && pathname === "/telegram/webhook") {
-      return handleTelegramWebhook(request, env);
+      return handleTelegramWebhook(request, env, ctx);
     }
 
     if (request.method === "POST" && pathname === "/callbacks/media-processed") {

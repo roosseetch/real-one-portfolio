@@ -76,6 +76,7 @@ export async function createDraft(
   source: DraftSource,
   text: string,
   now: Date = new Date(),
+  mediaGroupId: string | null = null,
 ): Promise<Draft> {
   const timestamp = now.toISOString();
   const draft: Draft = {
@@ -85,6 +86,12 @@ export async function createDraft(
     createdAt: timestamp,
     updatedAt: timestamp,
     source,
+    // Minted here alongside the draft id and kept distinct from it: a draft is
+    // private, its media becomes public, and one identifier spanning both would
+    // put the private object's name into a public URL.
+    activityId: randomId(),
+    mediaGroupId,
+    originals: [],
     input: { text },
     // Task 16 fills this in from Workers AI. It stays null if the model is
     // unavailable, which is what lets the draft survive a quota failure.

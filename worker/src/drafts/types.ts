@@ -46,6 +46,25 @@ export interface DraftSource {
   messageId: number;
 }
 
+/**
+ * An original file as it arrived from Telegram, stored in the private bucket.
+ *
+ * `mediaId` is minted by the Worker, never taken from Telegram: it names the R2
+ * object and later the public derivatives, and spec §8 keeps every object name
+ * under deterministic control. `fileId` is kept because Telegram can re-send a
+ * file by reference, which makes a preview far cheaper than reading the
+ * original back out of R2.
+ */
+export interface DraftOriginal {
+  mediaId: string;
+  type: "image" | "video";
+  fileId: string;
+  key: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+}
+
 export interface Draft {
   schemaVersion: number;
   draftId: string;
@@ -53,6 +72,20 @@ export interface Draft {
   createdAt: string;
   updatedAt: string;
   source: DraftSource;
+  /**
+   * Names the media for this draft, in R2 and later in the public URLs. Separate
+   * from draftId because a draft is private and an activity's media is not: one
+   * identifier spanning both would leak the private object's name.
+   */
+  activityId: string;
+  /**
+   * Set while an album is still arriving. Telegram delivers each item as its
+   * own update, so this is what lets the second and third photo find the draft
+   * the first one created.
+   */
+  mediaGroupId: string | null;
+  /** Originals in the private bucket. Empty for a text-only draft. */
+  originals: DraftOriginal[];
   /** Exactly what arrived from Telegram, kept so an edit can start over from it. */
   input: { text: string };
   /** Null until Workers AI proposes one, which is why a quota failure can leave a usable draft. */
