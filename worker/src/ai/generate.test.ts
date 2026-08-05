@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { aiRecord, createFakeAi } from "../test-support/ai";
 import type { DraftRecord } from "../drafts/types";
@@ -168,5 +168,24 @@ describe("editRecord", () => {
 
     expect(result).toEqual({ status: "unavailable", reason: "quota" });
     expect(fake.calls).toHaveLength(1);
+  });
+});
+
+describe("error logging", () => {
+  it("reports why the model failed, without echoing the note back", async () => {
+    // The first version logged only an attempt number, which made a real
+    // production failure undiagnosable. This keeps the diagnosis and drops the
+    // author's words.
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((m) => warnings.push(String(m)));
+
+    const secret = "went for an easy 8k along the river before work";
+    const fake = createFakeAi(new Error(`InferenceUpstreamError: model refused "${secret}"`));
+    await generateRecord({ AI: fake.AI }, secret, new Date(), 1);
+
+    warn.mockRestore();
+    expect(warnings[0]).toContain("InferenceUpstreamError");
+    expect(warnings[0]).not.toContain(secret);
+    expect(warnings[0]).toContain("[prompt]");
   });
 });
