@@ -6,10 +6,11 @@
  * failing — so they are asserted here separately from the authorization logic
  * in telegram/webhook.test.ts.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import worker, { type Env } from "./index";
 import type { TelegramUpdate } from "./telegram/types";
+import { aiRecord, createFakeAi } from "./test-support/ai";
 import { createFakeBucket, type FakeBucket } from "./test-support/r2";
 
 const SECRET = "test-webhook-secret";
@@ -20,16 +21,25 @@ let storage: FakeBucket;
 
 beforeEach(() => {
   storage = createFakeBucket();
+  // Nothing on this path should reach the network; if something tries, the
+  // test fails loudly rather than hanging on a real request.
+  vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("no network in tests"));
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function testEnv(overrides: Partial<Env> = {}): Env {
-  // The two secrets the gate reads plus the bucket an authorized message is
-  // written to. The Workers AI binding is never touched on this path, so
-  // fabricating it would be noise.
+  // What the webhook route actually touches: the two secrets the gate reads,
+  // the bucket an authorized message is written to, and the model it is handed
+  // to afterwards.
   return {
     TELEGRAM_WEBHOOK_SECRET: SECRET,
     TELEGRAM_ALLOWED_USER_IDS: String(ALLOWED_ID),
     PRIVATE_BUCKET: storage.bucket,
+    AI: createFakeAi(aiRecord()).AI,
+    TELEGRAM_BOT_TOKEN: "test-token",
     ...overrides,
   } as Env;
 }
