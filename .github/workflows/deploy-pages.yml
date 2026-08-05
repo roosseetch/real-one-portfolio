@@ -40,6 +40,9 @@ jobs:
           # CONTENT_BASE_URL: public content bucket base URL; unset until the
           # Cloudflare infrastructure exists, which the site handles gracefully.
           VITE_CONTENT_BASE_URL: ${{ vars.CONTENT_BASE_URL }}
+          # MEDIA_BASE_URL: public media bucket base URL. While unset the site
+          # renders accessible placeholders instead of photos.
+          VITE_MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
         run: npm run build
       # Pages drops the custom domain on some deploys unless the artifact
       # carries a CNAME. The value comes from a repository variable so no

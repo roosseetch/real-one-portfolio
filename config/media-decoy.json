@@ -1,0 +1,23 @@
+{
+  "$comment": "Decoy metadata injected after every trace of the original is removed. This is privacy hardening, not a security boundary: it makes a published photo look ordinary rather than proving anything. Nothing here is tied to a person, so the file stays reusable.",
+  "camera": {
+    "make": "Sony",
+    "model": "Alpha"
+  },
+  "dateTimeOriginal": {
+    "date": "2117:03:03",
+    "randomizeTime": true
+  },
+  "gpsCandidates": [
+    { "name": "Matterhorn", "lat": 45.9763, "lon": 7.6586 },
+    { "name": "Mont Blanc", "lat": 45.8326, "lon": 6.8652 },
+    { "name": "Jungfrau", "lat": 46.5367, "lon": 7.9625 },
+    { "name": "Eiger", "lat": 46.5775, "lon": 8.0053 },
+    { "name": "Moench", "lat": 46.5583, "lon": 7.9964 },
+    { "name": "Piz Bernina", "lat": 46.3828, "lon": 9.9086 },
+    { "name": "Grossglockner", "lat": 47.0744, "lon": 12.6944 },
+    { "name": "Dufourspitze", "lat": 45.9369, "lon": 7.8669 },
+    { "name": "Ortler", "lat": 46.5089, "lon": 10.5447 },
+    { "name": "Zugspitze", "lat": 47.4211, "lon": 10.9853 }
+  ]
+}
