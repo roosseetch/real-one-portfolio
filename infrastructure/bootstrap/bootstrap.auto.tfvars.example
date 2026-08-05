@@ -1,7 +1,18 @@
 # Copy to bootstrap.auto.tfvars (gitignored) and fill in real values.
 # Export CLOUDFLARE_API_TOKEN before running terraform.
+#
+# This stack builds account-level infrastructure only: one Terraform state
+# bucket shared by every project in the account. It has no project_slug --
+# projects are separated by state key prefix, set in the main stack's backend
+# configuration.
 
 cloudflare_account_id = "<cloudflare-account-id>"
-project_slug          = "<project-slug>"
+
+# Defaults to "terraform-state". Override only if that name is already taken.
+# state_bucket_name = "terraform-state"
+
+# Set false for a project deploying into an account where the bucket already
+# exists, so this stack uses it instead of trying to create it a second time.
+# manage_state_bucket = false
 
 # r2_location_hint = "weur"

@@ -14,13 +14,15 @@ site/.env.*
 !.env.example
 .envrc
 
-# Terraform local state (bootstrap stack)
-terraform.tfstate
-terraform.tfstate.backup
-**/terraform.tfstate
-**/terraform.tfstate.backup
+# Terraform local state (bootstrap stack).
+# The trailing glob matters: `terraform state rm` and `state mv` write
+# terraform.tfstate.<epoch>.backup, which the exact names below do not catch,
+# and any state file names every bucket, domain and account id in the account.
+terraform.tfstate*
+**/terraform.tfstate*
 .terraform/
 **/.terraform/
+.terraform.lock.hcl.backup
 
 # Private source material (raw CV, photos, reflections)
 private-inputs/
