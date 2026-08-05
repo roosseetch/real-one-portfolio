@@ -207,3 +207,21 @@ describe("error logging", () => {
     expect(warnings[0]).toContain("[prompt]");
   });
 });
+
+describe("author context in the prompts", () => {
+  it("reaches both generation and editing", async () => {
+    const forGeneration = createFakeAi(aiRecord());
+    await generateRecord({ AI: forGeneration.AI }, NOTE);
+    const editing = createFakeAi(aiRecord());
+    await editRecord({ AI: editing.AI }, RECORD, "shorten it");
+
+    for (const fake of [forGeneration, editing]) {
+      const system = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages[0].content;
+      expect(system).toContain("in her own voice");
+      // The profile must not become a quarry for details the note never had.
+      expect(system).toContain("not a source of facts");
+      // And the ban on inventing has to survive alongside it.
+      expect(system).toMatch(/Never invent|never invent/);
+    }
+  });
+});
