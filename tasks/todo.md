@@ -29,7 +29,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
       plan-verified against provider 5.22.0)
 
 ## Phase 4 — Telegram text-only publishing
-- [ ] Task 13: Worker scaffold + wrangler template + generate-wrangler script
+- [x] Task 13: Worker scaffold + wrangler template + generate-wrangler script
 - [ ] Task 14: Telegram webhook verification + sender allowlist
 - [ ] Task 15: Draft creation + private R2 storage
 - [ ] Task 16: Workers AI integration with structured output
