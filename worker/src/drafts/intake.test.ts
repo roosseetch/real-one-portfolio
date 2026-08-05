@@ -43,6 +43,9 @@ function env(...steps: AiStep[]) {
     TELEGRAM_BOT_TOKEN: "test-token",
     CONTENT_BUCKET: content.bucket,
     SITE_BASE_URL: "https://site.example",
+    GITHUB_REPOSITORY: "owner/repo",
+    MEDIA_WORKFLOW_FILE: "process-media.yml",
+    GITHUB_DISPATCH_TOKEN: "dispatch-token",
   };
 }
 

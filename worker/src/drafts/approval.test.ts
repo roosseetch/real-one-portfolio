@@ -28,10 +28,13 @@ beforeEach(() => {
   content = createFakeBucket();
   calls = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-    calls.push({
-      method: String(url).split("/").pop() ?? "",
-      body: JSON.parse(String(init?.body)),
-    });
+    const method = String(url).split("/").pop() ?? "";
+    calls.push({ method, body: JSON.parse(String(init?.body)) });
+
+    // GitHub answers a workflow dispatch with 204 and no body; Telegram answers
+    // with 200 and a result. Getting this wrong is how a dispatch silently
+    // looks like a failure.
+    if (method === "dispatches") return new Response(null, { status: 204 });
     return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }), { status: 200 });
   });
 });
@@ -46,6 +49,9 @@ function env(...steps: AiStep[]) {
     TELEGRAM_BOT_TOKEN: "test-token",
     CONTENT_BUCKET: content.bucket,
     SITE_BASE_URL: "https://site.example",
+    GITHUB_REPOSITORY: "owner/repo",
+    MEDIA_WORKFLOW_FILE: "process-media.yml",
+    GITHUB_DISPATCH_TOKEN: "dispatch-token",
     AI: createFakeAi(...(steps.length > 0 ? steps : [aiRecord()])).AI,
   };
 }
@@ -452,5 +458,91 @@ describe("previewing media", () => {
     await awaitingApproval();
     expect(calls.map((c) => c.method)).toContain("sendMessage");
     expect(calls.map((c) => c.method)).not.toContain("sendPhoto");
+  });
+});
+
+describe("publishing a draft with media", () => {
+  const withMedia = async () => {
+    const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "at the campus");
+    const originals = [
+      { mediaId: "media0", type: "image" as const, fileId: "file-0", key: `originals/${created.activityId}/media0.jpg` },
+    ];
+    return sendPreview(env(), { ...created, record: RECORD, originals });
+  };
+
+  beforeEach(async () => {
+    await createManifest(content.bucket, emptyManifest());
+  });
+
+  it("hands the draft to Actions instead of publishing it", async () => {
+    // The files still carry EXIF and GPS; nothing of them may become public
+    // until a runner has stripped them (spec §10.2).
+    const draft = await withMedia();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect(calls.map((c) => c.method)).toContain("dispatches");
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+  });
+
+  it("moves to processing and records the job before dispatching", async () => {
+    const draft = await withMedia();
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("processing");
+    expect(stored?.job?.jobToken).toHaveLength(32);
+    // The buttons go with the preview: nothing is left to decide.
+    expect(stored?.preview).toBeNull();
+  });
+
+  it("sends Actions the draft id and the job token, and nothing else", async () => {
+    // Workflow inputs show in the Actions UI, so anything passed is published.
+    const draft = await withMedia();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    const dispatch = calls.find((c) => c.method === "dispatches");
+    expect(Object.keys(dispatch?.body.inputs as object).sort()).toEqual(["draftId", "jobToken"]);
+    const body = JSON.stringify(dispatch?.body);
+    expect(body).not.toContain("at the campus");
+    expect(body).not.toContain("99");
+  });
+
+  it("tells the author the media is being processed", async () => {
+    const draft = await withMedia();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toContain("Processing the media");
+  });
+
+  it("leaves the draft in processing when GitHub refuses", async () => {
+    // Silently reverting would hide the failure; the retry flow starts from
+    // processing.
+    const draft = await withMedia();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const method = String(url).split("/").pop() ?? "";
+      calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : {} });
+      if (method === "dispatches") return new Response("no", { status: 403 });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }));
+    });
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("processing");
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toContain("Publication failed");
+  });
+
+  it("still publishes a text-only draft directly", async () => {
+    const draft = await awaitingApproval();
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(1);
+    expect(calls.map((c) => c.method)).not.toContain("dispatches");
   });
 });

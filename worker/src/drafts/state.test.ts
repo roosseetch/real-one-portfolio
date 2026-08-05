@@ -27,6 +27,7 @@ function draftIn(state: DraftState): Draft {
     record: null,
     preview: null,
     published: null,
+    job: null,
   };
 }
 
