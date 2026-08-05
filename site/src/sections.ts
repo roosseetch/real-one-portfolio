@@ -16,11 +16,41 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
   return node;
 }
 
-/** Image slot for media that only becomes public after the sanitization
-    pipeline runs (Phase 5). Until then it renders an accent-tinted block
-    carrying the alt text, so layout and accessibility are already real. */
+const MEDIA_BASE = import.meta.env.VITE_MEDIA_BASE_URL?.replace(/\/$/, "");
+
+/** Widths published by the sanitization pipeline for each media reference.
+    Sources vary in size and the pipeline never upscales, so the available
+    widths differ per image. */
+const PUBLISHED_WIDTHS: Record<string, number[]> = {
+  hero: [800, 991],
+  "hobby-jogging": [800, 1080],
+  "hobby-gym": [738],
+  "hobby-stretching": [800, 1600],
+  "hobby-ballet": [781],
+};
+
+/** Renders a published photo, or an accent-tinted block carrying the alt text
+    when no media base URL is configured. The placeholder keeps layout and
+    accessibility real for a deployment whose media pipeline has not run yet. */
 function mediaSlot(refId: string | null, className: string): HTMLElement {
   const ref = refId ? mediaRef(refId) : null;
+  const widths = refId ? PUBLISHED_WIDTHS[refId] : undefined;
+
+  if (MEDIA_BASE && refId && widths?.length) {
+    const img = new Image();
+    const url = (w: number) => `${MEDIA_BASE}/media/profile/${refId}-${w}.webp`;
+    img.className = `${className} media-photo`;
+    img.src = url(widths[widths.length - 1]);
+    if (widths.length > 1) {
+      img.srcset = widths.map((w) => `${url(w)} ${w}w`).join(", ");
+      img.sizes = "(max-width: 48rem) 100vw, 40rem";
+    }
+    img.alt = ref?.alt ?? "";
+    img.loading = refId === "hero" ? "eager" : "lazy";
+    img.decoding = "async";
+    return img;
+  }
+
   const slot = el("div", `${className} media-slot`);
   slot.setAttribute("role", "img");
   slot.setAttribute("aria-label", ref?.alt ?? "Photo placeholder");
