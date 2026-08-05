@@ -6,21 +6,30 @@
  * failing — so they are asserted here separately from the authorization logic
  * in telegram/webhook.test.ts.
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import worker, { type Env } from "./index";
 import type { TelegramUpdate } from "./telegram/types";
+import { createFakeBucket, type FakeBucket } from "./test-support/r2";
 
 const SECRET = "test-webhook-secret";
 const ALLOWED_ID = 4242;
 const WEBHOOK_URL = "https://worker.example/telegram/webhook";
 
+let storage: FakeBucket;
+
+beforeEach(() => {
+  storage = createFakeBucket();
+});
+
 function testEnv(overrides: Partial<Env> = {}): Env {
-  // Only the two secrets this route reads. The R2 and Workers AI bindings are
-  // never touched on this path, so fabricating them would be noise.
+  // The two secrets the gate reads plus the bucket an authorized message is
+  // written to. The Workers AI binding is never touched on this path, so
+  // fabricating it would be noise.
   return {
     TELEGRAM_WEBHOOK_SECRET: SECRET,
     TELEGRAM_ALLOWED_USER_IDS: String(ALLOWED_ID),
+    PRIVATE_BUCKET: storage.bucket,
     ...overrides,
   } as Env;
 }
@@ -70,33 +79,49 @@ describe("POST /telegram/webhook", () => {
     expect(response.headers.get("WWW-Authenticate")).toBeNull();
   });
 
-  it("accepts an allowlisted sender", async () => {
+  it("accepts an allowlisted sender and stores the draft", async () => {
     const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv());
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
+    expect([...storage.objects.keys()]).toEqual([expect.stringMatching(/^drafts\/[0-9a-z]{16}\/draft\.json$/)]);
   });
 
   // Every case below answers 200 on purpose. A non-2xx would have Telegram
   // redelivering a decision we have already made, with escalating backoff,
   // until it throttles the webhook.
   it("ignores a sender who is not on the allowlist", async () => {
-    // TODO(Task 15): once an authorized update writes a draft, extend this to
-    // assert that no R2 write happened — that is the half of "ignored" this
-    // test cannot yet prove.
     const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID + 1)), testEnv());
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
+    // The half of "ignored" that matters: nothing was written.
+    expect(storage.objects.size).toBe(0);
   });
 
   it("ignores everyone when the allowlist is empty", async () => {
     const env = testEnv({ TELEGRAM_ALLOWED_USER_IDS: "" });
     const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), env);
     expect(response.status).toBe(200);
+    expect(storage.objects.size).toBe(0);
   });
 
   it("ignores a body that is not JSON", async () => {
     const response = await worker.fetch(webhookRequest("{not json"), testEnv());
     expect(response.status).toBe(200);
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it("writes nothing when the secret is wrong", async () => {
+    await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), "wrong"), testEnv());
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it("asks Telegram to redeliver when storage fails", async () => {
+    // The one place a retry is worth having: the decision was fine, the write
+    // was not. Everything above this point would decide the same way again.
+    storage.failNextPut();
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv());
+    expect(response.status).toBe(503);
+    expect(storage.objects.size).toBe(0);
   });
 
   it("ignores an update carrying no sender", async () => {
