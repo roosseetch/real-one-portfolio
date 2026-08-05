@@ -4,7 +4,8 @@ import { aiRecord, createFakeAi, type AiStep } from "../test-support/ai";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import type { TelegramUpdate } from "../telegram/types";
 import { intakeUpdate } from "./intake";
-import { loadDraft } from "./store";
+import { setPendingEdit } from "./pending";
+import { loadDraft, saveDraft } from "./store";
 
 const SENDER = 4242;
 const AI_UNAVAILABLE = "The draft has been saved. AI processing can continue later.";
@@ -141,6 +142,62 @@ describe("intakeUpdate", () => {
     expect(sent[0]).toContain("Is this the information and media that should become public?");
     expect(sent[0]).toContain("Morning run by the river");
     expect(keyboards).toHaveLength(1);
+  });
+});
+
+describe("a message that answers an Edit prompt", () => {
+  it("revises the existing draft instead of starting a new one", async () => {
+    const first = await intakeUpdate(textMessage("an easy 8k"), SENDER, env());
+    if (first.status !== "created") throw new Error("expected a draft");
+    await setPendingEdit(storage.bucket, 99, first.draft.draftId);
+    sent.length = 0;
+
+    const result = await intakeUpdate(
+      textMessage("call it an evening run"),
+      SENDER,
+      env(aiRecord({ title: "Evening run by the river" })),
+    );
+
+    expect(result.status).toBe("created");
+    // One draft, not two.
+    expect([...storage.objects.keys()].filter((k) => k.endsWith("draft.json"))).toHaveLength(1);
+    expect((await loadDraft(storage.bucket, first.draft.draftId))?.record?.title).toBe("Evening run by the river");
+  });
+
+  it("shows the complete entry again rather than the changed field", async () => {
+    // Spec §7.3 is explicit: approving a diff is not approving what becomes public.
+    const first = await intakeUpdate(textMessage("an easy 8k"), SENDER, env());
+    if (first.status !== "created") throw new Error("expected a draft");
+    await setPendingEdit(storage.bucket, 99, first.draft.draftId);
+    sent.length = 0;
+
+    await intakeUpdate(textMessage("call it an evening run"), SENDER, env());
+
+    expect(sent.at(-1)).toContain("Is this the information and media that should become public?");
+    for (const label of ["Title", "Date", "Summary", "Body", "Tags"]) expect(sent.at(-1)).toContain(label);
+  });
+
+  it("starts a new draft when the one being edited has moved on", async () => {
+    // Cancelled while the author was typing. Treating the message as an
+    // instruction would silently discard it.
+    const first = await intakeUpdate(textMessage("an easy 8k"), SENDER, env());
+    if (first.status !== "created") throw new Error("expected a draft");
+    await saveDraft(storage.bucket, { ...first.draft, state: "cancelled" });
+    await setPendingEdit(storage.bucket, 99, first.draft.draftId);
+
+    await intakeUpdate(textMessage("a completely new thought"), SENDER, env());
+
+    expect([...storage.objects.keys()].filter((k) => k.endsWith("draft.json"))).toHaveLength(2);
+  });
+
+  it("starts a new draft once the pointer has expired", async () => {
+    const first = await intakeUpdate(textMessage("an easy 8k"), SENDER, env());
+    if (first.status !== "created") throw new Error("expected a draft");
+    await setPendingEdit(storage.bucket, 99, first.draft.draftId, new Date("2020-01-01T00:00:00.000Z"));
+
+    await intakeUpdate(textMessage("a completely new thought"), SENDER, env());
+
+    expect([...storage.objects.keys()].filter((k) => k.endsWith("draft.json"))).toHaveLength(2);
   });
 });
 

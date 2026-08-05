@@ -10,8 +10,9 @@
 import { generateRecord, type AiEnv } from "../ai/generate";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import type { TelegramUpdate } from "../telegram/types";
-import { sendPreview, type ApprovalEnv } from "./approval";
-import { createDraft, saveDraft } from "./store";
+import { applyEditInstruction, sendPreview, type ApprovalEnv } from "./approval";
+import { takePendingEdit } from "./pending";
+import { createDraft, loadDraft, saveDraft } from "./store";
 import type { Draft } from "./types";
 
 /** Spec §23, quoted rather than paraphrased. */
@@ -34,6 +35,31 @@ export type IntakeResult =
  * likewise left alone until the media pipeline exists to sanitize them — until
  * then there is nowhere safe for the file to go.
  */
+/**
+ * Consumes a pending edit instruction, if this chat owes one.
+ *
+ * Returns null when the message is an ordinary new note. The pointer is taken
+ * — read and cleared — before the draft is checked, so a pointer to a draft
+ * that has since been cancelled or published cannot keep intercepting messages.
+ */
+async function applyPendingEdit(
+  chatId: number,
+  text: string,
+  env: IntakeEnv,
+): Promise<IntakeResult | null> {
+  const draftId = await takePendingEdit(env.PRIVATE_BUCKET, chatId);
+  if (draftId === null) return null;
+
+  const draft = await loadDraft(env.PRIVATE_BUCKET, draftId);
+
+  // The draft moved on while the author was typing. Treating the message as an
+  // instruction would silently discard it, so it starts a new draft instead.
+  if (draft === null || draft.state !== "awaiting_approval" || draft.record === null) return null;
+
+  await applyEditInstruction(env, draft, text);
+  return { status: "created", draft };
+}
+
 export async function intakeUpdate(
   update: TelegramUpdate,
   senderId: number,
@@ -44,6 +70,11 @@ export async function intakeUpdate(
 
   const text = message.text?.trim();
   if (!text) return { status: "unsupported" };
+
+  // Checked before anything else: after "Edit text" the author's next message
+  // is the instruction, and it is indistinguishable from a new note otherwise.
+  const edited = await applyPendingEdit(message.chat.id, text, env);
+  if (edited) return edited;
 
   const draft = await createDraft(
     env.PRIVATE_BUCKET,

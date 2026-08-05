@@ -9,6 +9,8 @@
 import type { DraftRecord } from "../drafts/types";
 import { RECORD_JSON_SCHEMA, parseRecord } from "./schema";
 
+
+
 const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /** Two more tries after the first. Constrained decoding rarely needs them, and a stuck model will not improve on the fourth. */
@@ -23,6 +25,17 @@ const SYSTEM_PROMPT = [
   "- The body may tidy grammar and phrasing, but must not add events that are not in the note.",
   "- Set eventDate only if the note states or clearly implies a date. Otherwise null.",
   "- Tags are short topics, one to five of them, capitalised.",
+].join("\n");
+
+const EDIT_SYSTEM_PROMPT = [
+  "You are revising an entry for someone's personal website, following one instruction from its author.",
+  "",
+  "Rules:",
+  "- Change only what the instruction asks for. Every other field comes back untouched.",
+  "- The instruction is the author's, so follow it even where it contradicts your own judgement.",
+  "- Never invent places, people, distances, times or achievements the entry does not already contain.",
+  "- Keep the author's voice and first person.",
+  "- Set eventDate only if the entry or the instruction states one. Otherwise null.",
 ].join("\n");
 
 export interface AiEnv {
@@ -60,19 +73,26 @@ function readResponse(output: unknown): unknown {
   }
 }
 
-export async function generateRecord(
-  env: AiEnv,
-  text: string,
-  today: Date = new Date(),
-  maxAttempts: number = MAX_ATTEMPTS,
-): Promise<GenerationResult> {
-  const userPrompt = [
-    `Today is ${today.toISOString().slice(0, 10)}.`,
-    "",
-    "Note:",
-    text,
-  ].join("\n");
+/**
+ * Low but not zero, so the same note comes back roughly the same way twice.
+ * Regenerate deliberately runs hotter — see below.
+ */
+const STEADY = 0.3;
 
+/**
+ * Pressing Regenerate at the steady temperature would hand back something
+ * almost identical, which reads as a broken button. The point of the request
+ * is a different take on the same note.
+ */
+const VARIED = 0.9;
+
+async function requestRecord(
+  env: AiEnv,
+  systemPrompt: string,
+  userPrompt: string,
+  temperature: number,
+  maxAttempts: number,
+): Promise<GenerationResult> {
   // Remembers why the last attempt failed, so a model that is simply
   // unreachable is not reported as one producing malformed records.
   let failure: "invalid" | "error" = "error";
@@ -83,14 +103,12 @@ export async function generateRecord(
     try {
       output = await env.AI.run(MODEL, {
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         response_format: { type: "json_schema", json_schema: RECORD_JSON_SCHEMA },
         max_tokens: 1024,
-        // Low but not zero: the same note should come back roughly the same
-        // way, while Regenerate still has room to offer something different.
-        temperature: 0.3,
+        temperature,
       });
     } catch (error) {
       if (isQuotaError(error)) {
@@ -113,4 +131,59 @@ export async function generateRecord(
   }
 
   return { status: "unavailable", reason: failure };
+}
+
+function notePrompt(text: string, today: Date): string {
+  return [`Today is ${today.toISOString().slice(0, 10)}.`, "", "Note:", text].join("\n");
+}
+
+export function generateRecord(
+  env: AiEnv,
+  text: string,
+  today: Date = new Date(),
+  maxAttempts: number = MAX_ATTEMPTS,
+): Promise<GenerationResult> {
+  return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), STEADY, maxAttempts);
+}
+
+/** Same note, another attempt at it — run hotter so the result is actually different. */
+export function regenerateRecord(
+  env: AiEnv,
+  text: string,
+  today: Date = new Date(),
+  maxAttempts: number = MAX_ATTEMPTS,
+): Promise<GenerationResult> {
+  return requestRecord(env, SYSTEM_PROMPT, notePrompt(text, today), VARIED, maxAttempts);
+}
+
+/**
+ * Applies one instruction to the entry as it currently stands (spec §7.3).
+ *
+ * The current record goes in as data rather than as prose, so the model revises
+ * a structure it can see rather than re-deriving one from a description of it.
+ * `media` is left out: the model never decides media exists, and showing it a
+ * media list invites it to return one.
+ */
+export function editRecord(
+  env: AiEnv,
+  record: DraftRecord,
+  instruction: string,
+  today: Date = new Date(),
+  maxAttempts: number = MAX_ATTEMPTS,
+): Promise<GenerationResult> {
+  const { media: _media, ...editable } = record;
+
+  const userPrompt = [
+    `Today is ${today.toISOString().slice(0, 10)}.`,
+    "",
+    "Current entry:",
+    JSON.stringify(editable, null, 2),
+    "",
+    "Change to make:",
+    instruction,
+    "",
+    "Apply only that change. Return the whole entry, with every other field exactly as it was.",
+  ].join("\n");
+
+  return requestRecord(env, EDIT_SYSTEM_PROMPT, userPrompt, STEADY, maxAttempts);
 }

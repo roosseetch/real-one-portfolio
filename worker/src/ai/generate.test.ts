@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { aiRecord, createFakeAi } from "../test-support/ai";
-import { generateRecord } from "./generate";
+import type { DraftRecord } from "../drafts/types";
+import { editRecord, generateRecord, regenerateRecord } from "./generate";
 
 const NOTE = "went for an easy 8k along the river before work";
+
+const RECORD: DraftRecord = {
+  title: "Morning run by the river",
+  summary: "An easy 8 km before work.",
+  body: "Cool air, quiet paths, and a good pace.",
+  eventDate: "2026-07-28",
+  tags: ["Jogging"],
+  media: [],
+};
 
 describe("generateRecord", () => {
   it("returns the validated record", async () => {
@@ -94,10 +104,69 @@ describe("generateRecord", () => {
     }
   });
 
+  it("runs hotter when regenerating than when generating", async () => {
+    // Regenerate at the steady temperature would hand back something almost
+    // identical, which reads as a broken button.
+    const first = createFakeAi(aiRecord());
+    const second = createFakeAi(aiRecord());
+    await generateRecord({ AI: first.AI }, NOTE);
+    await regenerateRecord({ AI: second.AI }, NOTE);
+
+    const temp = (fake: typeof first) => (fake.calls[0].input as { temperature: number }).temperature;
+    expect(temp(second)).toBeGreaterThan(temp(first));
+  });
+
   it("honours a smaller attempt budget", async () => {
     const fake = createFakeAi({ response: "{not json" });
     await generateRecord({ AI: fake.AI }, NOTE, new Date(), 1);
 
+    expect(fake.calls).toHaveLength(1);
+  });
+});
+
+describe("editRecord", () => {
+  it("returns the revised record", async () => {
+    const { AI } = createFakeAi(aiRecord({ title: "Evening run by the river" }));
+    const result = await editRecord({ AI }, RECORD, "call it an evening run");
+
+    expect(result).toMatchObject({ status: "generated", record: { title: "Evening run by the river" } });
+  });
+
+  it("shows the model the current entry as data, plus the instruction", async () => {
+    const fake = createFakeAi(aiRecord());
+    await editRecord({ AI: fake.AI }, RECORD, "call it an evening run");
+
+    const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content ?? "";
+    expect(prompt).toContain("Morning run by the river");
+    expect(prompt).toContain("call it an evening run");
+    // Revising a structure it can see beats re-deriving one from a description.
+    expect(prompt).toContain('"eventDate"');
+  });
+
+  it("never shows the model the media list", async () => {
+    // The model does not decide media exists, and showing it a list invites
+    // one back.
+    const fake = createFakeAi(aiRecord());
+    await editRecord({ AI: fake.AI }, { ...RECORD, media: [{ mediaId: "m1", alt: "a", caption: "c" }] }, "shorten it");
+
+    const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content ?? "";
+    expect(prompt).not.toContain("mediaId");
+    expect(prompt).not.toContain("m1");
+  });
+
+  it("tells the model the instruction wins over its own judgement", async () => {
+    const fake = createFakeAi(aiRecord());
+    await editRecord({ AI: fake.AI }, RECORD, "shorten it");
+
+    const system = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages[0].content;
+    expect(system).toContain("Change only what the instruction asks for");
+  });
+
+  it("reports an exhausted allowance without retrying", async () => {
+    const fake = createFakeAi(new Error("daily quota exceeded"));
+    const result = await editRecord({ AI: fake.AI }, RECORD, "shorten it");
+
+    expect(result).toEqual({ status: "unavailable", reason: "quota" });
     expect(fake.calls).toHaveLength(1);
   });
 });

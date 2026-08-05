@@ -7,8 +7,10 @@
  * it was drawn for. A press proves only that someone tapped something that was
  * true once.
  */
+import { editRecord, regenerateRecord } from "../ai/generate";
 import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
+import { setPendingEdit } from "./pending";
 import {
   answerCallback,
   removeKeyboard,
@@ -25,15 +27,19 @@ import {
 import type { TelegramCallbackQuery } from "../telegram/types";
 import { transition } from "./state";
 import { loadDraft, saveDraft } from "./store";
-import type { Draft } from "./types";
+import type { Draft, DraftRecord } from "./types";
+import type { AiEnv } from "../ai/generate";
 
 /** Long enough that guessing is hopeless, short enough for the 64-byte callback_data budget. */
 const TOKEN_LENGTH = 12;
 
 const CANCELLED_MESSAGE = "Cancelled. Nothing was published.";
 const NOT_YET = "Not available yet.";
+const EDIT_PROMPT = "What should change? Send it as a message, and the whole entry comes back for approval.";
+/** Spec §23, quoted rather than paraphrased. */
+const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 
-export interface ApprovalEnv extends TelegramApiEnv {
+export interface ApprovalEnv extends TelegramApiEnv, AiEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
 
@@ -138,10 +144,89 @@ export async function handlePreviewCallback(
     return;
   }
 
-  // Publish lands with the publication task, edit and regenerate with the edit
-  // flows, media with the photo pipeline. The buttons stay live rather than
-  // being stripped, because nothing has been acted on yet.
+  if (parsed.action === "regenerate") {
+    // Answered before the model runs: generation takes seconds, and Telegram
+    // gives up on an unanswered callback long before that.
+    await answerCallback(env, query.id, "Rewriting…");
+    await regenerateDraft(env, draft);
+    return;
+  }
+
+  if (parsed.action === "edit") {
+    await answerCallback(env, query.id, "Send the change you want.");
+    await setPendingEdit(env.PRIVATE_BUCKET, draft.source.chatId, draft.draftId);
+    await sendMessage(env, draft.source.chatId, EDIT_PROMPT);
+    return;
+  }
+
+  // Publish lands with the publication task and media with the photo pipeline.
+  // The buttons stay live rather than being stripped, because nothing has been
+  // acted on yet.
   await answerCallback(env, query.id, NOT_YET);
+}
+
+/**
+ * Rewrites the entry from the author's original note and previews it again.
+ *
+ * Always from `input.text`, never from the record currently on the draft:
+ * regenerating from the last generation would compound its drift, so each
+ * attempt starts from what the author actually wrote.
+ */
+async function regenerateDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
+  const generated = await regenerateRecord(env, draft.input.text);
+
+  if (generated.status !== "generated") {
+    await sendMessage(env, draft.source.chatId, AI_UNAVAILABLE_MESSAGE);
+    return;
+  }
+
+  await replaceRecord(env, draft, generated.record);
+}
+
+/** Applies one instruction to the draft and previews the whole result again. */
+export async function applyEditInstruction(
+  env: ApprovalEnv,
+  draft: Draft,
+  instruction: string,
+): Promise<void> {
+  if (draft.record === null) return;
+
+  const edited = await editRecord(env, draft.record, instruction);
+
+  if (edited.status !== "generated") {
+    await sendMessage(env, draft.source.chatId, AI_UNAVAILABLE_MESSAGE);
+    return;
+  }
+
+  await replaceRecord(env, draft, edited.record);
+}
+
+/**
+ * Stores a revised record and shows the whole preview again.
+ *
+ * Spec §7.3 is explicit that the complete preview follows every change rather
+ * than the changed field alone: approving a diff is not approving what becomes
+ * public. sendPreview mints a new token, which is what stops the superseded
+ * message from publishing text the draft no longer says.
+ */
+async function replaceRecord(env: ApprovalEnv, draft: Draft, record: DraftRecord): Promise<void> {
+  const updated: Draft = { ...draft, record, updatedAt: new Date().toISOString() };
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, updated);
+  } catch {
+    console.error("Could not store the revised record; the previous version still stands");
+    await sendMessage(env, draft.source.chatId, "That change could not be saved. The previous version still stands.");
+    return;
+  }
+
+  // The old preview's buttons are retired by the new token, but leaving the
+  // keyboard on screen invites a press that can only be refused.
+  if (draft.preview !== null) {
+    await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
+  }
+
+  await sendPreview(env, updated);
 }
 
 async function cancelDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
