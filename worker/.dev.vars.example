@@ -1,0 +1,22 @@
+# Copy to worker/.dev.vars (gitignored) for local `wrangler dev`.
+# In production these are Worker secrets, set with `wrangler secret put NAME`
+# or by the deploy-worker workflow from GitHub secrets. They never appear in
+# wrangler.template.json or any tracked file.
+
+# From BotFather.
+TELEGRAM_BOT_TOKEN=
+
+# Random string, also given to Telegram when registering the webhook. Telegram
+# echoes it back in X-Telegram-Bot-Api-Secret-Token on every request.
+TELEGRAM_WEBHOOK_SECRET=
+
+# Comma-separated numeric Telegram user IDs allowed to author content.
+TELEGRAM_ALLOWED_USER_IDS=
+
+# Fine-grained GitHub token with actions:write on this repository only, used to
+# dispatch the media processing workflow.
+GITHUB_DISPATCH_TOKEN=
+
+# Shared secret the media workflow signs its callback with. Must match the
+# CALLBACK_HMAC_SECRET GitHub secret exactly.
+CALLBACK_HMAC_SECRET=
