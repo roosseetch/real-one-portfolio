@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { aiRecord, createFakeAi, type AiStep } from "../test-support/ai";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import type { TelegramCallbackQuery } from "../telegram/types";
 import { handlePreviewCallback, parseCallbackData, sendPreview } from "./approval";
@@ -35,8 +36,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function env() {
-  return { PRIVATE_BUCKET: storage.bucket, TELEGRAM_BOT_TOKEN: "test-token" };
+function env(...steps: AiStep[]) {
+  return {
+    PRIVATE_BUCKET: storage.bucket,
+    TELEGRAM_BOT_TOKEN: "test-token",
+    AI: createFakeAi(...(steps.length > 0 ? steps : [aiRecord()])).AI,
+  };
 }
 
 async function awaitingApproval(): Promise<Draft> {
@@ -187,7 +192,7 @@ describe("handlePreviewCallback", () => {
   });
 
   it("acknowledges the buttons whose flows land later, without touching the draft", async () => {
-    for (const code of ["p", "e", "m", "r"]) {
+    for (const code of ["p", "m"]) {
       const draft = await awaitingApproval();
       calls.length = 0;
 
@@ -198,5 +203,89 @@ describe("handlePreviewCallback", () => {
       expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("awaiting_approval");
       expect(calls.map((c) => c.method)).not.toContain("editMessageReplyMarkup");
     }
+  });
+});
+
+describe("regenerate", () => {
+  it("replaces the record and previews the whole entry again", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "r"), env(aiRecord({ title: "A different take" })));
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.record?.title).toBe("A different take");
+    // Spec §7.3: the complete preview follows every change, not the diff.
+    const preview = calls.find((c) => c.method === "sendMessage" && c.body.reply_markup);
+    expect(preview?.body.text).toContain("A different take");
+    expect(preview?.body.text).toContain("Is this the information and media that should become public?");
+  });
+
+  it("retires the superseded preview", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "r"), env());
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+
+    expect(stored?.preview?.token).not.toBe(draft.preview?.token);
+    // The old keyboard comes off, so no press can land on a message that is
+    // no longer describing the draft.
+    expect(calls.map((c) => c.method)).toContain("editMessageReplyMarkup");
+  });
+
+  it("answers the button before the model runs", async () => {
+    // Generation takes seconds; Telegram gives up on an unanswered callback
+    // long before that and the button would appear stuck.
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "r"), env());
+
+    expect(calls[0].method).toBe("answerCallbackQuery");
+    expect(answers()).toEqual(["Rewriting…"]);
+  });
+
+  it("rewrites from the author's note, not from the last generation", async () => {
+    // Regenerating from the previous output would compound its drift.
+    const fake = createFakeAi(aiRecord());
+    const draft = await awaitingApproval();
+
+    await handlePreviewCallback(press(draft, "r"), {
+      PRIVATE_BUCKET: storage.bucket,
+      TELEGRAM_BOT_TOKEN: "t",
+      AI: fake.AI,
+    });
+
+    const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content;
+    expect(prompt).toContain("an easy 8k");
+    expect(prompt).not.toContain("Morning run by the river");
+  });
+
+  it("keeps the existing record when the model is unavailable", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "r"), env(new Error("daily quota exceeded")));
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.record?.title).toBe("Morning run by the river");
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toBe(
+      "The draft has been saved. AI processing can continue later.",
+    );
+  });
+});
+
+describe("edit", () => {
+  it("asks for the instruction and records that one is owed", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "e"), env());
+
+    expect(answers()).toEqual(["Send the change you want."]);
+    expect(storage.objects.has("drafts/pending/99.json")).toBe(true);
+    // Nothing has changed yet, so the buttons stay live.
+    expect(calls.map((c) => c.method)).not.toContain("editMessageReplyMarkup");
   });
 });
