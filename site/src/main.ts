@@ -1,4 +1,5 @@
 import "./styles.css";
+import { initializeAnalytics } from "./analytics";
 import { facts, design, portfolio } from "./profile";
 import { renderHero, renderAbout, renderExperience, renderHobbies, renderFooter } from "./sections";
 import { renderActivity } from "./activity";
@@ -47,4 +48,5 @@ if (app) {
   document.title = facts.displayName ?? "Portfolio";
   applyDesignTokens();
   renderShell(app);
+  initializeAnalytics();
 }
