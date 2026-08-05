@@ -6,7 +6,8 @@
     "validate:profile": "tsx scripts/validate-profile.ts",
     "typecheck": "tsc --noEmit",
     "profile:publish": "tsx scripts/publish-profile.ts",
-    "profile:fetch": "tsx scripts/fetch-profile.ts"
+    "profile:fetch": "tsx scripts/fetch-profile.ts",
+    "record:unpublish": "tsx scripts/unpublish-record.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
