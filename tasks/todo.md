@@ -32,7 +32,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Task 13: Worker scaffold + wrangler template + generate-wrangler script
 - [x] Task 14: Telegram webhook verification + sender allowlist
 - [x] Task 15: Draft creation + private R2 storage
-- [ ] Task 16: Workers AI integration with structured output
+- [x] Task 16: Workers AI integration with structured output
 - [ ] Task 17: Telegram preview + approval buttons
 - [ ] Task 18: Edit / regenerate / cancel flows
 - [ ] Task 19: Text-only publication — immutable chunks + manifest
