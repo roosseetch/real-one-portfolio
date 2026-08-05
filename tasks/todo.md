@@ -36,7 +36,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Task 17: Telegram preview + approval buttons
 - [x] Task 18: Edit / regenerate / cancel flows
 - [x] Task 19: Text-only publication — immutable chunks + manifest
-- [ ] Task 20: Worker deploy workflow
+- [x] Task 20: Worker deploy workflow
 - [ ] Checkpoint D: full text-only loop works in production
 
 ## Phase 5 — Photo pipeline
