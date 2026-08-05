@@ -41,8 +41,14 @@ def deg_to_dms(value: float) -> str:
     return f"{degrees} {minutes} {seconds:.2f}"
 
 
-def strip_and_resize(source: Path, out_path: Path, width: int) -> tuple[int, int]:
-    """Re-encodes to WebP at the target width, carrying no metadata across.
+# WebP is what the site asks for; AVIF is offered alongside it where the encoder
+# is available, since a browser that understands it gets a smaller file for the
+# same picture. Its absence is not a failure: the WebP is always written.
+FORMATS = [("webp", "WEBP", {"quality": 82, "method": 6}), ("avif", "AVIF", {"quality": 60})]
+
+
+def strip_and_resize(source: Path, out_path: Path, width: int, pillow_format: str, options: dict) -> tuple[int, int]:
+    """Re-encodes at the target width, carrying no metadata across.
 
     Never upscales: a derivative wider than its source is a bigger file with no
     more detail in it, so the width is clamped to the original.
@@ -56,7 +62,7 @@ def strip_and_resize(source: Path, out_path: Path, width: int) -> tuple[int, int
         target_width = min(width, img.width)
         target_height = round(img.height * target_width / img.width)
         resized = img.resize((target_width, target_height), Image.LANCZOS)
-        resized.save(out_path, "WEBP", quality=82, method=6)
+        resized.save(out_path, pillow_format, **options)
         return target_width, target_height
 
 
@@ -69,7 +75,7 @@ def inject_decoy(path: Path, decoy: dict, rng: random.Random) -> str:
         else "12:00:00"
     )
     args = [
-        "exiftool", "-overwrite_original", "-q",
+        "exiftool", "-overwrite_original", "-q", "-m",
         f"-Make={decoy['camera']['make']}",
         f"-Model={decoy['camera']['model']}",
         f"-DateTimeOriginal={stamp['date']} {time_part}",
@@ -79,7 +85,12 @@ def inject_decoy(path: Path, decoy: dict, rng: random.Random) -> str:
         f"-GPSLongitudeRef={'E' if peak['lon'] >= 0 else 'W'}",
         str(path),
     ]
-    subprocess.run(args, check=True)
+    # Spec §11.3: inject only where the container supports it. Removal has
+    # already happened by re-encoding, so a format exiftool cannot write to is
+    # still safe -- it simply carries no decoy.
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
     return peak["name"]
 
 
@@ -94,7 +105,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("source_dir")
 parser.add_argument("work_dir")
 parser.add_argument("mapping")
-parser.add_argument("--widths", default="1600,800")
+parser.add_argument("--widths", default="1600,1200,800,320")
 args = parser.parse_args()
 
 source_dir = Path(args.source_dir)
@@ -108,6 +119,7 @@ rng = random.Random()
 
 manifest: dict[str, list[dict]] = {}
 failures: list[str] = []
+skipped_formats: set[str] = set()
 
 for media_id, filename in mapping.items():
     source = source_dir / filename
@@ -116,7 +128,9 @@ for media_id, filename in mapping.items():
         continue
 
     with Image.open(source) as probe:
+        probe = ImageOps.exif_transpose(probe)
         source_width = probe.width
+        source_ratio = probe.width / probe.height
     entries = []
     emitted: set[int] = set()
 
@@ -127,26 +141,47 @@ for media_id, filename in mapping.items():
             continue
         emitted.add(actual)
 
-        out_path = work_dir / f"{media_id}-{actual}.webp"
-        dims = strip_and_resize(source, out_path, width)
-        peak = inject_decoy(out_path, decoy, rng)
+        for extension, pillow_format, options in FORMATS:
+            out_path = work_dir / f"{media_id}-{actual}.{extension}"
+            try:
+                dims = strip_and_resize(source, out_path, width, pillow_format, options)
+            except (OSError, KeyError, ValueError) as exc:
+                # An encoder this build does not have. WebP is required and its
+                # absence is a real failure; AVIF is a bonus.
+                if extension == "webp":
+                    failures.append(f"{media_id}: could not write WebP at {actual}px: {exc}")
+                else:
+                    skipped_formats.add(extension)
+                continue
 
-        tags = read_tags(out_path)
-        leaked = [t for t in FORBIDDEN_TAGS if any(k.endswith(f":{t}") for k in tags)]
-        # The decoy GPS is expected; only flag it when it did not come from us.
-        leaked = [t for t in leaked if not t.startswith("GPS")]
-        if leaked:
-            failures.append(f"{out_path.name}: original metadata survived: {leaked}")
+            peak = inject_decoy(out_path, decoy, rng)
 
-        entries.append(
-            {
-                "file": out_path.name,
-                "width": dims[0],
-                "height": dims[1],
-                "bytes": out_path.stat().st_size,
-                "decoyLocation": peak,
-            }
-        )
+            tags = read_tags(out_path)
+            leaked = [t for t in FORBIDDEN_TAGS if any(k.endswith(f":{t}") for k in tags)]
+            # The decoy GPS is expected; only flag it when it did not come from us.
+            leaked = [t for t in leaked if not t.startswith("GPS")]
+            if leaked:
+                failures.append(f"{out_path.name}: original metadata survived: {leaked}")
+
+            # A derivative wider than its source would be an upscale, and one
+            # that lost its shape would crop the subject out on the site.
+            if dims[0] > source_width:
+                failures.append(f"{out_path.name}: upscaled beyond the source width")
+            if abs(dims[0] / dims[1] - source_ratio) > 0.01:
+                failures.append(f"{out_path.name}: aspect ratio drifted from the source")
+            if out_path.stat().st_size == 0:
+                failures.append(f"{out_path.name}: written empty")
+
+            entries.append(
+                {
+                    "file": out_path.name,
+                    "format": extension,
+                    "width": dims[0],
+                    "height": dims[1],
+                    "bytes": out_path.stat().st_size,
+                    "decoyLocation": peak,
+                }
+            )
 
     if entries:
         manifest[media_id] = entries
@@ -155,7 +190,11 @@ for media_id, filename in mapping.items():
 
 for media_id, entries in manifest.items():
     for e in entries:
-        print(f"{e['file']:32} {e['width']}x{e['height']:<6} {e['bytes']/1024:6.1f} KiB  decoy@{e['decoyLocation']}")
+        decoy_note = f"decoy@{e['decoyLocation']}" if e["decoyLocation"] else "no decoy (format)"
+        print(f"{e['file']:36} {e['width']}x{e['height']:<6} {e['bytes']/1024:7.1f} KiB  {decoy_note}")
+
+if skipped_formats:
+    print(f"\nSkipped, no encoder in this build: {', '.join(sorted(skipped_formats))}")
 
 if failures:
     print("\nFAILURES:", file=sys.stderr)
