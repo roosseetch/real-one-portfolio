@@ -35,7 +35,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Task 16: Workers AI integration with structured output
 - [x] Task 17: Telegram preview + approval buttons
 - [x] Task 18: Edit / regenerate / cancel flows
-- [ ] Task 19: Text-only publication — immutable chunks + manifest
+- [x] Task 19: Text-only publication — immutable chunks + manifest
 - [ ] Task 20: Worker deploy workflow
 - [ ] Checkpoint D: full text-only loop works in production
 

@@ -66,6 +66,12 @@ export interface Draft {
    * `messageId` is what lets those buttons be stripped once one is used.
    */
   preview: { messageId: number; token: string } | null;
+  /**
+   * Set once the record is live. Kept so a repeated Publish can hand back the
+   * link it already produced instead of publishing a second copy — chunks are
+   * immutable, so a duplicate cannot simply be edited out afterwards.
+   */
+  published: { recordId: string; url: string } | null;
 }
 
 export const DRAFT_SCHEMA_VERSION = 1;

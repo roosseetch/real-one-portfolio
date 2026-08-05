@@ -3,7 +3,9 @@
   "name": "__WORKER_NAME__",
   "main": "src/index.ts",
   "compatibility_date": "2026-01-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "observability": {
     "enabled": true
   },
@@ -22,8 +24,9 @@
   },
   "vars": {
     "CONTENT_BASE_URL": "__CONTENT_BASE_URL__",
-    "MEDIA_BASE_URL": "__MEDIA_BASE_URL__",
     "GITHUB_REPOSITORY": "__GITHUB_REPOSITORY__",
-    "MEDIA_WORKFLOW_FILE": "__MEDIA_WORKFLOW_FILE__"
+    "MEDIA_BASE_URL": "__MEDIA_BASE_URL__",
+    "MEDIA_WORKFLOW_FILE": "__MEDIA_WORKFLOW_FILE__",
+    "SITE_BASE_URL": "__SITE_BASE_URL__"
   }
 }

@@ -23,6 +23,7 @@ function draftIn(state: DraftState): Draft {
     input: { text: "a morning run by the river" },
     record: null,
     preview: null,
+    published: null,
   };
 }
 
