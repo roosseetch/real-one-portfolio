@@ -1,6 +1,8 @@
 output "state_bucket_name" {
   description = "Bucket name to put in the main stack backend configuration."
-  value       = cloudflare_r2_bucket.state.name
+  # Read from the variable rather than the resource so the output still answers
+  # when manage_state_bucket is false and there is no resource to read.
+  value = var.state_bucket_name
 }
 
 output "state_backend_endpoint" {

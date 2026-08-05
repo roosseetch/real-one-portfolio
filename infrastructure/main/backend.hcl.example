@@ -6,8 +6,11 @@
 #   AWS_ACCESS_KEY_ID     = <r2-access-key-id>
 #   AWS_SECRET_ACCESS_KEY = <r2-secret-access-key>
 
-bucket = "<project-slug>-tf-state"
-key    = "production/terraform.tfstate"
+# One state bucket serves every project in the account, so the project's
+# identity lives in the key prefix rather than the bucket name. Without the
+# prefix, two projects would collide on a key like production/terraform.tfstate.
+bucket = "terraform-state"
+key    = "<project-slug>/production/terraform.tfstate"
 region = "auto"
 
 endpoints = {
