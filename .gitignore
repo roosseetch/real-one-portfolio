@@ -24,8 +24,16 @@ terraform.tfstate*
 **/.terraform/
 .terraform.lock.hcl.backup
 
-# Private source material (raw CV, photos, reflections)
+# Private source material (raw CV, photos, reflections), including the full
+# profile that scripts/publish-profile.ts strips before publishing.
 private-inputs/
+
+# The approved profile is one person's name, role and history, so it does not
+# belong in a repository meant to be reused for someone else (spec §1). It is
+# published to the public content bucket and fetched at build time by
+# scripts/fetch-profile.ts. The schemas stay tracked: they describe the shape,
+# not the person.
+profile/*.json
 
 # Build + deps
 node_modules/

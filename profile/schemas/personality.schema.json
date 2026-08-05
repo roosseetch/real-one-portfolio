@@ -5,26 +5,56 @@
   "description": "Reviewed AI interpretation. Distinguishes verified observations, provisional AI interpretations, and approved final characteristics.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "verifiedObservations", "provisionalInterpretations", "approvedCharacteristics", "communicationStyle", "learningAttitude", "interests", "values", "motivations", "aboutText", "aboutGuidance"],
+  "required": [
+    "schemaVersion",
+    "approvedCharacteristics",
+    "communicationStyle",
+    "learningAttitude",
+    "interests",
+    "values",
+    "motivations",
+    "aboutText"
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": {
+      "const": 1
+    },
     "verifiedObservations": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Authoring-only: kept in the private source profile for regeneration and review, and stripped before publication."
     },
     "provisionalInterpretations": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Authoring-only: kept in the private source profile for regeneration and review, and stripped before publication."
     },
     "approvedCharacteristics": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "description"],
+        "required": [
+          "name",
+          "description"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "description": { "type": ["string", "null"] }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       }
     },
@@ -33,35 +63,80 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "description"],
+        "required": [
+          "name",
+          "description"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "description": { "type": ["string", "null"] }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       }
     },
-    "learningAttitude": { "type": ["string", "null"] },
+    "learningAttitude": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "interests": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "values": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "description"],
+        "required": [
+          "name",
+          "description"
+        ],
         "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "description": { "type": ["string", "null"] }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       }
     },
     "motivations": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
-    "aboutText": { "type": ["string", "null"], "description": "Approved About section text (150-200 words)." },
-    "aboutGuidance": { "type": ["string", "null"], "description": "Guidance for writing or regenerating the About section." }
+    "aboutText": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Approved About section text (150-200 words)."
+    },
+    "aboutGuidance": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Guidance for writing or regenerating the About section. Authoring-only: kept in the private source profile for regeneration and review, and stripped before publication."
+    }
   }
 }

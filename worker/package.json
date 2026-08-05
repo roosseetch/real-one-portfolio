@@ -10,7 +10,8 @@
     "build": "npm run config && wrangler deploy --dry-run --outdir=dist --config wrangler.generated.json",
     "deploy": "npm run config && wrangler deploy --config wrangler.generated.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "profile:fetch": "tsx ../scripts/fetch-profile.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.0.0",

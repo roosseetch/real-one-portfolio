@@ -70,6 +70,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The prompt's author context is built from the profile, which lives in
+      # the public content bucket rather than in the repository.
+      - name: Fetch the published profile
+        run: npm run profile:fetch
+
       # A deploy is the wrong moment to discover the Worker does not compile.
       # Both run before anything reaches Cloudflare.
       - name: Typecheck
