@@ -7,6 +7,7 @@
  * ever produce bad text — never a write to the wrong object.
  */
 import type { DraftRecord } from "../drafts/types";
+import { AUTHOR_CONTEXT } from "./author";
 import { RECORD_JSON_SCHEMA, parseRecord } from "./schema";
 
 
@@ -17,7 +18,9 @@ const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const MAX_ATTEMPTS = 3;
 
 const SYSTEM_PROMPT = [
-  "You turn a short personal note into a structured entry for someone's personal website.",
+  "You turn a short personal note into a structured entry for her personal website.",
+  "",
+  AUTHOR_CONTEXT,
   "",
   "Rules:",
   "- Use only what the note says. Never invent places, people, distances, times or achievements.",
@@ -28,7 +31,9 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 const EDIT_SYSTEM_PROMPT = [
-  "You are revising an entry for someone's personal website, following one instruction from its author.",
+  "You are revising an entry for her personal website, following one instruction from its author.",
+  "",
+  AUTHOR_CONTEXT,
   "",
   "Rules:",
   "- Change only what the instruction asks for. Every other field comes back untouched.",
