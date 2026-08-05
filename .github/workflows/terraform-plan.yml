@@ -71,10 +71,11 @@ jobs:
       - name: Initialize with the R2 state backend
         env:
           STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          PROJECT_SLUG: ${{ vars.PROJECT_SLUG }}
         run: |
           terraform init -input=false \
             -backend-config="bucket=${STATE_BUCKET}" \
-            -backend-config="key=production/terraform.tfstate" \
+            -backend-config="key=${PROJECT_SLUG}/production/terraform.tfstate" \
             -backend-config="region=auto" \
             -backend-config="skip_credentials_validation=true" \
             -backend-config="skip_region_validation=true" \
