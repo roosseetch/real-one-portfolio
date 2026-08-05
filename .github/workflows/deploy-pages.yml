@@ -31,6 +31,16 @@ jobs:
       - name: Install dependencies
         working-directory: site
         run: npm ci
+      # The profile is not in the repository — it is one person's details, and
+      # this repository is meant to be reusable. It lives in the public content
+      # bucket instead, so the build fetches it first. Public URLs only, so no
+      # credentials are needed here.
+      - name: Install root tooling
+        run: npm ci
+      - name: Fetch the published profile
+        env:
+          CONTENT_BASE_URL: ${{ vars.CONTENT_BASE_URL }}
+        run: npm run profile:fetch
       - name: Build site
         working-directory: site
         env:
