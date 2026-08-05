@@ -25,8 +25,8 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Task 11: Main stack — buckets, lifecycle, domains, DNS
 - [x] Task 12: Worker foundation in Terraform + Terraform CI workflows
 - [x] Checkpoint C: terraform apply succeeds, buckets/domains live
-      (the-root-domain active on Cloudflare; 4 buckets, both public custom
-      domains, 7-day lifecycle, Pages DNS; site live at https://the-root-domain)
+      (root domain active on Cloudflare; 4 buckets, both public custom
+      domains, 7-day lifecycle, Pages DNS; site live on the domain)
 
 ## Phase 4 — Telegram text-only publishing
 - [x] Task 13: Worker scaffold + wrangler template + generate-wrangler script
