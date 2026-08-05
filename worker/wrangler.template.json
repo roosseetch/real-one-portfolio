@@ -6,6 +6,8 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "//workers_dev": "Terraform owns this Worker's hostname, so Wrangler must not attach one. Left true, Wrangler refuses to deploy into an account with no workers.dev subdomain registered -- and registering one would publish the webhook at a second, unmanaged URL.",
+  "workers_dev": false,
   "observability": {
     "enabled": true
   },
