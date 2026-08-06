@@ -14,7 +14,9 @@ TELEGRAM_WEBHOOK_SECRET=
 TELEGRAM_ALLOWED_USER_IDS=
 
 # Fine-grained GitHub token with actions:write on this repository only, used to
-# dispatch the media processing workflow.
+# dispatch the media processing workflow. Stored as the repository secret
+# WORKER_DISPATCH_TOKEN, because GitHub refuses to store a secret whose name
+# begins with GITHUB_.
 GITHUB_DISPATCH_TOKEN=
 
 # Shared secret the media workflow signs its callback with. Must match the

@@ -10,7 +10,12 @@ name: Deploy Worker
 #
 # Repository secrets:
 #   CLOUDFLARE_API_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
-#   TELEGRAM_ALLOWED_USER_IDS, GITHUB_DISPATCH_TOKEN, CALLBACK_HMAC_SECRET
+#   TELEGRAM_ALLOWED_USER_IDS, WORKER_DISPATCH_TOKEN, CALLBACK_HMAC_SECRET
+#
+# WORKER_DISPATCH_TOKEN becomes the Worker's GITHUB_DISPATCH_TOKEN. The names
+# differ because GitHub reserves the GITHUB_ prefix for secret names and refuses
+# to store one, while Cloudflare has no such rule -- so the Worker keeps the
+# name that says what the token is for.
 #
 # The Worker's custom domain belongs to Terraform, but Terraform can only route
 # a hostname to a script that already exists. Run this workflow once, then set
@@ -98,7 +103,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           TELEGRAM_ALLOWED_USER_IDS: ${{ secrets.TELEGRAM_ALLOWED_USER_IDS }}
-          GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_DISPATCH_TOKEN }}
+          # See the note above: GitHub will not store a GITHUB_-prefixed secret.
+          GITHUB_DISPATCH_TOKEN: ${{ secrets.WORKER_DISPATCH_TOKEN }}
           CALLBACK_HMAC_SECRET: ${{ secrets.CALLBACK_HMAC_SECRET }}
         run: |
           jq -n \
