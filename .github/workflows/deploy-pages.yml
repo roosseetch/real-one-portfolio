@@ -53,7 +53,26 @@ jobs:
           # MEDIA_BASE_URL: public media bucket base URL. While unset the site
           # renders accessible placeholders instead of photos.
           VITE_MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
+          # AMPLITUDE_API_KEY: Amplitude's browser ingestion key. A repository
+          # variable rather than a secret because Vite inlines it into the
+          # bundle every visitor downloads — calling it a secret would only
+          # disguise how public it already is. Amplitude's Secret Key is a
+          # different value and must never appear here.
+          #
+          # Unset means no analytics: Vite inlines `undefined`, the init call is
+          # eliminated as dead code, and the SDK is dropped from the bundle
+          # entirely. That is quiet enough to look like working analytics, so
+          # the step below says which of the two happened.
+          VITE_AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY }}
         run: npm run build
+      - name: Report whether analytics shipped
+        working-directory: site
+        run: |
+          if grep -rqi amplitude dist/assets; then
+            echo "Amplitude is in the bundle; events will be sent."
+          else
+            echo "::warning::AMPLITUDE_API_KEY is not set, so the site ships without analytics and Amplitude will show no data."
+          fi
       # Pages drops the custom domain on some deploys unless the artifact
       # carries a CNAME. The value comes from a repository variable so no
       # domain is ever written into a tracked file.

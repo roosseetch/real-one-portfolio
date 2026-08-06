@@ -59,6 +59,14 @@ function webhookRequest(body: unknown, secret: string | null = SECRET) {
   });
 }
 
+/**
+ * Everything the request wrote apart from its own error log. The two live in
+ * the same bucket, so a test about drafts has to say which it means.
+ */
+const authored = () => [...storage.objects.keys()].filter((key) => !key.startsWith("logs/"));
+
+const errorLogs = () => [...storage.objects.keys()].filter((key) => key.startsWith("logs/"));
+
 function messageFrom(id: number): TelegramUpdate {
   return {
     update_id: 1,
@@ -86,6 +94,7 @@ describe("POST /telegram/webhook", () => {
     const env = testEnv({ TELEGRAM_WEBHOOK_SECRET: undefined });
     expect((await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID), ""), env, ctx())).status).toBe(401);
     expect((await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), env, ctx())).status).toBe(401);
+    expect(errorLogs()).toEqual([]);
   });
 
   it("does not advertise an authentication scheme", async () => {
@@ -97,7 +106,7 @@ describe("POST /telegram/webhook", () => {
     const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv(), ctx());
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
-    expect([...storage.objects.keys()]).toEqual([expect.stringMatching(/^drafts\/[0-9a-z]{16}\/draft\.json$/)]);
+    expect(authored()).toEqual([expect.stringMatching(/^drafts\/[0-9a-z]{16}\/draft\.json$/)]);
   });
 
   // Every case below answers 200 on purpose. A non-2xx would have Telegram
@@ -148,7 +157,7 @@ describe("POST /telegram/webhook", () => {
     storage.failNextPut();
     const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv(), ctx());
     expect(response.status).toBe(503);
-    expect(storage.objects.size).toBe(0);
+    expect(authored()).toEqual([]);
   });
 
   it("ignores an update carrying no sender", async () => {
@@ -158,6 +167,68 @@ describe("POST /telegram/webhook", () => {
     };
     const response = await worker.fetch(webhookRequest(channelPost), testEnv(), ctx());
     expect(response.status).toBe(200);
+  });
+});
+
+/**
+ * Log Explorer is not enabled on this account, so the bucket is the only place
+ * a past failure can be read from. What matters is that it holds the failures
+ * and nothing else: an object per stranger's probe would be a way to fill it.
+ */
+describe("error log", () => {
+  it("does not persist a missing callback-secret diagnostic for arbitrary callers", async () => {
+    const response = await worker.fetch(
+      new Request("https://worker.example/callbacks/media-processed", { method: "POST" }),
+      testEnv({ CALLBACK_HMAC_SECRET: undefined }),
+      ctx(),
+    );
+
+    expect(response.status).toBe(401);
+    expect(errorLogs()).toEqual([]);
+  });
+
+  it("records a failure with the reason attached", async () => {
+    storage.failNextPut();
+    await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), testEnv(), ctx());
+
+    expect(errorLogs()).toEqual([expect.stringMatching(/^logs\/\d{4}-\d{2}-\d{2}\/\d{9}-[0-9a-z]{8}\.json$/)]);
+
+    const written = JSON.parse(storage.objects.get(errorLogs()[0]) as string);
+    expect(written).toMatchObject({ method: "POST", path: "/telegram/webhook", status: 503 });
+    expect(written.entries).toContainEqual(
+      expect.objectContaining({ level: "error", message: expect.stringContaining("Could not store the draft") }),
+    );
+  });
+
+  it("writes nothing for a request that only warned", async () => {
+    // An unparseable body warns and is otherwise ignored. Anyone who finds this
+    // URL can send one; storing each would hand them the bucket.
+    const response = await worker.fetch(webhookRequest("{not json"), testEnv(), ctx());
+
+    expect(response.status).toBe(200);
+    expect(errorLogs()).toEqual([]);
+  });
+
+  it("writes nothing for a request that succeeded", async () => {
+    await worker.fetch(new Request("https://worker.example/", { method: "POST" }), testEnv(), ctx());
+    expect(errorLogs()).toEqual([]);
+  });
+
+  it("turns an uncaught throw into a 500 that says why", async () => {
+    // A thrown error would otherwise reach the platform, which answers with its
+    // own page and takes the reason down with the isolate.
+    const exploding = testEnv();
+    Object.defineProperty(exploding, "TELEGRAM_WEBHOOK_SECRET", {
+      get() {
+        throw new Error("binding exploded");
+      },
+    });
+
+    const response = await worker.fetch(webhookRequest(messageFrom(ALLOWED_ID)), exploding, ctx());
+
+    expect(response.status).toBe(500);
+    const written = JSON.parse(storage.objects.get(errorLogs()[0]) as string);
+    expect(written.entries[0].message).toContain("binding exploded");
   });
 });
 

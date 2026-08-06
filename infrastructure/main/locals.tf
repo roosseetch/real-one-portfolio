@@ -10,7 +10,8 @@ locals {
 
   serve_site_from_apex = var.site_subdomain == ""
 
-  draft_retention_seconds = var.draft_retention_days * 24 * 60 * 60
+  draft_retention_seconds     = var.draft_retention_days * 24 * 60 * 60
+  error_log_retention_seconds = var.error_log_retention_days * 24 * 60 * 60
 
   # Published by GitHub for Pages custom domains.
   github_pages_ipv4 = [

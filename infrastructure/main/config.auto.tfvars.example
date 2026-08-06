@@ -15,8 +15,9 @@ root_domain           = "<example.com>"
 # media_subdomain   = "media"
 # worker_subdomain  = "worker"
 
-# draft_retention_days = 7
-# r2_location_hint     = "weur"
+# draft_retention_days     = 7
+# error_log_retention_days = 14
+# r2_location_hint         = "weur"
 
 # Flip to true only after Wrangler has deployed the Worker once.
 # worker_enabled = true

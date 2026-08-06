@@ -1,4 +1,12 @@
 import { handleMediaProcessed } from "./callbacks/media-processed";
+import {
+  beginRequest,
+  flush,
+  installConsoleCapture,
+  recordException,
+  runWithLog,
+  trackDeferred,
+} from "./logging/error-log";
 import { handleTelegramWebhook } from "./telegram/webhook";
 
 export interface Env {
@@ -23,24 +31,50 @@ export interface Env {
   CALLBACK_HMAC_SECRET: string;
 }
 
+// Once per isolate, before any request can log anything.
+installConsoleCapture();
+
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const { pathname } = new URL(request.url);
+
+  if (request.method === "POST" && pathname === "/telegram/webhook") {
+    return handleTelegramWebhook(request, env, ctx);
+  }
+
+  if (request.method === "POST" && pathname === "/callbacks/media-processed") {
+    return handleMediaProcessed(request, env);
+  }
+
+  // Anything else is not part of the contract. Say nothing useful about what
+  // the Worker is or which routes exist.
+  return new Response("Not found", { status: 404 });
+}
+
 /**
  * The Worker exists only for authoring. Visitors never reach it: the site
  * reads published JSON and media straight from public R2.
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const { pathname } = new URL(request.url);
+    const log = beginRequest(request);
 
-    if (request.method === "POST" && pathname === "/telegram/webhook") {
-      return handleTelegramWebhook(request, env, ctx);
-    }
+    return runWithLog(log, async () => {
+      const deferred = trackDeferred(ctx);
+      let response: Response;
 
-    if (request.method === "POST" && pathname === "/callbacks/media-processed") {
-      return handleMediaProcessed(request, env);
-    }
+      try {
+        response = await route(request, env, deferred.context);
+      } catch (error) {
+        // Without this the platform answers with its own error page and the
+        // reason dies with the isolate, which is the case worth having a log
+        // for at all. Telegram sees a 500 and redelivers, which is right: an
+        // unplanned throw is exactly the kind of fault a retry can survive.
+        recordException(error);
+        response = new Response("Internal error", { status: 500 });
+      }
 
-    // Anything else is not part of the contract. Say nothing useful about what
-    // the Worker is or which routes exist.
-    return new Response("Not found", { status: 404 });
+      ctx.waitUntil(deferred.settled().then(() => flush(env.PRIVATE_BUCKET, log, response.status)));
+      return response;
+    });
   },
 } satisfies ExportedHandler<Env>;
