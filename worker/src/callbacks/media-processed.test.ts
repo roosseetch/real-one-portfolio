@@ -191,6 +191,51 @@ describe("the ten checks of spec §13.3", () => {
     ).toBe(400);
   });
 
+  it("8. refuses a duplicate media id", async () => {
+    const draft = await processingDraft();
+    const item = {
+      sourceId: "media0",
+      type: "image",
+      src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1600.webp`,
+    };
+    const body = payload(draft, { media: [item, item] });
+
+    expect((await handleMediaProcessed(await callback(body), env())).status).toBe(400);
+  });
+
+  it("8. refuses a callback that omits one of the originals", async () => {
+    const draft = await processingDraft();
+    await saveDraft(storage.bucket, {
+      ...draft,
+      originals: [
+        ...draft.originals,
+        {
+          mediaId: "media1",
+          type: "image",
+          fileId: "f1",
+          key: `originals/${draft.activityId}/media1.jpg`,
+        },
+      ],
+    });
+
+    expect((await handleMediaProcessed(await callback(payload(draft)), env())).status).toBe(400);
+  });
+
+  it("8. refuses a media type that does not match its original", async () => {
+    const draft = await processingDraft();
+    const body = payload(draft, {
+      media: [
+        {
+          sourceId: "media0",
+          type: "video",
+          src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0.mp4`,
+        },
+      ],
+    });
+
+    expect((await handleMediaProcessed(await callback(body), env())).status).toBe(400);
+  });
+
   it("9. refuses a URL on another host", async () => {
     // A signed callback naming an attacker's host would otherwise put their
     // images on her site.

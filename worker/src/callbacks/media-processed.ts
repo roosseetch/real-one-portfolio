@@ -124,9 +124,19 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   //    guessable, and this check exists to bind a callback to its dispatch.
   if (draft.job === null || !timingSafeEqual(body.jobId, draft.job.jobToken)) return refuse(400);
 
-  // 8. Media ids match the originals this draft actually holds.
-  const known = new Set(draft.originals.map((original) => original.mediaId));
-  if (body.media.length === 0 || !body.media.every((item) => known.has(item.sourceId))) return refuse(400);
+  // 8. Media ids match the originals this draft actually holds. This is an
+  //    exact one-to-one match: accepting a subset would silently drop an
+  //    approved picture, while accepting a duplicate could publish it twice.
+  const originals = new Map(draft.originals.map((original) => [original.mediaId, original]));
+  const received = new Set(body.media.map((item) => item.sourceId));
+  if (
+    body.media.length === 0 ||
+    body.media.length !== originals.size ||
+    received.size !== body.media.length ||
+    !body.media.every((item) => originals.get(item.sourceId)?.type === item.type)
+  ) {
+    return refuse(400);
+  }
 
   // 9. Every URL is on the configured media domain. A signed callback naming
   //    another host would otherwise publish someone else's images on her site.
