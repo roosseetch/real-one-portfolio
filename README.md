@@ -55,3 +55,33 @@ To unregister: `curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteW
 In production these values are Worker secrets (`wrangler secret put NAME`), set
 by the deploy workflow from GitHub secrets. `worker/.dev.vars` is local only and
 gitignored.
+
+## Reading Worker errors
+
+Log Explorer is a paid add-on and is deliberately not enabled, so the Worker
+writes its own errors to the private bucket instead: one JSON object per failed
+request under `logs/<day>/`, holding the request line, the status, and the
+messages leading up to the failure. Warnings alone never produce an object —
+otherwise anyone who found the webhook URL could fill the bucket with them.
+
+```
+npm run logs:read              # 10 most recent failures
+npm run logs:read -- -n 40     # more of them
+npm run logs:read -- -d 2026-08-06
+```
+
+It reads with the `R2_PRIVATE_RO` credentials from `infrastructure/.env`, so it
+cannot change anything. A lifecycle rule expires the logs after
+`error_log_retention_days` (14 by default). `wrangler tail` is still the better
+tool while a problem is happening; this is for the ones that already happened.
+
+## Analytics
+
+Amplitude runs only when `AMPLITUDE_API_KEY` is set as a repository variable —
+its browser ingestion key, not the Secret Key. It is a variable rather than a
+secret because Vite inlines it into the bundle every visitor downloads.
+
+With it unset, the init call is eliminated as dead code and the SDK never
+reaches the bundle, so Amplitude simply shows nothing. The Pages workflow greps
+the built assets and warns when that happens, because the two outcomes are
+otherwise indistinguishable from the outside.

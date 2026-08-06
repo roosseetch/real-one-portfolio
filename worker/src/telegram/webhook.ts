@@ -92,7 +92,9 @@ export async function authorizeWebhook(request: Request, env: TelegramEnv): Prom
     // Worth one line: it can only happen in a deployment where every delivery
     // fails anyway, and it turns an otherwise mystifying blanket 401 into a
     // one-line diagnosis.
-    console.error("TELEGRAM_WEBHOOK_SECRET is not configured; rejecting every Telegram update");
+    // A warning stays visible in `wrangler tail` without creating one durable
+    // error-log object per unauthenticated request during a misconfiguration.
+    console.warn("TELEGRAM_WEBHOOK_SECRET is not configured; rejecting every Telegram update");
     return { status: "unauthenticated" };
   }
 
@@ -120,7 +122,9 @@ export async function authorizeWebhook(request: Request, env: TelegramEnv): Prom
 
   const allowed = parseAllowedUserIds(env.TELEGRAM_ALLOWED_USER_IDS);
   if (allowed.size === 0) {
-    console.error("TELEGRAM_ALLOWED_USER_IDS is empty; no sender can author content");
+    // This can be reached by every Telegram user while the deployment is
+    // misconfigured, so it must not make each ignored update persist a log.
+    console.warn("TELEGRAM_ALLOWED_USER_IDS is empty; no sender can author content");
   }
   if (!allowed.has(sender)) return { status: "ignored", reason: "sender-not-allowed" };
 

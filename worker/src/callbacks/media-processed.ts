@@ -77,7 +77,9 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   if (!env.CALLBACK_HMAC_SECRET) {
     // Fail closed, and say so once: an unconfigured secret means every callback
     // is refused, which is otherwise a mystifying 401.
-    console.error("CALLBACK_HMAC_SECRET is not configured; refusing every callback");
+    // Keep this visible to a live tail without allowing arbitrary callers to
+    // create a durable error-log object for every request.
+    console.warn("CALLBACK_HMAC_SECRET is not configured; refusing every callback");
     return refuse(401);
   }
 

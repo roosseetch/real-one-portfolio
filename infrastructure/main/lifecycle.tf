@@ -28,6 +28,32 @@ resource "cloudflare_r2_bucket_lifecycle" "private" {
         }
       }
     },
+    # The Worker's own error logs. Kept longer than drafts because a fault is
+    # usually noticed after the fact, but still swept up: nothing here is worth
+    # storing forever, and an unbounded prefix is how a private bucket grows
+    # without anyone deciding that it should.
+    {
+      id      = "expire-error-logs"
+      enabled = true
+
+      conditions = {
+        prefix = "logs/"
+      }
+
+      delete_objects_transition = {
+        condition = {
+          type    = "Age"
+          max_age = local.error_log_retention_seconds
+        }
+      }
+
+      abort_multipart_uploads_transition = {
+        condition = {
+          type    = "Age"
+          max_age = 86400
+        }
+      }
+    },
     {
       id      = "expire-originals"
       enabled = true

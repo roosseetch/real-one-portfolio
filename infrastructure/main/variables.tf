@@ -69,6 +69,17 @@ variable "draft_retention_days" {
   }
 }
 
+variable "error_log_retention_days" {
+  description = "How long the Worker's error logs survive in the private bucket. Longer than drafts: a fault is often only noticed well after the draft that hit it has gone."
+  type        = number
+  default     = 14
+
+  validation {
+    condition     = var.error_log_retention_days >= 1 && var.error_log_retention_days <= 365
+    error_message = "error_log_retention_days must be between 1 and 365."
+  }
+}
+
 variable "worker_enabled" {
   description = "Attach the Worker custom domain. Leave false until Wrangler has deployed the Worker once, because the domain cannot bind to a script that does not exist yet."
   type        = bool
