@@ -99,8 +99,3 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
-        # This repository's Pages backend regularly needs just under ten
-        # minutes. The action's ten-minute default turns normal latency into a
-        # failed deployment at the finish line, so leave a safe margin.
-        with:
-          timeout: 900000
