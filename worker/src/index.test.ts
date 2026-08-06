@@ -233,6 +233,20 @@ describe("error log", () => {
 });
 
 describe("routing", () => {
+  it("answers the analytics preflight for the configured site", async () => {
+    const response = await worker.fetch(
+      new Request("https://worker.example/analytics", {
+        method: "OPTIONS",
+        headers: { Origin: "https://site.example" },
+      }),
+      testEnv({ SITE_BASE_URL: "https://site.example", AMPLITUDE_API_KEY: "public-project-key" }),
+      ctx(),
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://site.example");
+  });
+
   it("does not answer GET on the webhook path", async () => {
     const response = await worker.fetch(new Request(WEBHOOK_URL), testEnv(), ctx());
     expect(response.status).toBe(404);

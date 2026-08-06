@@ -64,6 +64,10 @@ jobs:
           # entirely. That is quiet enough to look like working analytics, so
           # the step below says which of the two happened.
           VITE_AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY }}
+          # First-party relay avoids browser privacy tools dropping requests to
+          # api2.amplitude.com. Unset keeps the SDK's direct endpoint for
+          # deployments that do not run the Worker.
+          VITE_AMPLITUDE_SERVER_URL: ${{ vars.AMPLITUDE_SERVER_URL }}
         run: npm run build
       - name: Report whether analytics shipped
         working-directory: site

@@ -6,7 +6,8 @@ name: Deploy Worker
 #
 # Repository variables:
 #   CLOUDFLARE_ACCOUNT_ID, PROJECT_SLUG, WORKER_NAME, CONTENT_BASE_URL,
-#   MEDIA_BASE_URL, SITE_BASE_URL, and optionally MEDIA_WORKFLOW_FILE
+#   MEDIA_BASE_URL, SITE_BASE_URL, AMPLITUDE_API_KEY, and optionally
+#   MEDIA_WORKFLOW_FILE
 #
 # Repository secrets:
 #   CLOUDFLARE_API_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
@@ -61,6 +62,10 @@ jobs:
       MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
       SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
       MEDIA_WORKFLOW_FILE: ${{ vars.MEDIA_WORKFLOW_FILE || 'process-media.yml' }}
+      # Public browser ingestion key, used to scope the first-party relay to
+      # this project. It is intentionally the same repository variable the
+      # Pages build embeds in the browser bundle.
+      AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY }}
       # Already qualified as owner/repo, so the Worker never has to be told
       # which repository it belongs to.
       GITHUB_REPOSITORY: ${{ github.repository }}

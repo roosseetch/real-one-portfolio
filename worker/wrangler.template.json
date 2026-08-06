@@ -25,6 +25,7 @@
     "binding": "AI"
   },
   "vars": {
+    "AMPLITUDE_API_KEY": "__AMPLITUDE_API_KEY__",
     "CONTENT_BASE_URL": "__CONTENT_BASE_URL__",
     "GITHUB_REPOSITORY": "__GITHUB_REPOSITORY__",
     "MEDIA_BASE_URL": "__MEDIA_BASE_URL__",
