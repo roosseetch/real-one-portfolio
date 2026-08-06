@@ -85,3 +85,9 @@ With it unset, the init call is eliminated as dead code and the SDK never
 reaches the bundle, so Amplitude simply shows nothing. The Pages workflow greps
 the built assets and warns when that happens, because the two outcomes are
 otherwise indistinguishable from the outside.
+
+The SDK first uses Amplitude's normal ingestion endpoint directly. A configured
+`AMPLITUDE_SERVER_URL` is used only when that browser request is rejected, as
+can happen with a privacy extension or network block. Normal Amplitude HTTP
+responses—including rate limits and server errors—do not use the Worker
+fallback, so ordinary analytics traffic does not consume its request allowance.

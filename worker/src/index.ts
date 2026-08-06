@@ -57,8 +57,8 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 }
 
 /**
- * The Worker handles authoring plus the site's narrow first-party analytics
- * relay. Site content and media still come straight from public R2.
+ * The Worker handles authoring plus the site's analytics fallback relay. Site
+ * content and media still come straight from public R2.
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

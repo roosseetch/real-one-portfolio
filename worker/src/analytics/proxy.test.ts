@@ -23,7 +23,7 @@ function request(method = "POST", overrides: { origin?: string; body?: string } 
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("Amplitude first-party proxy", () => {
+describe("Amplitude fallback proxy", () => {
   it("answers the browser preflight for the configured site only", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const result = await handleAnalyticsProxy(request("OPTIONS"), env);

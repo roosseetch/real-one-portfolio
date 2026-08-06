@@ -1,11 +1,9 @@
 /**
- * First-party relay for Amplitude Browser SDK events.
+ * First-party fallback relay for Amplitude Browser SDK events.
  *
- * Browsers and privacy extensions commonly block direct requests to
- * api2.amplitude.com. The public site therefore sends the same HTTP V2 payload
- * to this Worker's domain and this route forwards it unchanged. The API key is
- * public by design, but checking both it and the site origin keeps this from
- * becoming a generic relay for other Amplitude projects.
+ * The browser tries api2.amplitude.com first and calls this route only when
+ * that direct request is rejected. Checking both the public project key and
+ * site origin keeps this from becoming a generic relay.
  */
 
 const AMPLITUDE_HTTP_V2 = "https://api2.amplitude.com/2/httpapi";
