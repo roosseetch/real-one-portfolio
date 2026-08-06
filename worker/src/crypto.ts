@@ -21,3 +21,23 @@ export function timingSafeEqual(a: string, b: string): boolean {
   for (let i = 0; i < left.length; i++) difference |= left[i] ^ right[i];
   return difference === 0;
 }
+
+/**
+ * HMAC-SHA256 as lowercase hex.
+ *
+ * Used to authenticate the media callback: GitHub Actions signs
+ * `timestamp.nonce.body` with a secret both sides hold, and nothing else about
+ * the request is trusted until that matches.
+ */
+export async function hmacSha256Hex(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}

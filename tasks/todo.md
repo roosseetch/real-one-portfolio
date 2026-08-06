@@ -43,7 +43,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 - [x] Task 21: Photo intake + originals in private R2 + media preview
 - [ ] Task 22: GitHub Actions dispatch + process-media workflow — sanitization
 - [x] Task 23: Derivatives, validation, public upload
-- [ ] Task 24: HMAC callback endpoint + media publication
+- [x] Task 24: HMAC callback endpoint + media publication
 - [ ] Checkpoint E: photo publication end-to-end, decoy-only metadata live
 
 ## Phase 6 — Video pipeline

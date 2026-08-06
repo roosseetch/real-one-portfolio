@@ -21,6 +21,8 @@ name: Process media
 #     — write on the public media bucket, and nothing else. No access to the
 #       content bucket or to state: this job publishes pictures, and must not
 #       be able to touch the manifest that decides what the site shows.
+#   CALLBACK_HMAC_SECRET
+#     — shared with the Worker, and the only reason it believes this callback.
 
 on:
   workflow_dispatch:
@@ -53,6 +55,8 @@ jobs:
       AWS_REGION: auto
       PRIVATE_BUCKET: ${{ vars.PROJECT_SLUG }}-private
       MEDIA_BUCKET: ${{ vars.PROJECT_SLUG }}-media
+      MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
+      WORKER_BASE_URL: ${{ vars.WORKER_BASE_URL }}
       DRAFT_ID: ${{ inputs.draftId }}
     steps:
       - uses: actions/checkout@v4
@@ -179,9 +183,61 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Uploading the derivatives and calling the Worker back are the next two
-      # tasks. Until then the job proves the sanitisation itself, and the runner
-      # takes every original with it when it goes.
+      # The Worker publishes the record; this job only reports what it produced.
+      # That split is deliberate: the manifest decides what the site shows, and
+      # a runner holding media credentials must not be able to write it.
+      - name: Tell the Worker the media is ready
+        env:
+          CALLBACK_HMAC_SECRET: ${{ secrets.CALLBACK_HMAC_SECRET }}
+          JOB_TOKEN: ${{ inputs.jobToken }}
+        run: |
+          activity=$(jq -r '.activityId' "$WORK/draft.json")
+
+          # One entry per source id, pointing at the widest derivative and the
+          # thumbnail. jq builds it so no filename is ever pasted into a shell
+          # word.
+          jq -n \
+            --arg draftId "$DRAFT_ID" \
+            --arg jobId "$JOB_TOKEN" \
+            --arg processedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg base "${MEDIA_BASE_URL%/}/media/activity-${activity}" \
+            --slurpfile manifest "$WORK/public/manifest.json" \
+            '{
+              draftId: $draftId,
+              jobId: $jobId,
+              processedAt: $processedAt,
+              media: ($manifest[0] | to_entries | map({
+                sourceId: .key,
+                type: "image",
+                src: ($base + "/" + (.value | map(select(.format == "webp")) | max_by(.width) | .file)),
+                thumbnail: ($base + "/" + (.value | map(select(.format == "webp")) | min_by(.width) | .file)),
+                width: (.value | map(select(.format == "webp")) | max_by(.width) | .width),
+                height: (.value | map(select(.format == "webp")) | max_by(.width) | .height)
+              }))
+            }' > "$WORK/callback.json"
+
+          timestamp=$(( $(date +%s) * 1000 ))
+          nonce="$(openssl rand -hex 16)"
+          # Signed over exactly the bytes that are sent, in the order spec §13.3
+          # fixes: timestamp "." nonce "." raw body. Reading the file for both
+          # the signature and the request is what keeps them identical.
+          signature=$(printf '%s.%s.' "$timestamp" "$nonce" \
+            | cat - "$WORK/callback.json" \
+            | openssl dgst -sha256 -hmac "$CALLBACK_HMAC_SECRET" -hex \
+            | awk '{print $NF}')
+
+          # Status only. The body names the draft and the job token.
+          status=$(curl -sS -o "$WORK/callback-response.json" -w '%{http_code}' \
+            -X POST "${WORKER_BASE_URL%/}/callbacks/media-processed" \
+            -H 'content-type: application/json' \
+            -H "X-Callback-Timestamp: $timestamp" \
+            -H "X-Callback-Nonce: $nonce" \
+            -H "X-Callback-Signature: $signature" \
+            --data-binary @"$WORK/callback.json")
+
+          echo "worker answered $status"
+          [ "$status" = "200" ] || exit 1
+
       - name: Confirm nothing was left behind
         if: always()
         run: rm -rf "$WORK"

@@ -1,3 +1,4 @@
+import { handleMediaProcessed } from "./callbacks/media-processed";
 import { handleTelegramWebhook } from "./telegram/webhook";
 
 export interface Env {
@@ -35,7 +36,7 @@ export default {
     }
 
     if (request.method === "POST" && pathname === "/callbacks/media-processed") {
-      return new Response("Media callback not implemented yet", { status: 501 });
+      return handleMediaProcessed(request, env);
     }
 
     // Anything else is not part of the contract. Say nothing useful about what
