@@ -505,10 +505,10 @@ describe("publishing a draft with media", () => {
     await handlePreviewCallback(press(draft, "p"), env());
 
     const dispatch = calls.find((c) => c.method === "dispatches");
+    expect(Object.keys(dispatch?.body as object).sort()).toEqual(["inputs", "ref"]);
     expect(Object.keys(dispatch?.body.inputs as object).sort()).toEqual(["draftId", "jobToken"]);
     const body = JSON.stringify(dispatch?.body);
     expect(body).not.toContain("at the campus");
-    expect(body).not.toContain("99");
   });
 
   it("tells the author the media is being processed", async () => {

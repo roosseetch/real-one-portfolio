@@ -1,4 +1,5 @@
 import { handleMediaProcessed } from "./callbacks/media-processed";
+import { handleAnalyticsProxy } from "./analytics/proxy";
 import {
   beginRequest,
   flush,
@@ -22,6 +23,7 @@ export interface Env {
   SITE_BASE_URL: string;
   GITHUB_REPOSITORY: string;
   MEDIA_WORKFLOW_FILE: string;
+  AMPLITUDE_API_KEY: string;
 
   // Secrets, set with `wrangler secret put` and never in any config file.
   TELEGRAM_BOT_TOKEN: string;
@@ -45,14 +47,18 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return handleMediaProcessed(request, env);
   }
 
+  if ((request.method === "POST" || request.method === "OPTIONS") && pathname === "/analytics") {
+    return handleAnalyticsProxy(request, env);
+  }
+
   // Anything else is not part of the contract. Say nothing useful about what
   // the Worker is or which routes exist.
   return new Response("Not found", { status: 404 });
 }
 
 /**
- * The Worker exists only for authoring. Visitors never reach it: the site
- * reads published JSON and media straight from public R2.
+ * The Worker handles authoring plus the site's narrow first-party analytics
+ * relay. Site content and media still come straight from public R2.
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

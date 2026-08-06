@@ -9,7 +9,13 @@ export function initializeAnalytics() {
   const apiKey = import.meta.env.VITE_AMPLITUDE_API_KEY;
   if (!apiKey) return;
 
+  const serverUrl = import.meta.env.VITE_AMPLITUDE_SERVER_URL;
+
   amplitude.init(apiKey, {
+    ...(serverUrl ? { serverUrl } : {}),
+    // Local settings are enough for this small site. Avoid a second Amplitude
+    // hostname that privacy tools can block while the event relay succeeds.
+    remoteConfig: { fetchRemoteConfig: false },
     autocapture: {
       attribution: true,
       fileDownloads: true,
