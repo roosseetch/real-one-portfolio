@@ -62,9 +62,8 @@ jobs:
       MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
       SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
       MEDIA_WORKFLOW_FILE: ${{ vars.MEDIA_WORKFLOW_FILE || 'process-media.yml' }}
-      # Public browser ingestion key, used to scope the first-party relay to
-      # this project. It is intentionally the same repository variable the
-      # Pages build embeds in the browser bundle.
+      # Public browser ingestion key, used to scope the fallback relay to this
+      # project. It is the same variable embedded in the Pages bundle.
       AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY }}
       # Already qualified as owner/repo, so the Worker never has to be told
       # which repository it belongs to.
