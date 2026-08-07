@@ -1,21 +1,9 @@
 import { AmplitudeBrowser } from "@amplitude/analytics-browser";
 
-type TransportProvider = AmplitudeBrowser["config"]["transportProvider"];
+import { trackEngagement } from "./engagement";
 
-function withBlockedRequestFallback(
-  direct: TransportProvider,
-  relayUrl: string,
-): TransportProvider {
-  return {
-    async send(serverUrl, payload, enableRequestBodyCompression) {
-      try {
-        return await direct.send(serverUrl, payload, enableRequestBodyCompression);
-      } catch {
-        return direct.send(relayUrl, payload, enableRequestBodyCompression);
-      }
-    },
-  };
-}
+type TransportProvider = AmplitudeBrowser["config"]["transportProvider"];
+type Payload = Parameters<TransportProvider["send"]>[1];
 
 /**
  * Starts Amplitude only when a project API key is supplied at build time.
@@ -27,8 +15,54 @@ export function initializeAnalytics() {
   if (!apiKey) return;
 
   const relayUrl = import.meta.env.VITE_AMPLITUDE_SERVER_URL;
+
+  // Transport state, kept here rather than inside the wrapper so the unload
+  // path can set it whether or not the wrapper ever got installed.
+  let blocked = false;
+  let unloading = false;
+
+  /**
+   * sendBeacon is the only upload that survives a page being torn down, and the
+   * summary event that makes a session's length truthful is sent exactly then.
+   * A JSON content type would make this a preflighted request, and a preflight
+   * during unload is not reliably delivered; text/plain keeps it a simple one.
+   * Neither Amplitude's ingestion API nor the Worker relay reads the header.
+   */
+  function sendViaBeacon(url: string, payload: Payload): null {
+    navigator.sendBeacon(url, new Blob([JSON.stringify(payload)], { type: "text/plain" }));
+    // A beacon only ever confirms that the browser queued the request, never
+    // that it landed, so null—"outcome unknown"—is the truthful answer. The SDK
+    // takes it as reason to drop the batch rather than retry it, which is what
+    // this page wants: there is no next attempt once it has been torn down.
+    return null;
+  }
+
+  function withRelayFallback(direct: TransportProvider, relay: string | undefined): TransportProvider {
+    return {
+      async send(serverUrl, payload, enableRequestBodyCompression) {
+        if (unloading) return sendViaBeacon(blocked && relay ? relay : serverUrl, payload);
+        if (blocked && relay) return direct.send(relay, payload, enableRequestBodyCompression);
+
+        try {
+          return await direct.send(serverUrl, payload, enableRequestBodyCompression);
+        } catch (error) {
+          if (!relay) throw error;
+          // An extension or DNS block rejects the request outright instead of
+          // answering it, and will reject every later batch the same way. Latch
+          // so the rest of the visit stops paying for the doomed attempt.
+          blocked = true;
+          return direct.send(relay, payload, enableRequestBodyCompression);
+        }
+      },
+    };
+  }
+
   const amplitude = new AmplitudeBrowser();
   const initialization = amplitude.init(apiKey, {
+    // Ten seconds rather than the default one. A visit's engagement events then
+    // coalesce into a handful of uploads, which matters because an ad-blocked
+    // visitor's uploads each cost a Worker invocation on the relay.
+    flushIntervalMillis: 10_000,
     // Local settings are enough for this small site. Do not fetch a second
     // Amplitude hostname for settings that are already fixed here.
     remoteConfig: { fetchRemoteConfig: false },
@@ -38,20 +72,36 @@ export function initializeAnalytics() {
       formInteractions: false,
       pageViews: true,
       sessions: true,
-      elementInteractions: false,
+      elementInteractions: true,
       networkTracking: false,
       webVitals: false,
       frustrationInteractions: false
     }
   });
 
-  if (relayUrl) {
-    void initialization.promise.then(
-      () => {
-        const direct = amplitude.config.transportProvider;
-        amplitude.config.transportProvider = withBlockedRequestFallback(direct, relayUrl);
-      },
-      () => undefined,
-    );
-  }
+  const install = () => {
+    try {
+      const config = amplitude.config;
+      config.transportProvider = withRelayFallback(config.transportProvider, relayUrl);
+    } catch {
+      // No config means init never got far enough to have a transport to wrap.
+    }
+  };
+  // Install on both settle paths. Handling only fulfilment left a failed init
+  // with no fallback and no beacon, silently.
+  void initialization.promise.then(install, install);
+
+  window.addEventListener("pageshow", (event) => {
+    // Restored from the back-forward cache: the page is live again, so undo the
+    // one-way switch to beacons that pagehide made.
+    if (event.persisted) unloading = false;
+  });
+
+  trackEngagement({
+    track: (eventType, properties) => void amplitude.track(eventType, properties),
+    leaving: () => {
+      unloading = true;
+    },
+    flush: () => void amplitude.flush(),
+  });
 }

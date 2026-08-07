@@ -149,3 +149,18 @@ The SDK first uses Amplitude's normal ingestion endpoint directly. A configured
 can happen with a privacy extension or network block. Normal Amplitude HTTP
 responses—including rate limits and server errors—do not use the Worker
 fallback, so ordinary analytics traffic does not consume its request allowance.
+Once a direct request has been rejected the site stops retrying it for the rest
+of the visit: the block will reject every later batch too, and one wasted
+request per batch is worth avoiding.
+
+Amplitude measures a session as the gap between its first and last event, so a
+site that reports everything at load and nothing afterwards records every
+visitor as a 0s session however long they stayed. `engagement.ts` therefore
+sends up to four scroll-depth milestones and one `page_engaged` summary as the
+visitor leaves, carrying the time the tab was actually on screen, how far down
+they got, and which sections they saw. That last event is deliberately the only
+end-of-visit signal: a periodic heartbeat would report the same thing but bill
+the relay one Worker invocation per interval for every ad-blocked visitor. For
+the same reason uploads are batched over ten seconds rather than the SDK's
+default one, and the final one goes out through `sendBeacon`, which is the only
+transport that survives the page being torn down.

@@ -38,17 +38,42 @@ function response(status: number, origin: string | null, body = ""): Response {
   return new Response(status === 204 ? null : body, { status, headers });
 }
 
-function validPayload(raw: string, apiKey: string): boolean {
+interface AmplitudePayload {
+  api_key: string;
+  events: unknown[];
+}
+
+function parsePayload(raw: string, apiKey: string): AmplitudePayload | null {
   let payload: unknown;
   try {
     payload = JSON.parse(raw);
   } catch {
-    return false;
+    return null;
   }
 
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return false;
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
   const candidate = payload as { api_key?: unknown; events?: unknown };
-  return candidate.api_key === apiKey && Array.isArray(candidate.events) && candidate.events.length > 0;
+  if (candidate.api_key !== apiKey) return null;
+  if (!Array.isArray(candidate.events) || candidate.events.length === 0) return null;
+  return candidate as AmplitudePayload;
+}
+
+/**
+ * Amplitude resolves country and city from whichever address opened the
+ * connection, which for a relayed event is a Cloudflare one rather than the
+ * visitor's—and it ignores X-Forwarded-For. Its HTTP V2 API does read a
+ * per-event `ip`, so carry the visitor's address there. A direct request needs
+ * nothing: it already arrives from the visitor's own connection.
+ */
+function withVisitorIp(payload: AmplitudePayload, clientIp: string | null): string {
+  if (clientIp) {
+    for (const event of payload.events) {
+      if (typeof event !== "object" || event === null || Array.isArray(event)) continue;
+      const record = event as { ip?: unknown };
+      if (record.ip === undefined) record.ip = clientIp;
+    }
+  }
+  return JSON.stringify(payload);
 }
 
 export async function handleAnalyticsProxy(request: Request, env: AnalyticsProxyEnv): Promise<Response> {
@@ -71,20 +96,25 @@ export async function handleAnalyticsProxy(request: Request, env: AnalyticsProxy
 
   const raw = await request.text();
   if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) return response(413, allowedOrigin);
-  if (!validPayload(raw, env.AMPLITUDE_API_KEY)) return response(400, allowedOrigin);
+  const payload = parsePayload(raw, env.AMPLITUDE_API_KEY);
+  if (payload === null) return response(400, allowedOrigin);
+
+  const body = withVisitorIp(payload, request.headers.get("CF-Connecting-IP"));
+  // Stamping the address grows the body, so the ceiling has to hold for what
+  // actually leaves rather than only for what arrived.
+  if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) return response(413, allowedOrigin);
 
   // Deliberately do not forward cookies, Origin, or Cloudflare headers. The
-  // ingestion API needs the SDK payload, browser user agent, and originating
-  // IP for the same device/location properties a direct request would carry.
+  // ingestion API needs the SDK payload and the browser user agent for the same
+  // device properties a direct request would carry; location rides along in
+  // each event's `ip`.
   const headers = new Headers({ "content-type": "application/json" });
   const userAgent = request.headers.get("user-agent");
-  const clientIp = request.headers.get("CF-Connecting-IP");
   if (userAgent) headers.set("user-agent", userAgent);
-  if (clientIp) headers.set("x-forwarded-for", clientIp);
 
   let upstream: Response;
   try {
-    upstream = await fetch(AMPLITUDE_HTTP_V2, { method: "POST", headers, body: raw });
+    upstream = await fetch(AMPLITUDE_HTTP_V2, { method: "POST", headers, body });
   } catch {
     // Visitor traffic must not create one durable error-log object per event
     // during an upstream outage. The SDK sees 502 and retains its own retry.
