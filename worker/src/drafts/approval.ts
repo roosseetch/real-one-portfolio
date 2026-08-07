@@ -17,6 +17,7 @@ import { setPendingEdit } from "./pending";
 import {
   answerCallback,
   removeKeyboard,
+  sendDocument,
   sendMediaGroup,
   sendMessage,
   sendPhoto,
@@ -40,8 +41,8 @@ const TOKEN_LENGTH = 12;
 
 const CANCELLED_MESSAGE = "Cancelled. Nothing was published.";
 const NOT_YET = "Not available yet.";
-/** Telegram truncates a photo caption past this, which would hide part of what is being approved. */
-const PHOTO_CAPTION_LIMIT = 1024;
+/** Telegram truncates any media caption past this, which would hide part of what is being approved. */
+const MEDIA_CAPTION_LIMIT = 1024;
 const EDIT_PROMPT = "What should change? Send it as a message, and the whole entry comes back for approval.";
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
@@ -115,14 +116,22 @@ async function sendPreviewMessages(
     // One item: the preview travels as the photo's caption, so the author sees
     // the picture and the words it would be published with together.
     const only = originals[0];
-    if (only.type === "image" && text.length <= PHOTO_CAPTION_LIMIT) {
+    if (only.type === "image" && text.length <= MEDIA_CAPTION_LIMIT) {
       const shown = await sendPhoto(env, draft.source.chatId, only.fileId, text, keyboard);
       if (shown !== null) return shown;
 
       // Telegram will not re-send every file reference as a photo — a .webp
-      // sent as a file is a sticker to it. The picture is already safe in the
-      // private bucket and will still be published, so the preview falls back
-      // to words rather than leaving the author with nothing to approve.
+      // sent as a file is a sticker to it — but it takes the same reference as
+      // an attachment, caption and buttons included. The author still sees the
+      // picture next to the words it would be published with.
+      const attached = await sendDocument(env, draft.source.chatId, only.fileId, text, keyboard);
+      if (attached !== null) return attached;
+
+      // Neither shape was accepted, which a sticker's own file reference can
+      // do: it is re-sendable only through sendSticker, which carries no
+      // caption. The picture is already safe in the private bucket and will
+      // still be published, so the preview falls back to words rather than
+      // leaving the author with nothing to approve.
       console.warn("Could not preview the image; falling back to a text preview");
       return sendMessage(env, draft.source.chatId, text, keyboard);
     }

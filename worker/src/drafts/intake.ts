@@ -8,7 +8,8 @@
  * the work can be picked up later.
  */
 import { generateRecord, type AiEnv } from "../ai/generate";
-import { intakeMedia, type MediaIntakeEnv } from "../media/intake";
+import { carriesMedia, intakeMedia, type DeclineReason, type MediaIntakeEnv } from "../media/intake";
+import type { FileLabel } from "../media/formats";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import type { TelegramMessage, TelegramUpdate } from "../telegram/types";
 import { applyEditInstruction, sendPreview, type ApprovalEnv } from "./approval";
@@ -20,10 +21,58 @@ import type { Draft } from "./types";
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 
 const NOTHING_USABLE_MESSAGE =
-  "I could not find anything to publish in that message. Send a note, a photo, or a video — a picture sent as a file works too.";
+  "I could not find anything to publish in that message. Send a note, a photo, or a video — a picture sent as a file works too, and so does a sticker.";
 
 const UNUSABLE_FILE_MESSAGE =
   "I can only publish images and videos. That file is neither, so I have left it alone.";
+
+/** What the sanitiser can open, quoted back so "send it as something else" is actionable. */
+const OPENABLE_IMAGES = "JPEG, PNG, WebP, GIF, TIFF and BMP";
+const OPENABLE_VIDEO = "MP4, MOV and WebM";
+
+/**
+ * What Telegram actually said the file was, appended to every refusal of one.
+ *
+ * The first time this broke, the reply named nothing and the decline answered
+ * 200 — which `flush` does not persist — so the chat and the log between them
+ * recorded only that something had been refused, not what. Quoting the type and
+ * the name means the next one is diagnosable from the chat alone.
+ */
+function fileNote(file: FileLabel): string {
+  const type = file.mime ?? "no type at all";
+  return file.name ? `\n\nTelegram called it: ${type} — "${file.name}"` : `\n\nTelegram called it: ${type}`;
+}
+
+/** Every refusal the media path can produce, in one place so the voice stays one voice. */
+export function declineMessage(reason: DeclineReason): string {
+  switch (reason.kind) {
+    case "not-media":
+      return `${UNUSABLE_FILE_MESSAGE}${fileNote(reason.file)}`;
+
+    case "unopenable": {
+      const openable = reason.mediaKind === "video" ? OPENABLE_VIDEO : OPENABLE_IMAGES;
+      const noun = reason.mediaKind === "video" ? "video" : "pictures";
+      return (
+        `I can publish ${openable} ${noun}. That one is ${reason.format}, which I cannot open, so I have left it alone. ` +
+        `Sending it again as a JPEG will work.${fileNote(reason.file)}`
+      );
+    }
+
+    case "sticker-moves":
+      return (
+        `That is a ${reason.video ? "video" : "animated"} sticker, and I can only publish still pictures. ` +
+        "A sticker that does not move works, and so does a photo."
+      );
+
+    case "contents": {
+      const found = reason.format === null ? "not one" : `a ${reason.format}`;
+      return (
+        `That file is named like a picture, but its contents are ${found}. I checked the first bytes and ` +
+        `left it alone rather than hand the publisher something that would only fail later.${fileNote(reason.file)}`
+      );
+    }
+  }
+}
 
 export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv, MediaIntakeEnv {
   PRIVATE_BUCKET: R2Bucket;
@@ -91,7 +140,7 @@ export async function intakeUpdate(
     return { status: "unsupported" };
   }
 
-  if (message.photo || message.video || message.document) {
+  if (carriesMedia(message)) {
     return intakeMediaMessage(message, senderId, env, waitUntil);
   }
 
@@ -129,11 +178,23 @@ async function intakeMediaMessage(
   waitUntil: (promise: Promise<unknown>) => void,
 ): Promise<IntakeResult> {
   const filed = await intakeMedia(message, senderId, env);
-  if (filed.status === "unsupported") {
-    // Only reachable via a document: photo and video are always usable, so this
-    // is a file whose mime type is neither an image nor a video.
-    const kind = message.document?.mime_type ?? "unknown";
-    return decline(env, message, `a document of type ${kind}`, UNUSABLE_FILE_MESSAGE);
+
+  // The gate said the message carried media, so this is a field carrying
+  // nothing usable at all rather than an empty message.
+  if (filed.status === "none") {
+    return decline(env, message, "media fields carrying no file", NOTHING_USABLE_MESSAGE);
+  }
+
+  // Refused on what the file claimed to be, before any download and before any
+  // draft: nothing is left behind to clean up.
+  if (filed.status === "declined") {
+    return decline(env, message, describeReason(filed.reason), declineMessage(filed.reason));
+  }
+
+  // Refused on its contents, after the draft was made. The draft stands — its
+  // siblings in an album are fine — but the author is told which file went.
+  if (filed.declined !== null) {
+    await say(env, message, describeReason(filed.declined), declineMessage(filed.declined));
   }
 
   // A later item of an album: the first one owns the preview.
@@ -142,21 +203,45 @@ async function intakeMediaMessage(
   const draft = filed.draft;
 
   if (draft.mediaGroupId === null) {
+    // The one file this message carried was refused and there were no words
+    // either, so there is nothing to put in front of the author. Previewing
+    // would ask them to approve an empty record; the draft is left for the
+    // seven-day lifecycle rule, like any other abandoned one.
+    if (draft.originals.length === 0 && draft.input.text.trim() === "") {
+      return { status: "unsupported" };
+    }
     return describeAndPreview(env, draft, draft.input.text);
   }
 
   // Answer the webhook now and let the album settle in the background: holding
-  // the response open for four seconds invites Telegram to redeliver.
+  // the response open for four seconds invites Telegram to redeliver. This runs
+  // even when this item was refused — the siblings still need someone to
+  // preview them, and only the item that made the draft is here to do it.
   waitUntil(
     (async () => {
       await new Promise((resolve) => setTimeout(resolve, ALBUM_SETTLE_MS));
       const settled = (await loadDraft(env.PRIVATE_BUCKET, draft.draftId)) ?? draft;
       if (settled.state !== "draft") return;
+      if (settled.originals.length === 0 && settled.input.text.trim() === "") return;
       await describeAndPreview(env, settled, settled.input.text);
     })(),
   );
 
   return { status: "created", draft };
+}
+
+/** The log's version of a refusal: short, literal, and never the author's words. */
+function describeReason(reason: DeclineReason): string {
+  switch (reason.kind) {
+    case "not-media":
+      return `a document of type ${reason.file.mime ?? "unknown"}`;
+    case "unopenable":
+      return `a ${reason.format} the publisher cannot open`;
+    case "sticker-moves":
+      return reason.video ? "a video sticker" : "an animated sticker";
+    case "contents":
+      return `a file whose contents are ${reason.format ?? "unrecognised"}`;
+  }
 }
 
 /**
@@ -174,9 +259,30 @@ async function decline(
   reason: string,
   reply: string,
 ): Promise<IntakeResult> {
-  console.warn(`Declined a message: ${reason}`);
-  await sendMessage(env, message.chat.id, reply);
+  await say(env, message, reason, reply);
   return { status: "unsupported" };
+}
+
+/**
+ * Records a refusal and tells the author, without ending the turn.
+ *
+ * A file rejected on its contents needs both halves of `decline` but not its
+ * verdict: the draft it belonged to is still going to be previewed.
+ *
+ * `console.error` rather than `warn` on purpose. A decline answers 200, and
+ * `flush` keeps warnings only as context around an error — so the first time
+ * this happened it left no durable record at all, which is most of why the
+ * cause had to be inferred from the source rather than read off a log. Only an
+ * allowlisted sender can reach this, so nobody outside can drive it.
+ */
+async function say(
+  env: IntakeEnv,
+  message: TelegramMessage,
+  reason: string,
+  reply: string,
+): Promise<void> {
+  console.error(`Declined a message: ${reason}`);
+  await sendMessage(env, message.chat.id, reply);
 }
 
 /** Asks the model for a record, stores it, and shows the author the result. */

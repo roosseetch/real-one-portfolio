@@ -57,6 +57,31 @@ export interface TelegramDocument {
   file_size?: number;
 }
 
+/**
+ * A picture that Telegram decided was a sticker.
+ *
+ * Not the emoji-shop path it sounds like. Telegram converts a .webp upload into
+ * a sticker on its own, so the same file an author meant to publish arrives
+ * under a different field name depending on nothing they did — and a field
+ * nothing reads is a message that gets answered "I could not find anything to
+ * publish", which is untrue.
+ *
+ * `thumbnail` is deliberately absent, for the same reason the smallest `photo`
+ * rendition is discarded: it is Telegram's downscale, and publishing it would
+ * cap the resolution every derivative is generated from.
+ */
+export interface TelegramSticker {
+  file_id: string;
+  file_unique_id: string;
+  /** A .tgs, which is a gzipped vector animation and not a picture at all. */
+  is_animated: boolean;
+  /** A .webm loop. Still not a still. */
+  is_video: boolean;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
 export interface TelegramMessage {
   message_id: number;
   date: number;
@@ -70,6 +95,8 @@ export interface TelegramMessage {
   video?: TelegramVideo;
   /** An image or video sent as a file rather than through Telegram's compression. */
   document?: TelegramDocument;
+  /** Where a .webp ends up when Telegram converts it on the way in. */
+  sticker?: TelegramSticker;
   /** The text sent alongside media, which arrives here rather than in `text`. */
   caption?: string;
   /**

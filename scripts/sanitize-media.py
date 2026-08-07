@@ -47,6 +47,24 @@ def deg_to_dms(value: float) -> str:
 FORMATS = [("webp", "WEBP", {"quality": 82, "method": 6}), ("avif", "AVIF", {"quality": 60})]
 
 
+def flatten(img: Image.Image) -> Image.Image:
+    """Composites transparency onto white before the alpha channel is dropped.
+
+    `convert("RGB")` does not blend -- it discards the alpha and keeps whatever
+    colour sat under it, which is black almost everywhere it matters. A WebP
+    nearly always carries an alpha channel, so without this the format the
+    intake was widened to accept publishes with black where it should be clear.
+    """
+    transparent = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    if not transparent:
+        return img.convert("RGB")
+
+    rgba = img.convert("RGBA")
+    canvas = Image.new("RGB", rgba.size, (255, 255, 255))
+    canvas.paste(rgba, mask=rgba.getchannel("A"))
+    return canvas
+
+
 def strip_and_resize(source: Path, out_path: Path, width: int, pillow_format: str, options: dict) -> tuple[int, int]:
     """Re-encodes at the target width, carrying no metadata across.
 
@@ -57,7 +75,7 @@ def strip_and_resize(source: Path, out_path: Path, width: int, pillow_format: st
         # Apply the orientation flag, then drop it. Saving without an EXIF
         # block afterwards leaves the pixels already the right way up.
         img = ImageOps.exif_transpose(img)
-        img = img.convert("RGB")
+        img = flatten(img)
 
         target_width = min(width, img.width)
         target_height = round(img.height * target_width / img.width)

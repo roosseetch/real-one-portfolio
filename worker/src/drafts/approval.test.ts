@@ -426,22 +426,52 @@ describe("previewing media", () => {
     expect(calls.map((c) => c.method)).not.toContain("sendMediaGroup");
   });
 
-  it("still previews when Telegram refuses to re-send the file as a photo", async () => {
-    // A .webp sent as a file is a sticker to Telegram, so sendPhoto rejects the
-    // file reference. The draft must not be left unpreviewed over it: the
-    // picture is already in the private bucket and will still be published.
+  /** Telegram refuses the listed methods, as it does with a .webp file reference. */
+  const refusing = (...methods: string[]) => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
       const method = String(url).split("/").pop() ?? "";
       calls.push({ method, body: JSON.parse(String(init?.body)) });
-      if (method === "sendPhoto") {
+      if (methods.includes(method)) {
         return new Response(JSON.stringify({ ok: false, description: "wrong file identifier" }), { status: 400 });
       }
       return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }), { status: 200 });
     });
+  };
+
+  it("re-sends the file as a document when Telegram refuses it as a photo", async () => {
+    // A .webp sent as a file is a sticker to Telegram, so sendPhoto rejects the
+    // file reference — but the same reference goes through as an attachment,
+    // and the author gets to see what they are approving.
+    refusing("sendPhoto");
 
     const draft = await withOriginals(1);
 
     expect(calls.map((c) => c.method)).toContain("sendPhoto");
+    const attached = calls.find((c) => c.method === "sendDocument");
+    expect(attached?.body.document).toBe("file-0");
+    expect(calls.map((c) => c.method)).not.toContain("sendMessage");
+    expect(draft.state).toBe("awaiting_approval");
+  });
+
+  it("puts the same caption and buttons on the document, so the draft is still approvable", async () => {
+    refusing("sendPhoto");
+
+    const draft = await withOriginals(1);
+
+    const attached = calls.find((c) => c.method === "sendDocument");
+    expect(String(attached?.body.caption)).toContain("Is this the information and media that should become public?");
+    expect(attached?.body.reply_markup).toBeDefined();
+    expect(draft.preview?.messageId).toBe(4242);
+  });
+
+  it("falls back to words only when neither a photo nor a document is accepted", async () => {
+    // A sticker's own file reference is re-sendable through sendSticker alone,
+    // which carries no caption. The draft must not be left unpreviewed over it:
+    // the picture is already in the private bucket and will still be published.
+    refusing("sendPhoto", "sendDocument");
+
+    const draft = await withOriginals(1);
+
     const fallback = calls.find((c) => c.method === "sendMessage");
     expect(String(fallback?.body.text)).toContain("Is this the information and media that should become public?");
     expect(fallback?.body.reply_markup).toBeDefined();
