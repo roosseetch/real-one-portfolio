@@ -40,8 +40,8 @@ jobs:
       run:
         working-directory: infrastructure/${{ matrix.stack }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.13.3
           terraform_wrapper: false
@@ -75,7 +75,7 @@ jobs:
       TF_VAR_worker_enabled: ${{ vars.WORKER_ENABLED || 'false' }}
       TF_VAR_worker_name: ${{ vars.WORKER_NAME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Before Terraform is even installed. An unresolvable secret is an empty
       # string rather than an error, so without this the job would get as far as
       # `terraform init` and fail there complaining about S3 credentials --
@@ -94,7 +94,7 @@ jobs:
             exit 1
           fi
           echo "All three read-only credentials are present."
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.13.3
           terraform_wrapper: false
