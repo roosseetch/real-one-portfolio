@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadDraft } from "../drafts/store";
+import { bodyFor, type SampleFormat } from "../test-support/bytes";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import type { TelegramMessage } from "../telegram/types";
 import { intakeMedia, largestPhoto, mediaRequest } from "./intake";
@@ -11,19 +12,26 @@ let storage: FakeBucket;
 /** Every Telegram call, as {method, body}. */
 let calls: Array<{ method: string; body: Record<string, unknown> }>;
 
-beforeEach(() => {
-  storage = createFakeBucket();
-  calls = [];
+/**
+ * The download now has to survive being sniffed, so the body is a real header
+ * rather than a placeholder string.
+ */
+function telegramServing(format: SampleFormat, filePath = "photos/file_1.jpg") {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const method = String(url).split("/").pop() ?? "";
     calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : {} });
 
     if (method === "getFile") {
-      return new Response(JSON.stringify({ ok: true, result: { file_path: "photos/file_1.jpg", file_size: 2048 } }));
+      return new Response(JSON.stringify({ ok: true, result: { file_path: filePath, file_size: 2048 } }));
     }
-    // The download itself: any body will do, the bytes are never inspected.
-    return new Response("binary-image-bytes", { status: 200 });
+    return new Response(bodyFor(format), { status: 200 });
   });
+}
+
+beforeEach(() => {
+  storage = createFakeBucket();
+  calls = [];
+  telegramServing("jpeg");
 });
 
 afterEach(() => {
@@ -46,6 +54,13 @@ function photoMessage(overrides: Partial<TelegramMessage> = {}): TelegramMessage
   };
 }
 
+/** The accepted request, or a failure naming what came back instead. */
+function accepted(message: TelegramMessage) {
+  const decision = mediaRequest(message);
+  if (decision.status !== "accept") throw new Error(`expected an accepted file, got ${decision.status}`);
+  return decision.request;
+}
+
 describe("choosing which rendition to keep", () => {
   it("takes the largest, not the first", () => {
     // The smaller ones are Telegram's downscales; keeping one would cap the
@@ -56,11 +71,11 @@ describe("choosing which rendition to keep", () => {
   it("falls back to a video when there is no photo", () => {
     const message = photoMessage({ photo: undefined });
     message.video = { file_id: "vid", file_unique_id: "u3", width: 1920, height: 1080, duration: 12 };
-    expect(mediaRequest(message)).toMatchObject({ type: "video", fileId: "vid" });
+    expect(accepted(message)).toMatchObject({ type: "video", fileId: "vid" });
   });
 
-  it("returns null for a message carrying neither", () => {
-    expect(mediaRequest(photoMessage({ photo: undefined }))).toBeNull();
+  it("carries nothing when the message carries neither", () => {
+    expect(mediaRequest(photoMessage({ photo: undefined }))).toEqual({ status: "none" });
   });
 });
 
@@ -81,7 +96,7 @@ describe("media sent as a file", () => {
     });
 
   it("takes a webp sent as a file", () => {
-    expect(mediaRequest(asDocument("image/webp"))).toMatchObject({
+    expect(accepted(asDocument("image/webp"))).toMatchObject({
       type: "image",
       fileId: "doc",
       bytes: 616_000,
@@ -89,25 +104,83 @@ describe("media sent as a file", () => {
   });
 
   it("takes any other image type the sanitiser can open", () => {
-    expect(mediaRequest(asDocument("image/png"))).toMatchObject({ type: "image", fileId: "doc" });
+    expect(accepted(asDocument("image/png"))).toMatchObject({ type: "image", fileId: "doc" });
   });
 
   it("files a video document as a video, not an image", () => {
-    expect(mediaRequest(asDocument("video/mp4"))).toMatchObject({ type: "video", fileId: "doc" });
+    expect(accepted(asDocument("video/mp4"))).toMatchObject({ type: "video", fileId: "doc" });
   });
 
   it("refuses a file that is neither, rather than handing the sanitiser a PDF", () => {
-    expect(mediaRequest(asDocument("application/pdf"))).toBeNull();
+    expect(mediaRequest(asDocument("application/pdf"))).toMatchObject({
+      status: "decline",
+      reason: { kind: "not-media" },
+    });
   });
 
-  it("refuses a file Telegram gave no mime type for", () => {
-    expect(mediaRequest(asDocument(undefined))).toBeNull();
+  // The report that started this. Telegram omits the type when the sending
+  // client cannot name it, and reading that silence as "not an image" threw
+  // away a picture whose name said exactly what it was.
+  it("takes a webp document Telegram gave no mime type for, from its file name", () => {
+    expect(accepted(asDocument(undefined))).toMatchObject({ type: "image", fileId: "doc" });
+  });
+
+  it("takes a webp document Telegram could only call application/octet-stream", () => {
+    expect(accepted(asDocument("application/octet-stream"))).toMatchObject({ type: "image" });
+  });
+
+  it("refuses a HEIC by name, before it is ever downloaded", () => {
+    expect(mediaRequest(asDocument("image/heic"))).toMatchObject({
+      status: "decline",
+      reason: { kind: "unopenable", format: "HEIC", mediaKind: "image" },
+    });
   });
 
   it("prefers the photo when a message somehow carries both", () => {
     const message = asDocument("image/webp");
     message.photo = photoMessage().photo;
-    expect(mediaRequest(message)?.fileId).toBe("large");
+    expect(accepted(message).fileId).toBe("large");
+  });
+});
+
+describe("stickers", () => {
+  const asSticker = (overrides: Partial<TelegramMessage["sticker"]> = {}): TelegramMessage =>
+    photoMessage({
+      photo: undefined,
+      sticker: {
+        file_id: "stick",
+        file_unique_id: "u7",
+        is_animated: false,
+        is_video: false,
+        width: 512,
+        height: 512,
+        file_size: 24_000,
+        ...overrides,
+      },
+    });
+
+  // Telegram converts a .webp upload into a sticker on its own, so this is the
+  // same picture the author meant to send, under a field nothing used to read.
+  it("takes a static sticker as an image original", () => {
+    expect(accepted(asSticker())).toMatchObject({ type: "image", fileId: "stick" });
+  });
+
+  it("keeps the sticker's own dimensions, which Telegram does report", () => {
+    expect(accepted(asSticker())).toMatchObject({ width: 512, height: 512 });
+  });
+
+  it("refuses an animated sticker rather than calling the message empty", () => {
+    expect(mediaRequest(asSticker({ is_animated: true }))).toMatchObject({
+      status: "decline",
+      reason: { kind: "sticker-moves", video: false },
+    });
+  });
+
+  it("refuses a video sticker for the same reason", () => {
+    expect(mediaRequest(asSticker({ is_video: true }))).toMatchObject({
+      status: "decline",
+      reason: { kind: "sticker-moves", video: true },
+    });
   });
 });
 
@@ -200,6 +273,87 @@ describe("albums", () => {
     await intakeMedia(group(1), SENDER, env());
     const other = await intakeMedia(photoMessage({ message_id: 9, media_group_id: "media-group-2" }), SENDER, env());
     expect(other.status).toBe("started");
+  });
+});
+
+// Tier C: the name got the file this far, and the bytes are the last word on
+// whether the publisher can actually open it.
+describe("what the bytes say", () => {
+  const asDocument = (mime: string | undefined, name = "Image_20260806_114203.webp"): TelegramMessage =>
+    photoMessage({
+      photo: undefined,
+      document: {
+        file_id: "doc",
+        file_unique_id: "u9",
+        file_name: name,
+        ...(mime === undefined ? {} : { mime_type: mime }),
+        file_size: 616_000,
+      },
+    });
+
+  // The whole report, end to end: no mime type, a name that says webp, and
+  // contents that agree — this is the message that used to be answered "that
+  // file is neither".
+  it("turns a webp document Telegram gave no mime type for into a stored original", async () => {
+    telegramServing("webp", "documents/file_9.webp");
+
+    const result = await intakeMedia(asDocument(undefined), SENDER, env());
+
+    expect(result.status).toBe("started");
+    if (result.status !== "started") return;
+    expect(result.declined).toBeNull();
+    expect(result.draft.originals).toHaveLength(1);
+    expect(result.draft.originals[0].type).toBe("image");
+  });
+
+  it("keeps the draft but not the file when the contents are not a picture", async () => {
+    telegramServing("pdf", "documents/file_9.webp");
+
+    const message = asDocument("image/webp", "invoice.webp");
+    message.caption = "the good one is in the next message";
+    const result = await intakeMedia(message, SENDER, env());
+
+    expect(result.status).toBe("started");
+    if (result.status !== "started") return;
+    // The author's words survive; only the attachment went.
+    expect(result.draft.input.text).toBe("the good one is in the next message");
+    expect(result.draft.originals).toHaveLength(0);
+  });
+
+  it("stores nothing in R2 when the contents fail the check", async () => {
+    telegramServing("pdf", "documents/file_9.webp");
+
+    await intakeMedia(asDocument("image/webp"), SENDER, env());
+
+    expect([...storage.objects.keys()].some((k) => k.startsWith("originals/"))).toBe(false);
+  });
+
+  // Carried back rather than logged and forgotten: this is what lets the reply
+  // name the file that was dropped instead of going quiet.
+  it("reports the rejection, with what Telegram called the file", async () => {
+    telegramServing("pdf", "documents/file_9.webp");
+
+    const result = await intakeMedia(asDocument("image/webp", "invoice.webp"), SENDER, env());
+
+    if (result.status !== "started") throw new Error("expected a draft");
+    expect(result.declined).toMatchObject({
+      kind: "contents",
+      format: "PDF",
+      file: { mime: "image/webp", name: "invoice.webp" },
+    });
+  });
+
+  it("reports a file it could not fetch as unavailable, not as the wrong format", async () => {
+    // Nobody's fault and nothing to tell the author to do differently, so this
+    // must not turn into "its contents are not a picture".
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, description: "file is too big" }), { status: 400 }),
+    );
+
+    const result = await intakeMedia(asDocument("image/webp"), SENDER, env());
+
+    if (result.status !== "started") throw new Error("expected a draft");
+    expect(result.declined).toBeNull();
   });
 });
 
