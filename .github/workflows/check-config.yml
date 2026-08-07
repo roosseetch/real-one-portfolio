@@ -37,10 +37,13 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Current majors, so the job does not carry the deprecated Node 20 action
+      # runtime that GitHub warns about and silently runs on 24 anyway. The
+      # other workflows are still on v4 and older; that is its own board item.
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
