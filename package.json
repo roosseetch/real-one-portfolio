@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "validate:profile": "tsx scripts/validate-profile.ts",
+    "config:check": "tsx scripts/check-workflow-config.ts",
     "typecheck": "tsc --noEmit",
     "profile:publish": "tsx scripts/publish-profile.ts",
     "profile:fetch": "tsx scripts/fetch-profile.ts",

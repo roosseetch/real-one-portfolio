@@ -18,9 +18,67 @@ profile/         approved public profile JSONs (facts, personality, design, port
 worker/          Cloudflare Worker (Telegram webhook, drafts, AI, publishing)
 infrastructure/  Terraform: bootstrap/ (state bucket) and main/ (everything else)
 scripts/         generate-wrangler, bootstrap-manifest, validate-profile
-.github/         workflows: terraform-plan/apply, deploy-worker, process-media, deploy-pages
+.github/         workflows + config-inventory.json (every variable and secret they use)
 tasks/           implementation plan and task checklist
 ```
+
+## Repository variables and secrets
+
+`.github/config-inventory.json` lists every repository variable and secret the
+workflows may reference, what each is for, and — for the optional ones — what
+happens when it is unset. `npm run config:check` holds that list and
+`.github/workflows/` to each other, and CI runs it on every pull request.
+
+It exists because GitHub resolves an unknown `secrets.NAME` or `vars.NAME` to an
+empty string rather than failing. A renamed or mistyped name therefore ships a
+workflow that runs, reports success, and does the wrong thing quietly. That has
+already happened here: `secrets.GITHUB_DISPATCH_TOKEN`, a name GitHub refuses to
+store because it reserves the `GITHUB_` prefix, deployed the Worker with a blank
+token and turned every photo publication into "Publication failed" with no run
+anywhere to look at.
+
+Whether the declared names actually exist is a separate question and needs an
+authenticated `gh`:
+
+```
+npm run config:check -- --live
+```
+
+`gh` runs in a container by default; `GH_CMD=gh npm run config:check -- --live`
+uses a host installation instead.
+
+### Read-only credentials for the plan job
+
+`terraform-plan.yml` runs on pull requests, which means it is triggered by a
+branch rather than by a merge. It must not hold a credential that could rewrite
+state or change infrastructure, so it uses its own read-only pair. `terraform
+plan` never persists state, so read access is enough. The job stops with a named
+error until both exist.
+
+**#TODO:** create these two, then add them as repository secrets:
+
+1. **`CLOUDFLARE_API_TOKEN_PLAN`** — an API token at
+   <https://dash.cloudflare.com/profile/api-tokens> with the same reach as
+   `CLOUDFLARE_API_TOKEN` but **Read** instead of Edit throughout:
+
+   ```
+   Account | Workers R2 Storage      | Read
+   Account | Workers Scripts         | Read
+   Zone    | DNS                     | Read
+   Zone    | Cache Rules             | Read
+   Zone    | Workers Routes          | Read
+   Zone    | Zone                    | Read
+   Zone    | SSL and Certificates    | Read
+   ```
+
+2. **`R2_STATE_RO_ACCESS_KEY_ID`** and **`R2_STATE_RO_SECRET_ACCESS_KEY`** — from
+   an R2 API token (R2 > API > Manage API tokens) with **Object Read-only**
+   scoped to the state bucket alone. Cloudflare lets any R2 token act as an S3
+   credential pair: the access key id is the token's own id, and the secret is
+   the SHA-256 of the token value. `scripts/derive-r2-s3-credentials.sh` does
+   that derivation for the token in `infrastructure/.env` — read it for the
+   mechanics rather than running it here, since it overwrites the write
+   credentials in that file.
 
 ## Telegram webhook
 

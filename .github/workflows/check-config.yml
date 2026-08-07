@@ -1,0 +1,50 @@
+name: Check workflow config
+
+# Every secrets.* and vars.* reference in .github/workflows must be declared in
+# .github/config-inventory.json, and every declaration must be referenced.
+#
+# GitHub resolves an unknown reference to an empty string instead of failing, so
+# a renamed or mistyped name ships a workflow that runs, reports success, and
+# does the wrong thing. That is how secrets.GITHUB_DISPATCH_TOKEN -- a name
+# GitHub will not store at all -- reached production and turned every photo
+# publication into "Publication failed" with no run to look at.
+#
+# Deliberately credential-free, so it runs for forks too and gates the change
+# before it merges. Whether the declared values actually exist on GitHub is a
+# separate question, and needs an authenticated gh:
+#   npm run config:check -- --live
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "scripts/check-workflow-config.ts"
+      - "package.json"
+      - "package-lock.json"
+  push:
+    branches: [main]
+    paths:
+      - ".github/**"
+      - "scripts/check-workflow-config.ts"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Current majors, so the job does not carry the deprecated Node 20 action
+      # runtime that GitHub warns about and silently runs on 24 anyway. The
+      # other workflows are still on v4 and older; that is its own board item.
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run config:check
