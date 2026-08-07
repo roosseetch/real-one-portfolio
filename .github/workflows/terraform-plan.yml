@@ -2,11 +2,21 @@ name: Terraform plan
 
 # Repository variables used here:
 #   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_ZONE_ID, PROJECT_SLUG, ROOT_DOMAIN,
-#   TF_STATE_BUCKET, and optionally SITE_SUBDOMAIN, GITHUB_PAGES_OWNER,
-#   WORKER_ENABLED, WORKER_NAME
-# Secrets used here (read-only credentials only):
+#   TF_STATE_BUCKET, WORKER_NAME, and optionally SITE_SUBDOMAIN, PAGES_OWNER,
+#   WORKER_ENABLED
+#
+# Secrets used here, all of them read-only:
 #   CLOUDFLARE_API_TOKEN_PLAN, R2_STATE_RO_ACCESS_KEY_ID,
 #   R2_STATE_RO_SECRET_ACCESS_KEY
+#
+# Read-only on purpose. This job is triggered by a branch rather than by a
+# merge, so it must not hold a credential that could rewrite state or change
+# infrastructure. `terraform plan` never persists state, so read is enough.
+# The README says how to create the three; until they exist the job stops at
+# the check below rather than at an opaque S3 error inside `terraform init`.
+#
+# Every name here is declared in .github/config-inventory.json and checked by
+# `npm run config:check`.
 
 on:
   pull_request:
@@ -58,12 +68,32 @@ jobs:
       TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
       TF_VAR_project_slug: ${{ vars.PROJECT_SLUG }}
       TF_VAR_root_domain: ${{ vars.ROOT_DOMAIN }}
-      TF_VAR_site_subdomain: ${{ vars.SITE_SUBDOMAIN }}
-      TF_VAR_github_pages_owner: ${{ vars.GITHUB_PAGES_OWNER }}
+      # Empty is the Terraform default for both: the site is served from the
+      # apex, so there is no CNAME and no owner to point it at.
+      TF_VAR_site_subdomain: ${{ vars.SITE_SUBDOMAIN || '' }}
+      TF_VAR_github_pages_owner: ${{ vars.PAGES_OWNER || '' }}
       TF_VAR_worker_enabled: ${{ vars.WORKER_ENABLED || 'false' }}
       TF_VAR_worker_name: ${{ vars.WORKER_NAME }}
     steps:
       - uses: actions/checkout@v4
+      # Before Terraform is even installed. An unresolvable secret is an empty
+      # string rather than an error, so without this the job would get as far as
+      # `terraform init` and fail there complaining about S3 credentials --
+      # true, but several steps away from the actual cause.
+      #
+      # Names only. The point is to say which secret is missing, and a value
+      # that is present is exactly the thing that must not be printed.
+      - name: Check the read-only credentials exist
+        run: |
+          missing=()
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing+=(CLOUDFLARE_API_TOKEN_PLAN)
+          [ -n "$AWS_ACCESS_KEY_ID" ] || missing+=(R2_STATE_RO_ACCESS_KEY_ID)
+          [ -n "$AWS_SECRET_ACCESS_KEY" ] || missing+=(R2_STATE_RO_SECRET_ACCESS_KEY)
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing repository secret(s): ${missing[*]}. These are the read-only credentials the plan job runs with; the README explains how to create them."
+            exit 1
+          fi
+          echo "All three read-only credentials are present."
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.13.3
