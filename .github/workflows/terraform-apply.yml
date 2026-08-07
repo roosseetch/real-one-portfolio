@@ -12,6 +12,9 @@ name: Terraform apply
 # that the credentials here may write:
 #   CLOUDFLARE_API_TOKEN, R2_STATE_RW_ACCESS_KEY_ID,
 #   R2_STATE_RW_SECRET_ACCESS_KEY
+#
+# Every name is declared in .github/config-inventory.json and checked by
+# `npm run config:check`.
 
 on:
   push:
@@ -48,8 +51,10 @@ jobs:
       TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
       TF_VAR_project_slug: ${{ vars.PROJECT_SLUG }}
       TF_VAR_root_domain: ${{ vars.ROOT_DOMAIN }}
-      TF_VAR_site_subdomain: ${{ vars.SITE_SUBDOMAIN }}
-      TF_VAR_github_pages_owner: ${{ vars.GITHUB_PAGES_OWNER }}
+      # Empty is the Terraform default for both: the site is served from the
+      # apex, so there is no CNAME and no owner to point it at.
+      TF_VAR_site_subdomain: ${{ vars.SITE_SUBDOMAIN || '' }}
+      TF_VAR_github_pages_owner: ${{ vars.PAGES_OWNER || '' }}
       TF_VAR_worker_enabled: ${{ vars.WORKER_ENABLED || 'false' }}
       TF_VAR_worker_name: ${{ vars.WORKER_NAME }}
     steps:

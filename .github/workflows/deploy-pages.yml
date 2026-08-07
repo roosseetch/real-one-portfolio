@@ -63,10 +63,10 @@ jobs:
           # eliminated as dead code, and the SDK is dropped from the bundle
           # entirely. That is quiet enough to look like working analytics, so
           # the step below says which of the two happened.
-          VITE_AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY }}
+          VITE_AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY || '' }}
           # Direct Amplitude ingestion remains the default. This relay is tried
           # only if the browser rejects the direct request.
-          VITE_AMPLITUDE_SERVER_URL: ${{ vars.AMPLITUDE_SERVER_URL }}
+          VITE_AMPLITUDE_SERVER_URL: ${{ vars.AMPLITUDE_SERVER_URL || '' }}
         run: npm run build
       - name: Report whether analytics shipped
         working-directory: site
@@ -82,7 +82,7 @@ jobs:
       - name: Write CNAME when a custom domain is configured
         if: vars.PAGES_CUSTOM_DOMAIN != ''
         env:
-          CUSTOM_DOMAIN: ${{ vars.PAGES_CUSTOM_DOMAIN }}
+          CUSTOM_DOMAIN: ${{ vars.PAGES_CUSTOM_DOMAIN || '' }}
         run: printf '%s\n' "$CUSTOM_DOMAIN" > site/dist/CNAME
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

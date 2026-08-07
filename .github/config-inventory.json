@@ -1,0 +1,166 @@
+{
+  "$comment": [
+    "Every repository variable and secret the workflows are allowed to reference.",
+    "Names and purposes only — no values, and nothing here is a credential.",
+    "",
+    "It exists because GitHub resolves an unknown secrets.* or vars.* reference to",
+    "an empty string instead of failing. A renamed or mistyped name therefore",
+    "produces a workflow that runs, succeeds, and does the wrong thing quietly.",
+    "That has already happened twice here: secrets.GITHUB_DISPATCH_TOKEN, a name",
+    "GitHub refuses to store, and the three read-only Terraform plan credentials.",
+    "",
+    "scripts/check-workflow-config.ts holds this file and .github/workflows/ to",
+    "each other, so neither can drift without CI saying so.",
+    "",
+    "required=false means the workflows work without it. Every such entry says",
+    "what happens when it is unset, and every reference to one carries its",
+    "fallback inline, so an empty value is always a decision rather than an",
+    "accident."
+  ],
+
+  "variables": {
+    "AMPLITUDE_API_KEY": {
+      "required": false,
+      "purpose": "Amplitude browser ingestion key, inlined into the site bundle and used by the Worker to scope its analytics relay. Public by construction, which is why it is a variable and not a secret.",
+      "whenUnset": "The site ships with no analytics at all — the init call is eliminated as dead code and the SDK never reaches the bundle. The Pages workflow warns, because the outcome is otherwise indistinguishable from working analytics."
+    },
+    "AMPLITUDE_SERVER_URL": {
+      "required": false,
+      "purpose": "Worker endpoint the browser falls back to when a privacy extension or network block rejects the direct Amplitude request.",
+      "whenUnset": "Only direct Amplitude ingestion is attempted; a blocked request is simply lost."
+    },
+    "CLOUDFLARE_ACCOUNT_ID": {
+      "required": true,
+      "purpose": "Account owning the R2 buckets and the Worker. Also the host part of every R2 S3 endpoint URL."
+    },
+    "CLOUDFLARE_ZONE_ID": {
+      "required": true,
+      "purpose": "Zone hosting the root domain, where Terraform writes DNS records and the cache ruleset."
+    },
+    "CONTENT_BASE_URL": {
+      "required": true,
+      "purpose": "Public base URL of the content bucket. Both the Pages build and the Worker deploy fetch the published profile from it before they can build anything."
+    },
+    "MEDIA_BASE_URL": {
+      "required": true,
+      "purpose": "Public base URL of the media bucket. The site renders photos from it and the media pipeline builds the record's image links from it."
+    },
+    "MEDIA_WORKFLOW_FILE": {
+      "required": false,
+      "purpose": "Workflow file the Worker dispatches to sanitise a draft's media.",
+      "whenUnset": "Falls back to process-media.yml at the reference site."
+    },
+    "PAGES_BASE_PATH": {
+      "required": false,
+      "purpose": "Vite base path for the built site.",
+      "whenUnset": "Falls back to the project-pages subpath /<repo>/ at the reference site. Set it to / when serving from a custom domain."
+    },
+    "PAGES_OWNER": {
+      "required": false,
+      "purpose": "GitHub user or organisation owning the Pages site; the CNAME for a subdomain site targets <owner>.github.io. Deliberately not GITHUB_PAGES_OWNER — GitHub reserves the GITHUB_ prefix and refuses to store a variable using it, so that name could never have held a value.",
+      "whenUnset": "Matches the Terraform default. Only valid while the site is served from the apex, where A and AAAA records are used and no CNAME exists — Terraform's precondition rejects an unset owner alongside a set SITE_SUBDOMAIN."
+    },
+    "PAGES_CUSTOM_DOMAIN": {
+      "required": false,
+      "purpose": "Custom domain written into the Pages artifact as a CNAME file, because Pages otherwise drops the domain on some deploys.",
+      "whenUnset": "No CNAME file is written and the site is served from its github.io URL."
+    },
+    "PROJECT_SLUG": {
+      "required": true,
+      "purpose": "Identifier every bucket name is derived from, and the prefix separating this project's Terraform state from any other in the same bucket."
+    },
+    "ROOT_DOMAIN": {
+      "required": true,
+      "purpose": "Registered domain the public hostnames hang off."
+    },
+    "SITE_BASE_URL": {
+      "required": true,
+      "purpose": "Public origin of the site, used by the Worker when it builds links back to a published record."
+    },
+    "SITE_SUBDOMAIN": {
+      "required": false,
+      "purpose": "Subdomain for the GitHub Pages site.",
+      "whenUnset": "Matches the Terraform default: the site is served from the apex, with A and AAAA records rather than a CNAME."
+    },
+    "TF_STATE_BUCKET": {
+      "required": true,
+      "purpose": "R2 bucket holding Terraform state, shared across projects and separated by state key prefix."
+    },
+    "WORKER_BASE_URL": {
+      "required": true,
+      "purpose": "Public origin of the Worker. The media pipeline posts its completion callback there."
+    },
+    "WORKER_ENABLED": {
+      "required": false,
+      "purpose": "Whether Terraform attaches the Worker's custom domain.",
+      "whenUnset": "Falls back to false at the reference site. The domain cannot bind to a script that does not exist, so this stays off until Wrangler has deployed the Worker once."
+    },
+    "WORKER_NAME": {
+      "required": true,
+      "purpose": "Wrangler service name of the Worker. generate-wrangler.ts refuses to build a configuration without it, and Terraform's custom domain routes to it by name."
+    }
+  },
+
+  "secrets": {
+    "CALLBACK_HMAC_SECRET": {
+      "required": true,
+      "purpose": "Shared between the Worker and the media pipeline, and the only reason the Worker believes a media-processed callback."
+    },
+    "CLOUDFLARE_API_TOKEN": {
+      "required": true,
+      "purpose": "Write credential for Terraform apply and for Wrangler. R2, Workers Scripts, DNS, Cache Rules, Workers Routes, Zone and SSL."
+    },
+    "CLOUDFLARE_API_TOKEN_PLAN": {
+      "required": true,
+      "purpose": "Read-only mirror of CLOUDFLARE_API_TOKEN, used by the pull-request plan job. A job triggered by a branch must not hold a credential that can change infrastructure. See the README."
+    },
+    "R2_MEDIA_RW_ACCESS_KEY_ID": {
+      "required": true,
+      "purpose": "S3 access key id for the public media bucket, write scope, used only by the media pipeline's upload step."
+    },
+    "R2_MEDIA_RW_SECRET_ACCESS_KEY": {
+      "required": true,
+      "purpose": "Secret half of R2_MEDIA_RW_ACCESS_KEY_ID."
+    },
+    "R2_PRIVATE_RO_ACCESS_KEY_ID": {
+      "required": true,
+      "purpose": "S3 access key id for the private bucket, read-only: the media pipeline reads originals and must never be able to destroy the only copy."
+    },
+    "R2_PRIVATE_RO_SECRET_ACCESS_KEY": {
+      "required": true,
+      "purpose": "Secret half of R2_PRIVATE_RO_ACCESS_KEY_ID."
+    },
+    "R2_STATE_RO_ACCESS_KEY_ID": {
+      "required": true,
+      "purpose": "S3 access key id for the Terraform state bucket, read-only, used by the pull-request plan job. terraform plan never persists state, so read is enough. See the README."
+    },
+    "R2_STATE_RO_SECRET_ACCESS_KEY": {
+      "required": true,
+      "purpose": "Secret half of R2_STATE_RO_ACCESS_KEY_ID."
+    },
+    "R2_STATE_RW_ACCESS_KEY_ID": {
+      "required": true,
+      "purpose": "S3 access key id for the Terraform state bucket, write scope, used only by the apply workflow."
+    },
+    "R2_STATE_RW_SECRET_ACCESS_KEY": {
+      "required": true,
+      "purpose": "Secret half of R2_STATE_RW_ACCESS_KEY_ID."
+    },
+    "TELEGRAM_ALLOWED_USER_IDS": {
+      "required": true,
+      "purpose": "Comma-separated numeric Telegram ids allowed to author. Everything else is dropped without a reply."
+    },
+    "TELEGRAM_BOT_TOKEN": {
+      "required": true,
+      "purpose": "BotFather token the Worker uses to answer Telegram."
+    },
+    "TELEGRAM_WEBHOOK_SECRET": {
+      "required": true,
+      "purpose": "Value Telegram was given at registration and sends back on every update; the Worker rejects anything without it."
+    },
+    "WORKER_DISPATCH_TOKEN": {
+      "required": true,
+      "purpose": "Becomes the Worker's GITHUB_DISPATCH_TOKEN, which dispatches the media workflow. The names differ because GitHub reserves the GITHUB_ prefix and will not store a secret using it."
+    }
+  }
+}

@@ -64,7 +64,7 @@ jobs:
       MEDIA_WORKFLOW_FILE: ${{ vars.MEDIA_WORKFLOW_FILE || 'process-media.yml' }}
       # Public browser ingestion key, used to scope the fallback relay to this
       # project. It is the same variable embedded in the Pages bundle.
-      AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY }}
+      AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY || '' }}
       # Already qualified as owner/repo, so the Worker never has to be told
       # which repository it belongs to.
       GITHUB_REPOSITORY: ${{ github.repository }}
