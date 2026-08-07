@@ -7,17 +7,34 @@ const API_KEY = "public-project-key";
 const env = { SITE_BASE_URL: ORIGIN, AMPLITUDE_API_KEY: API_KEY };
 const body = JSON.stringify({ api_key: API_KEY, events: [{ event_type: "[Amplitude] Page Viewed" }] });
 
-function request(method = "POST", overrides: { origin?: string; body?: string } = {}): Request {
+function request(
+  method = "POST",
+  overrides: { origin?: string; body?: string; clientIp?: string | null } = {},
+): Request {
+  const headers: Record<string, string> = {
+    Origin: overrides.origin ?? ORIGIN,
+    "content-type": "application/json",
+    "user-agent": "Test Browser",
+    Cookie: "private-site-cookie=must-not-leave",
+  };
+  const clientIp = overrides.clientIp === undefined ? "203.0.113.7" : overrides.clientIp;
+  if (clientIp !== null) headers["CF-Connecting-IP"] = clientIp;
+
   return new Request("https://worker.dinahaman.com/analytics", {
     method,
-    headers: {
-      Origin: overrides.origin ?? ORIGIN,
-      "content-type": "application/json",
-      "user-agent": "Test Browser",
-      "CF-Connecting-IP": "203.0.113.7",
-      Cookie: "private-site-cookie=must-not-leave",
-    },
+    headers,
     ...(method === "POST" ? { body: overrides.body ?? body } : {}),
+  });
+}
+
+function sentEvents(init: RequestInit | undefined): Record<string, unknown>[] {
+  return JSON.parse(String(init?.body)).events as Record<string, unknown>[];
+}
+
+function okResponse(): Response {
+  return new Response(JSON.stringify({ code: 200, events_ingested: 1 }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
   });
 }
 
@@ -35,12 +52,7 @@ describe("Amplitude fallback proxy", () => {
   });
 
   it("forwards a valid SDK payload without forwarding site cookies", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ code: 200, events_ingested: 1 }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
 
     const result = await handleAnalyticsProxy(request(), env);
 
@@ -49,12 +61,64 @@ describe("Amplitude fallback proxy", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe("https://api2.amplitude.com/2/httpapi");
-    expect(init?.body).toBe(body);
+    expect(JSON.parse(String(init?.body)).api_key).toBe(API_KEY);
+    expect(sentEvents(init)[0].event_type).toBe("[Amplitude] Page Viewed");
     const headers = new Headers(init?.headers);
     expect(headers.get("cookie")).toBeNull();
     expect(headers.get("origin")).toBeNull();
     expect(headers.get("user-agent")).toBe("Test Browser");
-    expect(headers.get("x-forwarded-for")).toBe("203.0.113.7");
+  });
+
+  // Amplitude geolocates from the connecting address, which for a relayed event
+  // is Cloudflare's. Without this every fallback visitor lands in the wrong country.
+  it("stamps the visitor address onto each event so Amplitude geolocates the visitor", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+    const two = JSON.stringify({
+      api_key: API_KEY,
+      events: [{ event_type: "session_start" }, { event_type: "page_engaged" }],
+    });
+
+    await handleAnalyticsProxy(request("POST", { body: two }), env);
+
+    expect(sentEvents(fetchSpy.mock.calls[0][1]).map((event) => event.ip)).toEqual([
+      "203.0.113.7",
+      "203.0.113.7",
+    ]);
+    expect(new Headers(fetchSpy.mock.calls[0][1]?.headers).get("x-forwarded-for")).toBeNull();
+  });
+
+  it("leaves an address the SDK already set alone", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+    const preset = JSON.stringify({
+      api_key: API_KEY,
+      events: [{ event_type: "session_start", ip: "198.51.100.4" }],
+    });
+
+    await handleAnalyticsProxy(request("POST", { body: preset }), env);
+
+    expect(sentEvents(fetchSpy.mock.calls[0][1])[0].ip).toBe("198.51.100.4");
+  });
+
+  it("still forwards when Cloudflare supplies no visitor address", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+
+    const result = await handleAnalyticsProxy(request("POST", { clientIp: null }), env);
+
+    expect(result.status).toBe(200);
+    expect(sentEvents(fetchSpy.mock.calls[0][1])[0].ip).toBeUndefined();
+  });
+
+  it("refuses a payload that only exceeds the ceiling once addresses are stamped", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    // Each stamp adds ~20 bytes, so enough events tip a legal body over the edge.
+    const events = Array.from({ length: 4000 }, () => ({ event_type: "page_scrolled" }));
+    const large = JSON.stringify({ api_key: API_KEY, events });
+    expect(new TextEncoder().encode(large).byteLength).toBeLessThan(128 * 1024);
+
+    const result = await handleAnalyticsProxy(request("POST", { body: large }), env);
+
+    expect(result.status).toBe(413);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("refuses another browser origin before reading or forwarding it", async () => {
