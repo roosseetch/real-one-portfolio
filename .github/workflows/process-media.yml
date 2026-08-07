@@ -58,6 +58,10 @@ jobs:
       MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
       WORKER_BASE_URL: ${{ vars.WORKER_BASE_URL }}
       DRAFT_ID: ${{ inputs.draftId }}
+      # Requested once and checked against the same list afterwards. Two copies
+      # of these numbers is how a completeness check ends up agreeing with a
+      # sanitiser that was asked for something else.
+      DERIVATIVE_WIDTHS: "1600,1200,800,320"
     steps:
       - uses: actions/checkout@v7
 
@@ -110,7 +114,7 @@ jobs:
       - name: Strip metadata and inject decoys
         run: |
           python scripts/sanitize-media.py "$WORK/originals" "$WORK/public" "$WORK/mapping.json" \
-            --widths 1600,1200,800,320
+            --widths "$DERIVATIVE_WIDTHS"
 
       - name: Verify nothing identifying survived
         run: |
@@ -132,18 +136,45 @@ jobs:
       # for whichever width the browser picked.
       - name: Check the derivative set is complete
         run: |
-          expected_widths="1600 1200 800 320"
           fail=0
           while read -r media_id; do
             [ -n "$media_id" ] || continue
-            for w in $expected_widths; do
-              # A width clamped to a smaller source is expected and fine; what
-              # is not fine is no file at that size or below.
-              if ! ls "$WORK"/public/"$media_id"-*.webp >/dev/null 2>&1; then
-                echo "::error::$media_id produced no WebP derivatives at all"
-                fail=1
-                break
+
+            # Read back the widths actually written, off the filenames the
+            # sanitiser produces: media_id-WIDTH.webp. Taking the segment after
+            # the last hyphen keeps this right for ids containing one.
+            widths=""
+            widest=0
+            for f in "$WORK"/public/"$media_id"-*.webp; do
+              [ -e "$f" ] || continue
+              w=${f##*-}
+              w=${w%.webp}
+              case "$w" in ''|*[!0-9]*) continue ;; esac
+              widths="$widths $w"
+              if [ "$w" -gt "$widest" ]; then
+                widest=$w
               fi
+            done
+
+            if [ -z "$widths" ]; then
+              echo "::error::$media_id produced no WebP derivatives at all"
+              fail=1
+              continue
+            fi
+
+            for expected in $(printf '%s' "$DERIVATIVE_WIDTHS" | tr ',' ' '); do
+              # sanitize-media.py clamps to the source rather than upscaling, so
+              # an expected width above the widest derivative is legitimately
+              # absent. At or below it, every one must be present exactly --
+              # that is the part the site relies on when it picks a width.
+              [ "$expected" -le "$widest" ] || continue
+              case " $widths " in
+                *" $expected "*) ;;
+                *)
+                  echo "::error::$media_id has no WebP derivative at ${expected}px"
+                  fail=1
+                  ;;
+              esac
             done
           done < <(jq -r 'keys[]' "$WORK/mapping.json")
           [ "$fail" -eq 0 ] || exit 1
