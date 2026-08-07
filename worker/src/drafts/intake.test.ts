@@ -245,3 +245,90 @@ describe("updates that do not start a draft", () => {
     expect(result.draft.input.text).toBe("an easy 8k");
   });
 });
+
+/**
+ * A picture sent as a file arrives as a document, never as a photo — Telegram
+ * does it unprompted with .webp. This used to match no branch: the caption sits
+ * in `caption` rather than `text`, so the message fell through to the text path,
+ * came out empty, and was answered 200 with nothing said.
+ */
+describe("a picture sent as a file", () => {
+  function documentMessage(mime: string | undefined, caption?: string): TelegramUpdate {
+    return {
+      update_id: 5,
+      message: {
+        message_id: 8,
+        date: 1_700_000_000,
+        chat: { id: 99, type: "private" },
+        from: { id: SENDER },
+        ...(caption === undefined ? {} : { caption }),
+        document: {
+          file_id: "doc",
+          file_unique_id: "u9",
+          file_name: "Image_20260806_114203.webp",
+          ...(mime === undefined ? {} : { mime_type: mime }),
+          file_size: 616_000,
+        },
+      },
+    };
+  }
+
+  it("becomes a draft, taking the caption as its text", async () => {
+    const result = await intakeUpdate(
+      documentMessage("image/webp", "The books that I like, and what do you read?"),
+      SENDER,
+      env(),
+    );
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.input.text).toBe("The books that I like, and what do you read?");
+    expect(result.draft.record?.title).toBe("Morning run by the river");
+  });
+
+  it("is previewed, so the author sees something back", async () => {
+    await intakeUpdate(documentMessage("image/webp", "a caption"), SENDER, env());
+    expect(sent.length).toBeGreaterThan(0);
+    expect(keyboards.length).toBeGreaterThan(0);
+  });
+
+  it("says so when the file is not an image or a video", async () => {
+    const result = await intakeUpdate(documentMessage("application/pdf", "read this"), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("I can only publish images and videos");
+    // Declining must not leave a half-made draft behind.
+    expect(storage.objects.size).toBe(0);
+  });
+});
+
+/**
+ * The failure that made this worth fixing: a message the intake could not use
+ * was answered 200 and dropped, which from the author's side is
+ * indistinguishable from a bot that has died.
+ */
+describe("messages the intake cannot use", () => {
+  it("answers a message carrying neither text nor media", async () => {
+    const result = await intakeUpdate(textMessage(undefined), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("could not find anything to publish");
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it("answers whitespace rather than treating it as a note", async () => {
+    await intakeUpdate(textMessage("   \n  "), SENDER, env());
+    expect(sent.join(" ")).toContain("could not find anything to publish");
+  });
+
+  it("stays quiet for an update with no message to answer", async () => {
+    // An edited_message has a chat, but replying would be answering a typo fix.
+    // A button press has no message of its own at all.
+    const update: TelegramUpdate = {
+      update_id: 6,
+      callback_query: { id: "cb", from: { id: SENDER }, data: "publish" },
+    };
+
+    expect((await intakeUpdate(update, SENDER, env())).status).toBe("unsupported");
+    expect(sent).toEqual([]);
+  });
+});

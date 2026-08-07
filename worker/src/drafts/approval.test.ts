@@ -426,6 +426,29 @@ describe("previewing media", () => {
     expect(calls.map((c) => c.method)).not.toContain("sendMediaGroup");
   });
 
+  it("still previews when Telegram refuses to re-send the file as a photo", async () => {
+    // A .webp sent as a file is a sticker to Telegram, so sendPhoto rejects the
+    // file reference. The draft must not be left unpreviewed over it: the
+    // picture is already in the private bucket and will still be published.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const method = String(url).split("/").pop() ?? "";
+      calls.push({ method, body: JSON.parse(String(init?.body)) });
+      if (method === "sendPhoto") {
+        return new Response(JSON.stringify({ ok: false, description: "wrong file identifier" }), { status: 400 });
+      }
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }), { status: 200 });
+    });
+
+    const draft = await withOriginals(1);
+
+    expect(calls.map((c) => c.method)).toContain("sendPhoto");
+    const fallback = calls.find((c) => c.method === "sendMessage");
+    expect(String(fallback?.body.text)).toContain("Is this the information and media that should become public?");
+    expect(fallback?.body.reply_markup).toBeDefined();
+    // The preview counts as shown, so the draft can actually be approved.
+    expect(draft.state).toBe("awaiting_approval");
+  });
+
   it("sends several as an album plus a separate control message", async () => {
     // Telegram allows no buttons on a media group, which is exactly why the
     // spec pairs one with a control message carrying the text and the decision.
