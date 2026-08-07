@@ -10,6 +10,7 @@
 import { randomId } from "../ids";
 import type { TelegramApiEnv } from "../telegram/api";
 import type { DraftOriginal } from "../drafts/types";
+import { sniff, SNIFF_BYTES, type FormatEntry } from "./formats";
 
 const API_BASE = "https://api.telegram.org";
 
@@ -36,11 +37,18 @@ export function originalKey(activityId: string, mediaId: string, extension: stri
   return `originals/${activityId}/${mediaId}.${extension}`;
 }
 
-/** Telegram's own path carries the extension; anything unrecognised is stored as .bin rather than guessed at. */
-function extensionOf(path: string, type: "image" | "video"): string {
+/**
+ * Telegram's own path usually carries the extension; the format the bytes turn
+ * out to be is the fallback.
+ *
+ * Nothing downstream reads it — Pillow opens by content — so this is only about
+ * the private bucket describing itself honestly. It used to guess `jpg` or
+ * `mp4` from the requested type, which is exactly the kind of small lie that
+ * costs an hour when something later goes wrong.
+ */
+function extensionOf(path: string, format: FormatEntry): string {
   const match = /\.([a-z0-9]{2,4})$/i.exec(path);
-  if (match) return match[1].toLowerCase();
-  return type === "image" ? "jpg" : "mp4";
+  return match ? match[1].toLowerCase() : format.extension;
 }
 
 interface FileInfo {
@@ -49,20 +57,42 @@ interface FileInfo {
 }
 
 /**
- * Downloads one file and stores it privately.
+ * Why a file did not become an original.
  *
- * Returns null rather than throwing: one unreadable photo in an album should
- * cost that photo, not the whole draft, and the author still gets a preview of
- * what did arrive.
+ * `null` used to cover both of these, and that is why a dropped file was
+ * invisible: a transport failure is nobody's fault and worth retrying, whereas
+ * a file whose contents are not what its name claimed is something the author
+ * needs to be told about. Only a distinguishable result lets the caller say so.
+ */
+export type StoreResult =
+  | { status: "stored"; original: DraftOriginal }
+  | { status: "wrong-format"; label: string | null }
+  | { status: "unavailable" };
+
+/**
+ * Downloads one file, checks it really is what it claimed, and stores it
+ * privately.
+ *
+ * Never throws: one unreadable photo in an album should cost that photo, not
+ * the whole draft, and the author still gets a preview of what did arrive.
+ *
+ * The download is buffered rather than streamed into R2, and the reason is
+ * ordering rather than convenience. The signature cannot be read until some
+ * bytes have arrived, and with a stream R2 has already accepted them by then —
+ * so rejecting a file would mean deleting a partial object, in the one place
+ * the system promises nothing exists until sanitisation has run. Buffering
+ * makes "verify, then write" structural. The allocation is bounded by
+ * MAX_DOWNLOAD_BYTES, which is checked twice below and is the only thing
+ * keeping this well inside the isolate's memory.
  */
 export async function storeOriginal(
   env: OriginalsEnv,
   activityId: string,
   request: OriginalRequest,
-): Promise<DraftOriginal | null> {
+): Promise<StoreResult> {
   if (request.bytes !== undefined && request.bytes > MAX_DOWNLOAD_BYTES) {
     console.warn(`Original too large for the Bot API to serve: ${request.bytes} bytes`);
-    return null;
+    return { status: "unavailable" };
   }
 
   let info: FileInfo;
@@ -75,40 +105,75 @@ export async function storeOriginal(
     const payload = (await response.json()) as { ok: boolean; result?: FileInfo };
     if (!response.ok || !payload.ok || !payload.result?.file_path) {
       console.warn(`Telegram getFile did not return a path (status ${response.status})`);
-      return null;
+      return { status: "unavailable" };
     }
     info = payload.result;
   } catch {
     console.warn("Telegram getFile could not be reached");
-    return null;
+    return { status: "unavailable" };
   }
 
-  const mediaId = randomId();
-  const extension = extensionOf(info.file_path ?? "", request.type);
-  const key = originalKey(activityId, mediaId, extension);
+  // A document arrives with no file_size of its own — the case that started all
+  // of this — so the check above can be skipped entirely. getFile always
+  // reports one, and it is the last chance to refuse before the bytes are held
+  // in memory.
+  if (info.file_size !== undefined && info.file_size > MAX_DOWNLOAD_BYTES) {
+    console.warn(`Original too large to buffer: ${info.file_size} bytes`);
+    return { status: "unavailable" };
+  }
 
+  let buffer: ArrayBuffer;
   try {
     // The download URL embeds the bot token, so it is built here and never
     // logged, returned, or stored on the draft.
     const file = await fetch(`${API_BASE}/file/bot${env.TELEGRAM_BOT_TOKEN}/${info.file_path}`);
-    if (!file.ok || file.body === null) {
+    if (!file.ok) {
       console.warn(`Could not download the original (status ${file.status})`);
-      return null;
+      return { status: "unavailable" };
     }
+    buffer = await file.arrayBuffer();
+  } catch {
+    console.warn("Could not download the original");
+    return { status: "unavailable" };
+  }
 
-    await env.PRIVATE_BUCKET.put(key, file.body);
+  const format = sniff(new Uint8Array(buffer, 0, Math.min(SNIFF_BYTES, buffer.byteLength)));
+
+  if (format === null || !format.open) {
+    // console.error, not warn: flush() keeps warnings only as context around an
+    // error, so a warning here would leave a refusal with no durable trace —
+    // which is the condition that made the original report unreconstructable.
+    console.error(`Refused an original whose contents are ${format?.label ?? "not a format we publish"}`);
+    return { status: "wrong-format", label: format?.label ?? null };
+  }
+
+  // The bytes outrank the claim. A video filed as an image is not a cosmetic
+  // mistake: the media workflow selects on `type == "image"`, so Pillow would
+  // be handed an mp4 and the run would fail with nothing said to anyone.
+  if (format.kind !== request.type) {
+    console.warn(`Filed as ${format.kind} rather than ${request.type}: the bytes are a ${format.label}`);
+  }
+
+  const mediaId = randomId();
+  const key = originalKey(activityId, mediaId, extensionOf(info.file_path ?? "", format));
+
+  try {
+    await env.PRIVATE_BUCKET.put(key, buffer);
   } catch {
     console.warn("Could not store the original in the private bucket");
-    return null;
+    return { status: "unavailable" };
   }
 
   return {
-    mediaId,
-    type: request.type,
-    fileId: request.fileId,
-    key,
-    width: request.width,
-    height: request.height,
-    bytes: request.bytes ?? info.file_size,
+    status: "stored",
+    original: {
+      mediaId,
+      type: format.kind,
+      fileId: request.fileId,
+      key,
+      width: request.width,
+      height: request.height,
+      bytes: request.bytes ?? info.file_size ?? buffer.byteLength,
+    },
   };
 }

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { aiRecord, createFakeAi, type AiStep } from "../test-support/ai";
+import { bodyFor, type SampleFormat } from "../test-support/bytes";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
-import type { TelegramUpdate } from "../telegram/types";
+import type { TelegramMessage, TelegramUpdate } from "../telegram/types";
 import { intakeUpdate } from "./intake";
 import { setPendingEdit } from "./pending";
 import { loadDraft, saveDraft } from "./store";
@@ -35,6 +36,33 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+/**
+ * The same recording mock, with a download that actually serves bytes.
+ *
+ * The default `getFile` above returns no `file_path`, so `storeOriginal` gives
+ * up before fetching anything — which is what every other test here wants. The
+ * contents check has nothing to read under that, so the cases about what the
+ * bytes turn out to be need a file to arrive.
+ */
+function servingFile(format: SampleFormat) {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    if (String(url).includes("/getFile")) {
+      return new Response(
+        JSON.stringify({ ok: true, result: { file_path: "documents/file_9.webp", file_size: 2048 } }),
+      );
+    }
+
+    // The download itself carries no body; everything else is a Bot API call.
+    if (init?.body === undefined) return new Response(bodyFor(format), { status: 200 });
+
+    const body = JSON.parse(String(init.body));
+    if (body.text !== undefined) sent.push(body.text);
+    if (body.caption !== undefined) sent.push(body.caption);
+    if (body.reply_markup !== undefined) keyboards.push(body.reply_markup);
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }), { status: 200 });
+  });
+}
 
 function env(...steps: AiStep[]) {
   return {
@@ -291,6 +319,21 @@ describe("a picture sent as a file", () => {
     expect(keyboards.length).toBeGreaterThan(0);
   });
 
+  // The message that was reported. Telegram omits the type when the sending
+  // client cannot name it, and the old check read that silence as "not media".
+  it("becomes a draft even when Telegram sent no mime type at all", async () => {
+    const result = await intakeUpdate(documentMessage(undefined, "no type on this one"), SENDER, env());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.input.text).toBe("no type on this one");
+  });
+
+  it("becomes a draft when Telegram could only call it application/octet-stream", async () => {
+    const result = await intakeUpdate(documentMessage("application/octet-stream", "still a picture"), SENDER, env());
+
+    expect(result.status).toBe("created");
+  });
+
   it("says so when the file is not an image or a video", async () => {
     const result = await intakeUpdate(documentMessage("application/pdf", "read this"), SENDER, env());
 
@@ -298,6 +341,150 @@ describe("a picture sent as a file", () => {
     expect(sent.join(" ")).toContain("I can only publish images and videos");
     // Declining must not leave a half-made draft behind.
     expect(storage.objects.size).toBe(0);
+  });
+
+  // The reply named nothing the first time this happened, and a decline answers
+  // 200, which the error log does not persist — so neither the chat nor R2
+  // recorded what had been refused.
+  it("quotes what Telegram called the file, so the next refusal is readable from the chat", async () => {
+    await intakeUpdate(documentMessage("application/pdf"), SENDER, env());
+
+    expect(sent.join(" ")).toContain("application/pdf");
+    expect(sent.join(" ")).toContain("Image_20260806_114203.webp");
+  });
+
+  // Accepted today, then handed to a sanitiser with no decoder for it, where
+  // the run fails and nothing tells the author anything.
+  it("refuses a HEIC by name rather than stranding it in the pipeline", async () => {
+    const result = await intakeUpdate(documentMessage("image/heic"), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("HEIC");
+    expect(sent.join(" ")).toContain("JPEG");
+    expect(storage.objects.size).toBe(0);
+  });
+});
+
+/**
+ * Telegram turns a `.webp` upload into a sticker on its own, so this is the same
+ * picture the author meant to send, arriving under a field nothing used to read.
+ */
+describe("a picture Telegram called a sticker", () => {
+  function stickerMessage(
+    overrides: Partial<NonNullable<TelegramMessage["sticker"]>> = {},
+    caption?: string,
+  ): TelegramUpdate {
+    return {
+      update_id: 9,
+      message: {
+        message_id: 11,
+        date: 1_700_000_000,
+        chat: { id: 99, type: "private" },
+        from: { id: SENDER },
+        ...(caption === undefined ? {} : { caption }),
+        sticker: {
+          file_id: "stick",
+          file_unique_id: "u7",
+          is_animated: false,
+          is_video: false,
+          width: 512,
+          height: 512,
+          file_size: 24_000,
+          ...overrides,
+        },
+      },
+    };
+  }
+
+  it("becomes a draft rather than an unanswered message", async () => {
+    const result = await intakeUpdate(stickerMessage({}, "from the trip"), SENDER, env());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.input.text).toBe("from the trip");
+  });
+
+  it("says an animated sticker moves, rather than that it found nothing to publish", async () => {
+    const result = await intakeUpdate(stickerMessage({ is_animated: true }), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("animated sticker");
+    expect(sent.join(" ")).not.toContain("could not find anything to publish");
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it("says the same of a video sticker", async () => {
+    await intakeUpdate(stickerMessage({ is_video: true }), SENDER, env());
+
+    expect(sent.join(" ")).toContain("video sticker");
+  });
+});
+
+/**
+ * The last tier: the name got the file this far and the bytes disagree. The
+ * draft is already made by then, so a refusal here has to cost the file without
+ * costing the message it arrived with.
+ */
+describe("a file whose contents are not what its name said", () => {
+  function documentMessage(caption?: string): TelegramUpdate {
+    return {
+      update_id: 12,
+      message: {
+        message_id: 13,
+        date: 1_700_000_000,
+        chat: { id: 99, type: "private" },
+        from: { id: SENDER },
+        ...(caption === undefined ? {} : { caption }),
+        document: {
+          file_id: "doc",
+          file_unique_id: "u9",
+          file_name: "invoice.webp",
+          mime_type: "image/webp",
+          file_size: 616_000,
+        },
+      },
+    };
+  }
+
+  it("stores the original when the bytes agree with the name", async () => {
+    servingFile("webp");
+
+    const result = await intakeUpdate(documentMessage("the good one"), SENDER, env());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.originals).toHaveLength(1);
+    expect([...storage.objects.keys()]).toContainEqual(expect.stringMatching(/^originals\//));
+  });
+
+  it("keeps the author's words and tells them which file went", async () => {
+    servingFile("pdf");
+
+    const result = await intakeUpdate(documentMessage("worth keeping anyway"), SENDER, env());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.originals).toHaveLength(0);
+    expect(result.draft.input.text).toBe("worth keeping anyway");
+    expect(sent.join(" ")).toContain("its contents are a PDF");
+    expect(sent.join(" ")).toContain("invoice.webp");
+  });
+
+  it("writes nothing to the private bucket beyond the draft itself", async () => {
+    servingFile("pdf");
+
+    await intakeUpdate(documentMessage("worth keeping anyway"), SENDER, env());
+
+    expect([...storage.objects.keys()].every((k) => k.startsWith("drafts/"))).toBe(true);
+  });
+
+  // Nothing to approve: the one file was refused and there were no words. A
+  // preview here would ask the author to publish an empty record.
+  it("does not preview an empty draft when the file was all there was", async () => {
+    servingFile("pdf");
+
+    const result = await intakeUpdate(documentMessage(), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("its contents are");
+    expect(keyboards).toEqual([]);
   });
 });
 

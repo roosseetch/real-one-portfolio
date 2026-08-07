@@ -133,6 +133,31 @@ export async function sendPhoto(
   return result?.message_id ?? null;
 }
 
+/**
+ * Sends the same file as an attachment instead of a photo.
+ *
+ * Telegram will not re-send every file reference through `sendPhoto` — a .webp
+ * sent as a file is a sticker to it, and a sticker cannot carry a caption — but
+ * it accepts the very same reference here. Without this rung the preview falls
+ * all the way back to words and the author approves a picture they never saw.
+ */
+export async function sendDocument(
+  env: TelegramApiEnv,
+  chatId: number,
+  fileId: string,
+  caption: string,
+  replyMarkup?: InlineKeyboardMarkup,
+): Promise<number | null> {
+  const result = await call<{ message_id: number }>(env, "sendDocument", {
+    chat_id: chatId,
+    document: fileId,
+    caption,
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+
+  return result?.message_id ?? null;
+}
+
 export interface MediaGroupItem {
   type: "photo" | "video";
   media: string;
