@@ -87,7 +87,42 @@ describe("Amplitude fallback proxy", () => {
     expect(new Headers(fetchSpy.mock.calls[0][1]?.headers).get("x-forwarded-for")).toBeNull();
   });
 
-  it("leaves an address the SDK already set alone", async () => {
+  // The payload the SDK actually sends. Its context plugin stamps "$remote" on
+  // every event, so a guard that only filled in a missing `ip` never fired once
+  // in production — and passed its tests, which used events carrying no `ip`.
+  it("overrides the SDK's $remote placeholder, which is what really arrives", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+    const asSent = JSON.stringify({
+      api_key: API_KEY,
+      events: [
+        { event_type: "session_start", ip: "$remote" },
+        { event_type: "page_engaged", ip: "$remote" },
+      ],
+    });
+
+    await handleAnalyticsProxy(request("POST", { body: asSent }), env);
+
+    expect(sentEvents(fetchSpy.mock.calls[0][1]).map((event) => event.ip)).toEqual([
+      "203.0.113.7",
+      "203.0.113.7",
+    ]);
+  });
+
+  it("forwards $remote untouched when Cloudflare supplies no visitor address", async () => {
+    // Nothing better to say than what the SDK already said, and dropping the
+    // placeholder would lose the visitor's country rather than approximate it.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
+    const asSent = JSON.stringify({
+      api_key: API_KEY,
+      events: [{ event_type: "session_start", ip: "$remote" }],
+    });
+
+    await handleAnalyticsProxy(request("POST", { body: asSent, clientIp: null }), env);
+
+    expect(sentEvents(fetchSpy.mock.calls[0][1])[0].ip).toBe("$remote");
+  });
+
+  it("leaves a concrete address alone", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse());
     const preset = JSON.stringify({
       api_key: API_KEY,
