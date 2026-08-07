@@ -11,6 +11,7 @@ import { editRecord, regenerateRecord } from "../ai/generate";
 import { toPublicRecord } from "../content/records";
 import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
+import { resendsAsPhoto } from "../media/formats";
 import { dispatchMediaProcessing, newJobToken, type DispatchEnv } from "../publishing/dispatch";
 import { publishRecord, type PublishEnv } from "../publishing/publish";
 import { setPendingEdit } from "./pending";
@@ -117,8 +118,14 @@ async function sendPreviewMessages(
     // the picture and the words it would be published with together.
     const only = originals[0];
     if (only.type === "image" && text.length <= MEDIA_CAPTION_LIMIT) {
-      const shown = await sendPhoto(env, draft.source.chatId, only.fileId, text, keyboard);
-      if (shown !== null) return shown;
+      // Skipped for a WebP rather than spent: Telegram treats that file
+      // reference as a sticker and answers 400 to every one of them, so asking
+      // bought a round trip and a `sendPhoto failed with status 400` warning on
+      // a preview that then worked.
+      if (resendsAsPhoto(only.key)) {
+        const shown = await sendPhoto(env, draft.source.chatId, only.fileId, text, keyboard);
+        if (shown !== null) return shown;
+      }
 
       // Telegram will not re-send every file reference as a photo — a .webp
       // sent as a file is a sticker to it — but it takes the same reference as

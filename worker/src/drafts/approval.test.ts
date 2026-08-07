@@ -404,13 +404,18 @@ describe("publish", () => {
 });
 
 describe("previewing media", () => {
-  const withOriginals = async (count: number, type: "image" | "video" = "image") => {
+  const withOriginals = async (
+    count: number,
+    type: "image" | "video" = "image",
+    /** The stored object's extension, which is how the preview knows a WebP. */
+    extension = "jpg",
+  ) => {
     const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "at the campus");
     const originals = Array.from({ length: count }, (_, i) => ({
       mediaId: `media${i}`,
       type,
       fileId: `file-${i}`,
-      key: `originals/${created.activityId}/media${i}.jpg`,
+      key: `originals/${created.activityId}/media${i}.${extension}`,
     }));
     return sendPreview(env(), { ...created, record: RECORD, originals });
   };
@@ -476,6 +481,30 @@ describe("previewing media", () => {
     expect(String(fallback?.body.text)).toContain("Is this the information and media that should become public?");
     expect(fallback?.body.reply_markup).toBeDefined();
     // The preview counts as shown, so the draft can actually be approved.
+    expect(draft.state).toBe("awaiting_approval");
+  });
+
+  // Observed in production: every webp preview logged `sendPhoto failed with
+  // status 400` and then succeeded on the rung below. Correct, but it spent a
+  // round trip on a refusal and wrote a warning that reads like a fault.
+  it("does not offer a webp to sendPhoto, which Telegram refuses every time", async () => {
+    const draft = await withOriginals(1, "image", "webp");
+
+    expect(calls.map((c) => c.method)).not.toContain("sendPhoto");
+    const attached = calls.find((c) => c.method === "sendDocument");
+    expect(attached?.body.document).toBe("file-0");
+    expect(String(attached?.body.caption)).toContain("should become public?");
+    expect(attached?.body.reply_markup).toBeDefined();
+    expect(draft.state).toBe("awaiting_approval");
+  });
+
+  it("still falls back to words when the document is refused too", async () => {
+    // Skipping a rung must not cost the rung below it.
+    refusing("sendDocument");
+
+    const draft = await withOriginals(1, "image", "webp");
+
+    expect(String(calls.find((c) => c.method === "sendMessage")?.body.text)).toContain("should become public?");
     expect(draft.state).toBe("awaiting_approval");
   });
 
