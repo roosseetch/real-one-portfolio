@@ -59,18 +59,36 @@ function parsePayload(raw: string, apiKey: string): AmplitudePayload | null {
 }
 
 /**
+ * What the Browser SDK writes into `ip` to mean "use the address this arrived
+ * from". Its context plugin stamps it on every event unconditionally while
+ * `trackingOptions.ipAddress` is on, which is the default.
+ *
+ * The instruction is right for a direct upload and wrong for a relayed one,
+ * where the address it points at is Cloudflare's. Reading it as an address the
+ * SDK had already chosen is what left the stamp below unreachable in
+ * production: `ip` was never `undefined`, so every relayed event kept resolving
+ * to the edge — while the tests, which built events with no `ip` key at all,
+ * went on passing against a payload shape the SDK never emits.
+ */
+const SDK_CONNECTION_IP = "$remote";
+
+/**
  * Amplitude resolves country and city from whichever address opened the
  * connection, which for a relayed event is a Cloudflare one rather than the
  * visitor's—and it ignores X-Forwarded-For. Its HTTP V2 API does read a
  * per-event `ip`, so carry the visitor's address there. A direct request needs
  * nothing: it already arrives from the visitor's own connection.
+ *
+ * A concrete address is still left alone. Only the placeholder is overridden,
+ * because only the placeholder is a question this relay is better placed to
+ * answer than whoever set it.
  */
 function withVisitorIp(payload: AmplitudePayload, clientIp: string | null): string {
   if (clientIp) {
     for (const event of payload.events) {
       if (typeof event !== "object" || event === null || Array.isArray(event)) continue;
       const record = event as { ip?: unknown };
-      if (record.ip === undefined) record.ip = clientIp;
+      if (record.ip === undefined || record.ip === SDK_CONNECTION_IP) record.ip = clientIp;
     }
   }
   return JSON.stringify(payload);
