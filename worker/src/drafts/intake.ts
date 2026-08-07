@@ -19,6 +19,12 @@ import type { Draft } from "./types";
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 
+const NOTHING_USABLE_MESSAGE =
+  "I could not find anything to publish in that message. Send a note, a photo, or a video — a picture sent as a file works too.";
+
+const UNUSABLE_FILE_MESSAGE =
+  "I can only publish images and videos. That file is neither, so I have left it alone.";
+
 export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv, MediaIntakeEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
@@ -39,9 +45,11 @@ export type IntakeResult =
  *
  * `edited_message` deliberately does not: someone fixing a typo in Telegram
  * would otherwise get a second draft for the same thought. Editing a draft is
- * its own flow, driven by the buttons on the preview. Photos and videos are
- * likewise left alone until the media pipeline exists to sanitize them — until
- * then there is nowhere safe for the file to go.
+ * its own flow, driven by the buttons on the preview.
+ *
+ * Whatever arrives, the author hears back. A message this cannot use is
+ * declined out loud rather than dropped: silence is indistinguishable from a
+ * broken bot, and it leaves nothing behind to explain what happened.
  */
 /**
  * Consumes a pending edit instruction, if this chat owes one.
@@ -76,12 +84,21 @@ export async function intakeUpdate(
   waitUntil: (promise: Promise<unknown>) => void = () => {},
 ): Promise<IntakeResult> {
   const message = update.message;
-  if (!message) return { status: "unsupported" };
+  if (!message) {
+    // An edited_message, or an update type the webhook does not subscribe to.
+    // There is no chat to answer here, so the log is the only record.
+    console.warn("Ignored a Telegram update carrying no message");
+    return { status: "unsupported" };
+  }
 
-  if (message.photo || message.video) return intakeMediaMessage(message, senderId, env, waitUntil);
+  if (message.photo || message.video || message.document) {
+    return intakeMediaMessage(message, senderId, env, waitUntil);
+  }
 
   const text = message.text?.trim();
-  if (!text) return { status: "unsupported" };
+  if (!text) {
+    return decline(env, message, "no text and no usable media", NOTHING_USABLE_MESSAGE);
+  }
 
   // Checked before anything else: after "Edit text" the author's next message
   // is the instruction, and it is indistinguishable from a new note otherwise.
@@ -112,7 +129,12 @@ async function intakeMediaMessage(
   waitUntil: (promise: Promise<unknown>) => void,
 ): Promise<IntakeResult> {
   const filed = await intakeMedia(message, senderId, env);
-  if (filed.status === "unsupported") return { status: "unsupported" };
+  if (filed.status === "unsupported") {
+    // Only reachable via a document: photo and video are always usable, so this
+    // is a file whose mime type is neither an image nor a video.
+    const kind = message.document?.mime_type ?? "unknown";
+    return decline(env, message, `a document of type ${kind}`, UNUSABLE_FILE_MESSAGE);
+  }
 
   // A later item of an album: the first one owns the preview.
   if (filed.status === "appended") return { status: "created", draft: filed.draft };
@@ -135,6 +157,26 @@ async function intakeMediaMessage(
   );
 
   return { status: "created", draft };
+}
+
+/**
+ * Answers a message the intake cannot turn into a draft.
+ *
+ * Every path that produces no draft comes through here, because returning 200
+ * and saying nothing is what made a dropped message look like a dead bot — and
+ * left no log either, so nothing recorded that anything had arrived.
+ * `sendMessage` swallows its own transport failures, so this cannot throw and
+ * turn a declined message into a 503 and a Telegram redelivery.
+ */
+async function decline(
+  env: IntakeEnv,
+  message: TelegramMessage,
+  reason: string,
+  reply: string,
+): Promise<IntakeResult> {
+  console.warn(`Declined a message: ${reason}`);
+  await sendMessage(env, message.chat.id, reply);
+  return { status: "unsupported" };
 }
 
 /** Asks the model for a record, stores it, and shows the author the result. */

@@ -52,9 +52,29 @@ export function videoRequest(message: TelegramMessage): OriginalRequest | null {
   };
 }
 
+/**
+ * An image or video sent as a file.
+ *
+ * The mime type is the gate. A document is an arbitrary file — a PDF, an
+ * archive, anything — whereas Telegram guarantees `photo` is a picture, so
+ * accepting one unchecked would hand the sanitiser something it cannot parse
+ * and turn a wrong attachment into a failed pipeline run. Telegram reports no
+ * dimensions for a document; the sanitiser reads them off the file itself.
+ */
+export function documentRequest(message: TelegramMessage): OriginalRequest | null {
+  const document = message.document;
+  if (!document?.file_id) return null;
+
+  const mime = document.mime_type ?? "";
+  if (mime.startsWith("image/")) return { type: "image", fileId: document.file_id, bytes: document.file_size };
+  if (mime.startsWith("video/")) return { type: "video", fileId: document.file_id, bytes: document.file_size };
+
+  return null;
+}
+
 /** Null when the message carries nothing this handles. */
 export function mediaRequest(message: TelegramMessage): OriginalRequest | null {
-  return largestPhoto(message) ?? videoRequest(message);
+  return largestPhoto(message) ?? videoRequest(message) ?? documentRequest(message);
 }
 
 export type MediaIntakeResult =

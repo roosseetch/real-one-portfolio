@@ -64,6 +64,53 @@ describe("choosing which rendition to keep", () => {
   });
 });
 
+// Choosing "send as file" is how an author avoids Telegram re-compressing a
+// picture, and Telegram does it unprompted with .webp. These arrive as
+// documents, which used to match nothing and be dropped in silence.
+describe("media sent as a file", () => {
+  const asDocument = (mime: string | undefined, size = 616_000): TelegramMessage =>
+    photoMessage({
+      photo: undefined,
+      document: {
+        file_id: "doc",
+        file_unique_id: "u9",
+        file_name: "Image_20260806_114203.webp",
+        ...(mime === undefined ? {} : { mime_type: mime }),
+        file_size: size,
+      },
+    });
+
+  it("takes a webp sent as a file", () => {
+    expect(mediaRequest(asDocument("image/webp"))).toMatchObject({
+      type: "image",
+      fileId: "doc",
+      bytes: 616_000,
+    });
+  });
+
+  it("takes any other image type the sanitiser can open", () => {
+    expect(mediaRequest(asDocument("image/png"))).toMatchObject({ type: "image", fileId: "doc" });
+  });
+
+  it("files a video document as a video, not an image", () => {
+    expect(mediaRequest(asDocument("video/mp4"))).toMatchObject({ type: "video", fileId: "doc" });
+  });
+
+  it("refuses a file that is neither, rather than handing the sanitiser a PDF", () => {
+    expect(mediaRequest(asDocument("application/pdf"))).toBeNull();
+  });
+
+  it("refuses a file Telegram gave no mime type for", () => {
+    expect(mediaRequest(asDocument(undefined))).toBeNull();
+  });
+
+  it("prefers the photo when a message somehow carries both", () => {
+    const message = asDocument("image/webp");
+    message.photo = photoMessage().photo;
+    expect(mediaRequest(message)?.fileId).toBe("large");
+  });
+});
+
 describe("intakeMedia", () => {
   it("stores the original in the private bucket only", async () => {
     const result = await intakeMedia(photoMessage(), SENDER, env());

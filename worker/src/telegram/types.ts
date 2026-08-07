@@ -40,6 +40,23 @@ export interface TelegramVideo {
   file_size?: number;
 }
 
+/**
+ * A file sent without Telegram's own image handling.
+ *
+ * Choosing "send as file" is how an author avoids Telegram re-compressing a
+ * picture, and it is what Telegram does unprompted with .webp — so this is a
+ * normal way to send media, not an edge case. Unlike `photo`, nothing here is
+ * guaranteed to be an image, which is why `mime_type` has to be checked before
+ * the file reaches the sanitiser.
+ */
+export interface TelegramDocument {
+  file_id: string;
+  file_unique_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+}
+
 export interface TelegramMessage {
   message_id: number;
   date: number;
@@ -51,6 +68,8 @@ export interface TelegramMessage {
   /** Sizes of a single photo, smallest first. */
   photo?: TelegramPhotoSize[];
   video?: TelegramVideo;
+  /** An image or video sent as a file rather than through Telegram's compression. */
+  document?: TelegramDocument;
   /** The text sent alongside media, which arrives here rather than in `text`. */
   caption?: string;
   /**
