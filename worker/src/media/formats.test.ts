@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { headerFor, truncatedBody } from "../test-support/bytes";
-import { classifyFile, sniff, SNIFF_BYTES } from "./formats";
+import { classifyFile, resendsAsPhoto, sniff, SNIFF_BYTES } from "./formats";
 
 describe("what a file claims to be", () => {
   it("takes a webp by its mime type", () => {
@@ -86,6 +86,28 @@ describe("what a file claims to be", () => {
 
   it("reads only the last dot segment, so report.pdf.exe is not a pdf", () => {
     expect(classifyFile({ mime: null, name: "report.pdf.exe" })).toEqual({ status: "unknown" });
+  });
+});
+
+// Not a property of the file so much as of what Telegram will do with it: a
+// .webp file reference is sticker-class to them, and a sticker takes no caption.
+describe("what Telegram will re-send as a photo", () => {
+  it("does not offer a webp, which sendPhoto refuses every time", () => {
+    expect(resendsAsPhoto("originals/act1/media0.webp")).toBe(false);
+  });
+
+  it("offers a jpeg, which is the shape the preview wants", () => {
+    expect(resendsAsPhoto("originals/act1/media0.jpg")).toBe(true);
+  });
+
+  it("ignores the case of the extension", () => {
+    expect(resendsAsPhoto("originals/act1/MEDIA0.WEBP")).toBe(false);
+  });
+
+  // The rung below still catches a refusal, whereas guessing "no" would cost
+  // every unusual key the caption-on-photo shape spec §7.2 asks for.
+  it("offers a name it cannot place, rather than assuming the worst", () => {
+    expect(resendsAsPhoto("originals/act1/media0")).toBe(true);
   });
 });
 

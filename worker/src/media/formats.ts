@@ -199,6 +199,33 @@ export function classifyFile(file: FileLabel): FormatVerdict {
   return { status: "unknown" };
 }
 
+/**
+ * Formats Telegram will not re-send through `sendPhoto`.
+ *
+ * Only WebP, and only because Telegram treats one as sticker-class: a sticker
+ * carries no caption, so the call is refused rather than silently downgraded.
+ * Everything else in the table above goes through as a photo.
+ */
+const STICKER_CLASS = new Set<FormatEntry>([WEBP]);
+
+/**
+ * Whether a stored original is worth offering to `sendPhoto` at all.
+ *
+ * The preview tries a photo first and an attachment second, and for a WebP the
+ * first rung answered 400 every single time — a wasted round trip, and a
+ * warning that reads like a fault on a request that then worked.
+ *
+ * Keyed off the stored object's name, which carries Telegram's own extension
+ * or, where its path had none, the one the sniffed bytes gave it. A name this
+ * cannot place is worth trying: the attachment rung still catches a refusal,
+ * whereas guessing "no" would cost every unusual key the caption-on-photo shape
+ * that spec §7.2 asks for.
+ */
+export function resendsAsPhoto(key: string): boolean {
+  const entry = BY_EXTENSION.get(extensionOf(key) ?? "");
+  return entry === undefined || !STICKER_CLASS.has(entry);
+}
+
 /** Enough for the WebP marker at 8 and the ISO-BMFF brand at 8, with headroom. */
 export const SNIFF_BYTES = 16;
 
