@@ -116,7 +116,15 @@ async function sendPreviewMessages(
     // the picture and the words it would be published with together.
     const only = originals[0];
     if (only.type === "image" && text.length <= PHOTO_CAPTION_LIMIT) {
-      return sendPhoto(env, draft.source.chatId, only.fileId, text, keyboard);
+      const shown = await sendPhoto(env, draft.source.chatId, only.fileId, text, keyboard);
+      if (shown !== null) return shown;
+
+      // Telegram will not re-send every file reference as a photo — a .webp
+      // sent as a file is a sticker to it. The picture is already safe in the
+      // private bucket and will still be published, so the preview falls back
+      // to words rather than leaving the author with nothing to approve.
+      console.warn("Could not preview the image; falling back to a text preview");
+      return sendMessage(env, draft.source.chatId, text, keyboard);
     }
   }
 
