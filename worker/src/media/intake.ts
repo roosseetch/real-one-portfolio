@@ -31,7 +31,15 @@ export type DeclineReason =
   | { kind: "unopenable"; mediaKind: MediaKind; format: string; file: FileLabel }
   | { kind: "sticker-moves"; video: boolean }
   /** The bytes disagreed with the name, found only after the download. */
-  | { kind: "contents"; format: string | null; file: FileLabel };
+  | { kind: "contents"; format: string | null; file: FileLabel }
+  /**
+   * Bigger than the Bot API will serve, so the bytes never arrived.
+   *
+   * No `FileLabel`: this reaches a `message.video`, which carries neither a mime
+   * type nor a file name, so the note would read "no type at all" on the one
+   * refusal that already knows exactly what happened and how big it was.
+   */
+  | { kind: "too-large"; mediaKind: MediaKind; bytes: number; limit: number };
 
 export type MediaDecision =
   | { status: "accept"; request: OriginalRequest }
@@ -254,6 +262,17 @@ async function appendOriginal(
   // One unreadable file costs that file, not the draft. The author still gets a
   // preview of whatever did arrive. What changed is that a file refused on its
   // contents now says so, rather than disappearing as quietly as a timeout.
+  if (stored.status === "too-large") {
+    return {
+      draft,
+      declined: {
+        kind: "too-large",
+        mediaKind: request.type,
+        bytes: stored.bytes,
+        limit: stored.limit,
+      },
+    };
+  }
   if (stored.status === "unavailable") return { draft, declined: null };
   if (stored.status === "wrong-format") {
     return { draft, declined: { kind: "contents", format: stored.label, file } };

@@ -1,9 +1,14 @@
 name: Process media
 
-# Strips every trace of the original metadata off a draft's photos and injects
-# the configured decoy values (spec §11), in a runner that is destroyed
-# afterwards. Nothing durable ever holds a raw original outside the private
-# bucket, and nothing public is written until the output has been checked.
+# Strips every trace of the original metadata off a draft's photos and videos
+# and injects the configured decoy values (spec §11), in a runner that is
+# destroyed afterwards. Nothing durable ever holds a raw original outside the
+# private bucket, and nothing public is written until the output has been
+# checked.
+#
+# Pictures are re-encoded through Pillow; videos are transcoded to H.264/AAC
+# with every metadata dictionary dropped, and stand in on the site behind a
+# poster frame taken from the sanitised output rather than the source.
 #
 # Dispatched by the Worker when the author approves a draft that has media. It
 # receives a draft id and a job token and nothing else — workflow inputs are
@@ -62,6 +67,16 @@ jobs:
       # of these numbers is how a completeness check ends up agreeing with a
       # sanitiser that was asked for something else.
       DERIVATIVE_WIDTHS: "1600,1200,800,320"
+      # Literals rather than repository variables, for the same reason as the
+      # widths above. Turning one into a `vars.X` means an entry in
+      # .github/config-inventory.json and a `|| default` at the reference site,
+      # which check-workflow-config.ts enforces in both directions.
+      VIDEO_CRF: "20"
+      VIDEO_PRESET: "medium"
+      # Only a source longer than this on its longest side is scaled at all.
+      # The spec asks for no resize unless required; 1920 is where a phone's 4K
+      # clip stops being worth what it costs to serve.
+      VIDEO_MAX_WIDTH: "1920"
     steps:
       - uses: actions/checkout@v7
 
@@ -69,13 +84,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install exiftool and Pillow
+      - name: Install ffmpeg, exiftool and Pillow
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libimage-exiftool-perl
-          # pillow-avif-plugin registers the AVIF encoder; without it Pillow
-          # writes WebP only and the AVIF derivatives are silently skipped.
-          python -m pip install --quiet Pillow pillow-avif-plugin
+          sudo apt-get install -y -qq ffmpeg libimage-exiftool-perl
+          python -m pip install --quiet -r scripts/requirements-media.txt
+          # The transcode is H.264 and nothing else. libopenh264 accepts neither
+          # -crf nor -preset, so a build without libx264 would not fail over --
+          # it would quietly produce something the sanitiser never asked for.
+          ffmpeg -hide_banner -encoders | grep -q ' libx264 '
 
       # Everything below stays under the runner's temp directory, which is
       # discarded with the runner. Never the workspace: the workspace is a git
@@ -95,16 +112,27 @@ jobs:
       - name: Download the originals
         run: |
           mkdir -p "$WORK/originals"
-          jq -r '.originals[] | select(.type == "image") | .key' "$WORK/draft.json" > "$WORK/keys.txt"
+          # An explicit allowlist, and it must stay in step with the mapping
+          # filter below: a kind downloaded but not mapped is a file the
+          # sanitiser never sees, and a kind mapped but not downloaded is a
+          # source that is not there.
+          jq -r '.originals[] | select(.type == "image" or .type == "video") | .key' \
+            "$WORK/draft.json" > "$WORK/keys.txt"
           while read -r key; do
             [ -n "$key" ] || continue
             aws s3 cp "s3://${PRIVATE_BUCKET}/${key}" "$WORK/originals/$(basename "$key")" --quiet
           done < "$WORK/keys.txt"
           echo "downloaded $(find "$WORK/originals" -type f | wc -l) file(s)"
 
+      # The type travels with the file rather than being guessed from its
+      # extension. The sanitiser refuses a mapping without one, because the
+      # tolerant reading of a missing type is "image" and that is how an mp4
+      # ends up in front of Pillow.
       - name: Build the id-to-file mapping
         run: |
-          jq '[.originals[] | select(.type == "image") | {(.mediaId): (.key | split("/") | last)}] | add // {}' \
+          jq '[.originals[]
+               | select(.type == "image" or .type == "video")
+               | {(.mediaId): {file: (.key | split("/") | last), type: .type}}] | add // {}' \
             "$WORK/draft.json" > "$WORK/mapping.json"
 
       # The sanitizer removes everything first and only then injects the decoy
@@ -113,15 +141,49 @@ jobs:
       # job: a half-scrubbed photo is worse than no photo.
       - name: Strip metadata and inject decoys
         run: |
-          python scripts/sanitize-media.py "$WORK/originals" "$WORK/public" "$WORK/mapping.json" \
-            --widths "$DERIVATIVE_WIDTHS"
+          python scripts/sanitize_media.py "$WORK/originals" "$WORK/public" "$WORK/mapping.json" \
+            --widths "$DERIVATIVE_WIDTHS" \
+            --video-crf "$VIDEO_CRF" \
+            --video-preset "$VIDEO_PRESET" \
+            --video-max-width "$VIDEO_MAX_WIDTH"
 
       - name: Verify nothing identifying survived
         run: |
           fail=0
           for f in "$WORK"/public/*.webp; do
+            [ -e "$f" ] || continue
             # Anything tying the file to a real camera, person or place. The
             # decoy GPS is expected; an original serial number is not.
+            leaked=$(exiftool -s -SerialNumber -OwnerName -Artist -Copyright -Software \
+                              -ImageDescription -UserComment -HostComputer "$f" | wc -l)
+            if [ "$leaked" -ne 0 ]; then
+              echo "::error file=$(basename "$f")::identifying metadata survived sanitisation"
+              fail=1
+            fi
+          done
+
+          for f in "$WORK"/public/*.mp4; do
+            [ -e "$f" ] || continue
+            # A video hides its provenance somewhere exiftool alone will not
+            # look: the container's own tag dictionaries, where a phone writes
+            # its clock, its model and the encoder's version string.
+            leaked=$(ffprobe -v error -show_format -show_streams -of json "$f" \
+              | jq -r '[(.format.tags // {}), (.streams[]?.tags // {})]
+                       | map(to_entries[]) | map(.key | ascii_downcase)
+                       # The same key appears as "location" and "location-eng"
+                       # depending on whether the atom named a language.
+                       | map(sub("-[a-z]{3}$"; ""))
+                       # No creation_time: the transcode zeroes every container
+                       # date and the video decoy writes none, because an MP4
+                       # counts from 1904 in 32 bits and the configured 2117
+                       # wraps round to 1981 rather than failing.
+                       | map(select(test("^(major_brand|minor_version|compatible_brands|language|handler_name|vendor_id|encoder|make|model|location|com\\.apple\\.quicktime\\.(make|model|location\\.iso6709))$") | not))
+                       | unique | join(",")')
+            if [ -n "$leaked" ]; then
+              echo "::error file=$(basename "$f")::container metadata survived sanitisation: $leaked"
+              fail=1
+            fi
+
             leaked=$(exiftool -s -SerialNumber -OwnerName -Artist -Copyright -Software \
                               -ImageDescription -UserComment -HostComputer "$f" | wc -l)
             if [ "$leaked" -ne 0 ]; then
@@ -137,15 +199,16 @@ jobs:
       - name: Check the derivative set is complete
         run: |
           fail=0
-          while read -r media_id; do
-            [ -n "$media_id" ] || continue
 
-            # Read back the widths actually written, off the filenames the
-            # sanitiser produces: media_id-WIDTH.webp. Taking the segment after
-            # the last hyphen keeps this right for ids containing one.
+          # A picture and a video's poster are the same thing to a browser, so
+          # they answer to the same rule. The infix is what separates
+          # media_id-800.webp from media_id-poster-800.webp.
+          check_widths() {
+            id=$1
+            infix=$2
             widths=""
             widest=0
-            for f in "$WORK"/public/"$media_id"-*.webp; do
+            for f in "$WORK"/public/"$id$infix"-*.webp; do
               [ -e "$f" ] || continue
               w=${f##*-}
               w=${w%.webp}
@@ -157,13 +220,12 @@ jobs:
             done
 
             if [ -z "$widths" ]; then
-              echo "::error::$media_id produced no WebP derivatives at all"
-              fail=1
-              continue
+              echo "::error::$id$infix produced no WebP derivatives at all"
+              return 1
             fi
 
             for expected in $(printf '%s' "$DERIVATIVE_WIDTHS" | tr ',' ' '); do
-              # sanitize-media.py clamps to the source rather than upscaling, so
+              # sanitize_media.py clamps to the source rather than upscaling, so
               # an expected width above the widest derivative is legitimately
               # absent. At or below it, every one must be present exactly --
               # that is the part the site relies on when it picks a width.
@@ -171,14 +233,52 @@ jobs:
               case " $widths " in
                 *" $expected "*) ;;
                 *)
-                  echo "::error::$media_id has no WebP derivative at ${expected}px"
-                  fail=1
+                  echo "::error::$id$infix has no WebP derivative at ${expected}px"
+                  return 1
                   ;;
               esac
             done
-          done < <(jq -r 'keys[]' "$WORK/mapping.json")
+            return 0
+          }
+
+          while read -r media_id type; do
+            [ -n "$media_id" ] || continue
+
+            case "$type" in
+              image)
+                check_widths "$media_id" "" || fail=1
+                ;;
+              video)
+                count=$(find "$WORK/public" -maxdepth 1 -name "${media_id}-*.mp4" | wc -l)
+                if [ "$count" -ne 1 ]; then
+                  echo "::error::$media_id produced $count mp4 files, expected exactly 1"
+                  fail=1
+                fi
+                check_widths "$media_id" "-poster" || fail=1
+
+                mp4=$(find "$WORK/public" -maxdepth 1 -name "${media_id}-*.mp4" | head -1)
+                if [ -n "$mp4" ]; then
+                  # The sanitiser already compared these against the input it
+                  # still held. This is the second reader: it catches a run that
+                  # succeeded and wrote the wrong thing.
+                  probe=$(ffprobe -v error -show_format -show_streams -of json "$mp4")
+                  echo "$probe" | jq -e '[.streams[] | select(.codec_type=="video")][0].codec_name == "h264"' >/dev/null \
+                    || { echo "::error::$media_id is not H.264"; fail=1; }
+                  echo "$probe" | jq -e '([.streams[] | select(.codec_type=="audio")] | length == 0)
+                                         or ([.streams[] | select(.codec_type=="audio")][0].codec_name == "aac")' >/dev/null \
+                    || { echo "::error::$media_id has audio that is not AAC"; fail=1; }
+                  echo "$probe" | jq -e '(.format.duration | tonumber) > 0' >/dev/null \
+                    || { echo "::error::$media_id has no duration"; fail=1; }
+                fi
+                ;;
+              *)
+                echo "::error::$media_id has an unknown media type: $type"
+                fail=1
+                ;;
+            esac
+          done < <(jq -r 'to_entries[] | "\(.key) \(.value.type)"' "$WORK/mapping.json")
           [ "$fail" -eq 0 ] || exit 1
-          echo "$(find "$WORK/public" -name '*.webp' | wc -l) WebP and $(find "$WORK/public" -name '*.avif' | wc -l) AVIF derivatives"
+          echo "$(find "$WORK/public" -name '*.webp' | wc -l) WebP, $(find "$WORK/public" -name '*.avif' | wc -l) AVIF and $(find "$WORK/public" -name '*.mp4' | wc -l) MP4"
 
       # Write-only on the media bucket, set here rather than at job level so the
       # read-only private credentials cannot be used for a write by accident.
@@ -188,12 +288,33 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_MEDIA_RW_SECRET_ACCESS_KEY }}
         run: |
           activity=$(jq -r '.activityId' "$WORK/draft.json")
+
+          # One pass per extension, because a single --recursive copy cannot
+          # name more than one content type and the CLI's guess is not good
+          # enough here: R2 serves whatever it was told, and an mp4 delivered as
+          # binary/octet-stream makes Safari refuse to play it inline and Chrome
+          # download it instead.
+          upload() {
+            aws s3 cp "$WORK/public" "s3://${MEDIA_BUCKET}/media/activity-${activity}/" \
+              --recursive --exclude '*' --include "*.$1" \
+              --content-type "$2" \
+              --cache-control 'public, max-age=31536000, immutable' \
+              --quiet
+          }
           # Derivatives are immutable: their names carry the media id and the
           # width, so a changed picture is a new name rather than a new body.
-          aws s3 cp "$WORK/public" "s3://${MEDIA_BUCKET}/media/activity-${activity}/" \
-            --recursive --exclude 'manifest.json' \
-            --cache-control 'public, max-age=31536000, immutable' \
-            --quiet
+          upload webp image/webp
+          upload avif image/avif
+          upload mp4 video/mp4
+
+          # What naming the types costs: a new output extension is now skipped
+          # rather than uploaded, and silently. Refuse to finish instead.
+          stray=$(find "$WORK/public" -maxdepth 1 -type f ! -name manifest.json \
+                  ! -name '*.webp' ! -name '*.avif' ! -name '*.mp4' -printf '%f\n')
+          if [ -n "$stray" ]; then
+            echo "::error::no upload pass covers these: $(echo "$stray" | paste -sd' ')"
+            exit 1
+          fi
           echo "uploaded to media/activity-${activity}/"
 
       # Filenames, sizes and the decoy values only. Never a source path, a
@@ -206,12 +327,28 @@ jobs:
             echo "| file | size | camera | taken |"
             echo "| --- | --- | --- | --- |"
             for f in "$WORK"/public/*.webp; do
+              [ -e "$f" ] || continue
               printf '| %s | %s KiB | %s | %s |\n' \
                 "$(basename "$f")" \
                 "$(( $(stat -c%s "$f") / 1024 ))" \
                 "$(exiftool -s3 -Make -Model "$f" | paste -sd' ')" \
                 "$(exiftool -s3 -DateTimeOriginal "$f")"
             done
+
+            if compgen -G "$WORK/public/*.mp4" > /dev/null; then
+              echo
+              echo "| video | size | dimensions | duration | audio |"
+              echo "| --- | --- | --- | --- | --- |"
+              for f in "$WORK"/public/*.mp4; do
+                probe=$(ffprobe -v error -show_format -show_streams -of json "$f")
+                printf '| %s | %s KiB | %s | %s s | %s |\n' \
+                  "$(basename "$f")" \
+                  "$(( $(stat -c%s "$f") / 1024 ))" \
+                  "$(echo "$probe" | jq -r '[.streams[] | select(.codec_type=="video")][0] | "\(.width)x\(.height)"')" \
+                  "$(echo "$probe" | jq -r '.format.duration | tonumber | . * 100 | round / 100')" \
+                  "$(echo "$probe" | jq -r '[.streams[] | select(.codec_type=="audio")][0].codec_name // "none"')"
+              done
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The Worker publishes the record; this job only reports what it produced.
@@ -227,24 +364,51 @@ jobs:
           # One entry per source id, pointing at the widest derivative and the
           # thumbnail. jq builds it so no filename is ever pasted into a shell
           # word.
+          #
+          # Every lookup ends in `error` rather than defaulting, because jq
+          # folds `"str" + null` back to `"str"`: a missing derivative would
+          # otherwise travel as a truncated URL that still begins with the media
+          # base, which is exactly what the Worker's host check accepts.
           jq -n \
             --arg draftId "$DRAFT_ID" \
             --arg jobId "$JOB_TOKEN" \
             --arg processedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg base "${MEDIA_BASE_URL%/}/media/activity-${activity}" \
             --slurpfile manifest "$WORK/public/manifest.json" \
-            '{
+            '
+            def webps($role): map(select(.format == "webp" and .role == $role));
+            def widest($role; $id): (webps($role) | max_by(.width)) // error("no \($role) WebP for \($id)");
+            def narrowest($role; $id): (webps($role) | min_by(.width)) // error("no \($role) WebP for \($id)");
+
+            {
               draftId: $draftId,
               jobId: $jobId,
               processedAt: $processedAt,
-              media: ($manifest[0] | to_entries | map({
-                sourceId: .key,
-                type: "image",
-                src: ($base + "/" + (.value | map(select(.format == "webp")) | max_by(.width) | .file)),
-                thumbnail: ($base + "/" + (.value | map(select(.format == "webp")) | min_by(.width) | .file)),
-                width: (.value | map(select(.format == "webp")) | max_by(.width) | .width),
-                height: (.value | map(select(.format == "webp")) | max_by(.width) | .height)
-              }))
+              media: ($manifest[0] | to_entries | map(
+                .key as $id | .value as $entries |
+                if ($entries | any(.role == "video")) then
+                  (($entries | map(select(.role == "video"))[0]) // error("no MP4 for \($id)")) as $video |
+                  {
+                    sourceId: $id,
+                    type: "video",
+                    src: ($base + "/" + $video.file),
+                    poster: ($base + "/" + ($entries | widest("poster"; $id)).file),
+                    thumbnail: ($base + "/" + ($entries | narrowest("poster"; $id)).file),
+                    width: $video.width,
+                    height: $video.height
+                  }
+                else
+                  ($entries | widest("image"; $id)) as $w |
+                  {
+                    sourceId: $id,
+                    type: "image",
+                    src: ($base + "/" + $w.file),
+                    thumbnail: ($base + "/" + ($entries | narrowest("image"; $id)).file),
+                    width: $w.width,
+                    height: $w.height
+                  }
+                end
+              ))
             }' > "$WORK/callback.json"
 
           timestamp=$(( $(date +%s) * 1000 ))

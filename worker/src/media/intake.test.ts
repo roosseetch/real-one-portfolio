@@ -5,6 +5,7 @@ import { bodyFor, type SampleFormat } from "../test-support/bytes";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import type { TelegramMessage } from "../telegram/types";
 import { intakeMedia, largestPhoto, mediaRequest } from "./intake";
+import { MAX_DOWNLOAD_BYTES } from "./originals";
 
 const SENDER = 4242;
 
@@ -370,5 +371,57 @@ describe("when a file cannot be fetched", () => {
     if (result.status !== "started") return;
     expect(result.draft.originals).toHaveLength(0);
     expect(result.draft.input.text).toBe("still worth keeping");
+  });
+});
+
+// The case that reaches almost every real phone video: Telegram will not hand a
+// bot anything over 20 MB, and this used to be indistinguishable from a timeout.
+describe("a video past the Bot API's ceiling", () => {
+  function videoMessage(fileSize: number): TelegramMessage {
+    return {
+      message_id: 7,
+      date: 1_700_000_000,
+      chat: { id: 99, type: "private" },
+      from: { id: SENDER },
+      video: {
+        file_id: "vid",
+        file_unique_id: "u3",
+        width: 1080,
+        height: 1920,
+        duration: 31,
+        file_size: fileSize,
+      },
+    };
+  }
+
+  it("declines with the size and the limit, having fetched nothing", async () => {
+    const result = await intakeMedia(videoMessage(MAX_DOWNLOAD_BYTES + 1), SENDER, env());
+
+    if (result.status !== "started") throw new Error("expected a draft");
+    expect(result.declined).toEqual({
+      kind: "too-large",
+      mediaKind: "video",
+      bytes: MAX_DOWNLOAD_BYTES + 1,
+      limit: MAX_DOWNLOAD_BYTES,
+    });
+    // Telegram already told us the size, so asking it for the file would only
+    // spend a round trip to be told no.
+    expect(calls).toEqual([]);
+  });
+
+  it("stores nothing in R2", async () => {
+    await intakeMedia(videoMessage(MAX_DOWNLOAD_BYTES + 1), SENDER, env());
+
+    expect([...storage.objects.keys()].some((k) => k.startsWith("originals/"))).toBe(false);
+  });
+
+  it("still takes a video that fits", async () => {
+    telegramServing("mp4", "videos/file_2.mp4");
+
+    const result = await intakeMedia(videoMessage(MAX_DOWNLOAD_BYTES - 1), SENDER, env());
+
+    if (result.status !== "started") throw new Error("expected a draft");
+    expect(result.declined).toBeNull();
+    expect(result.draft.originals).toMatchObject([{ type: "video" }]);
   });
 });

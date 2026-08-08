@@ -14,9 +14,10 @@
  * in their key.
  *
  * The accepted set is not a matter of taste: it is exactly what
- * `scripts/sanitize-media.py` can open, which is Pillow plus the one plugin
- * `.github/workflows/process-media.yml` installs. Adding a row here without
- * adding the decoder there moves a silent Actions failure back into existence.
+ * `scripts/sanitize_media.py` can open, which is Pillow plus the one plugin
+ * `.github/workflows/process-media.yml` installs, and ffmpeg for the videos.
+ * Adding a row here without adding the decoder there moves a silent Actions
+ * failure back into existence.
  */
 
 export type MediaKind = "image" | "video";
@@ -247,10 +248,10 @@ function startsWithBytes(head: Uint8Array, bytes: number[]): boolean {
  *
  * HEIC, AVIF, MP4 and MOV are all the same container and all carry `ftyp` at
  * byte 4. Stopping there and calling every one of them a video files an iPhone
- * photo as a video, and a video draft does not merely get dropped — the
- * workflow filters `select(.type == "image")`, returns no media, the callback
- * refuses an empty set, and the draft sits in `processing` for good. The brand
- * at bytes 8..12 is the only thing that separates them.
+ * photo as a video, which sends it down the transcode path: ffmpeg would be
+ * handed a still image, the poster frame would be the picture itself, and the
+ * author would be shown a one-frame film of their own photograph. The brand at
+ * bytes 8..12 is the only thing that separates them.
  */
 const BRANDS = new Map<string, FormatEntry>([
   ["heic", HEIC],
