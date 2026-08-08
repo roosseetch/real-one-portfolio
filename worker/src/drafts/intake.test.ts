@@ -489,6 +489,61 @@ describe("a file whose contents are not what its name said", () => {
 });
 
 /**
+ * The same silence, one layer earlier and far more common: Telegram will not
+ * hand a bot a file over 20 MB, which nearly every phone video exceeds. The
+ * refusal used to be folded into "could not fetch it", so the author was told
+ * nothing at all and the draft simply went quiet.
+ */
+describe("a video Telegram will not hand over", () => {
+  function videoMessage(fileSize: number, caption?: string): TelegramUpdate {
+    return {
+      update_id: 14,
+      message: {
+        message_id: 15,
+        date: 1_700_000_000,
+        chat: { id: 99, type: "private" },
+        from: { id: SENDER },
+        ...(caption === undefined ? {} : { caption }),
+        video: {
+          file_id: "vid",
+          file_unique_id: "u10",
+          width: 1080,
+          height: 1920,
+          duration: 31,
+          file_size: fileSize,
+        },
+      },
+    };
+  }
+
+  it("names the size and the limit rather than going quiet", async () => {
+    const result = await intakeUpdate(videoMessage(31_457_280), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("30.0 MB");
+    expect(sent[0]).toContain("20.0 MB");
+    // Nothing to approve: the video was the whole message.
+    expect(keyboards).toEqual([]);
+  });
+
+  it("keeps the caption and previews it, when there was one", async () => {
+    const result = await intakeUpdate(videoMessage(31_457_280, "the run itself"), SENDER, env());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.originals).toHaveLength(0);
+    expect(result.draft.input.text).toBe("the run itself");
+    expect(sent.join(" ")).toContain("20.0 MB");
+  });
+
+  it("writes nothing to the private bucket beyond the draft itself", async () => {
+    await intakeUpdate(videoMessage(31_457_280, "the run itself"), SENDER, env());
+
+    expect([...storage.objects.keys()].every((k) => k.startsWith("drafts/"))).toBe(true);
+  });
+});
+
+/**
  * The failure that made this worth fixing: a message the intake could not use
  * was answered 200 and dropped, which from the author's side is
  * indistinguishable from a bot that has died.

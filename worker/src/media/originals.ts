@@ -67,6 +67,13 @@ interface FileInfo {
 export type StoreResult =
   | { status: "stored"; original: DraftOriginal }
   | { status: "wrong-format"; label: string | null }
+  /**
+   * Past the ceiling below, so the bytes could never have been fetched. Split
+   * out from `unavailable` because it is the one refusal that is neither a
+   * transport failure nor retryable: the author has to send a smaller file, and
+   * cannot know that unless told.
+   */
+  | { status: "too-large"; bytes: number; limit: number }
   | { status: "unavailable" };
 
 /**
@@ -92,7 +99,7 @@ export async function storeOriginal(
 ): Promise<StoreResult> {
   if (request.bytes !== undefined && request.bytes > MAX_DOWNLOAD_BYTES) {
     console.warn(`Original too large for the Bot API to serve: ${request.bytes} bytes`);
-    return { status: "unavailable" };
+    return { status: "too-large", bytes: request.bytes, limit: MAX_DOWNLOAD_BYTES };
   }
 
   let info: FileInfo;
@@ -119,7 +126,7 @@ export async function storeOriginal(
   // in memory.
   if (info.file_size !== undefined && info.file_size > MAX_DOWNLOAD_BYTES) {
     console.warn(`Original too large to buffer: ${info.file_size} bytes`);
-    return { status: "unavailable" };
+    return { status: "too-large", bytes: info.file_size, limit: MAX_DOWNLOAD_BYTES };
   }
 
   let buffer: ArrayBuffer;

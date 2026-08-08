@@ -64,6 +64,37 @@ async function processingDraft(): Promise<Draft> {
   return draft;
 }
 
+/** The same, with the one original filed as a video rather than a picture. */
+async function videoDraft(): Promise<Draft> {
+  const draft = await processingDraft();
+  const video: Draft = {
+    ...draft,
+    originals: [
+      { mediaId: "media0", type: "video", fileId: "f0", key: `originals/${draft.activityId}/media0.mov` },
+    ],
+  };
+  await saveDraft(storage.bucket, video);
+  return video;
+}
+
+/** What the workflow's jq builds for a video: an mp4, and a poster to stand in. */
+function videoPayload(draft: Draft, poster?: string): string {
+  const base = `${MEDIA_BASE}/media/activity-${draft.activityId}`;
+  return payload(draft, {
+    media: [
+      {
+        sourceId: "media0",
+        type: "video",
+        src: `${base}/media0-1280.mp4`,
+        poster: poster ?? `${base}/media0-poster-1280.webp`,
+        thumbnail: `${base}/media0-poster-320.webp`,
+        width: 1280,
+        height: 720,
+      },
+    ],
+  });
+}
+
 function payload(draft: Draft, overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     draftId: draft.draftId,
@@ -336,6 +367,33 @@ describe("publishing on a valid callback", () => {
     expect(body).not.toContain(draft.draftId);
     expect(body).not.toContain(draft.job!.jobToken);
     expect(body).not.toContain("originals/");
+  });
+
+  // The mismatch case above proves a video entry can be refused. This is the
+  // other half: when the original really is a video, the poster survives into
+  // the record, which is the only thing the site will have to show for it.
+  it("publishes a video with its poster and thumbnail", async () => {
+    const draft = await videoDraft();
+    const response = await handleMediaProcessed(await callback(videoPayload(draft)), env());
+
+    expect(response.status).toBe(200);
+    const manifest = (await readManifest(content.bucket))!.manifest;
+    const chunk = JSON.parse(content.objects.get(`content/records-${manifest.latest}.json`) as unknown as string);
+    expect(chunk[0].media[0]).toMatchObject({
+      type: "video",
+      src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1280.mp4`,
+      poster: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-poster-1280.webp`,
+      thumbnail: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-poster-320.webp`,
+    });
+  });
+
+  it("refuses a poster served from somewhere other than the media domain", async () => {
+    // The poster is a URL like any other and gets the same host check; a
+    // published record must not embed a third party's address.
+    const draft = await videoDraft();
+    const body = videoPayload(draft, "https://elsewhere.example/poster.webp");
+
+    expect((await handleMediaProcessed(await callback(body), env())).status).toBe(400);
   });
 });
 
