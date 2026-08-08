@@ -39,6 +39,9 @@ profile/*.json
 node_modules/
 dist/
 .wrangler/
+__pycache__/
+*.pyc
+.pytest_cache/
 
 # Editor / OS noise
 .DS_Store

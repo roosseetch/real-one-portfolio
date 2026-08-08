@@ -1,0 +1,7 @@
+# What scripts/sanitize_media.py needs to run. Installed by the media workflows
+# rather than named inline in each, so the two cannot drift apart.
+#
+# pillow-avif-plugin registers the AVIF encoder; without it Pillow writes WebP
+# only and the AVIF derivatives are silently skipped.
+Pillow
+pillow-avif-plugin

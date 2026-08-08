@@ -43,6 +43,11 @@ function fileNote(file: FileLabel): string {
   return file.name ? `\n\nTelegram called it: ${type} — "${file.name}"` : `\n\nTelegram called it: ${type}`;
 }
 
+/** Bytes as the author thinks of them. One decimal: "20.0 MB" is the limit they were told. */
+function megabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** Every refusal the media path can produce, in one place so the voice stays one voice. */
 export function declineMessage(reason: DeclineReason): string {
   switch (reason.kind) {
@@ -69,6 +74,15 @@ export function declineMessage(reason: DeclineReason): string {
       return (
         `That file is named like a picture, but its contents are ${found}. I checked the first bytes and ` +
         `left it alone rather than hand the publisher something that would only fail later.${fileNote(reason.file)}`
+      );
+    }
+
+    case "too-large": {
+      const noun = reason.mediaKind === "video" ? "video" : "file";
+      return (
+        `That ${noun} is ${megabytes(reason.bytes)}, and Telegram only lets a bot download files up to ` +
+        `${megabytes(reason.limit)}. I never received the bytes, so there is nothing to publish. A shorter ` +
+        `clip, or the same one sent at a lower quality, will come through.`
       );
     }
   }
@@ -241,6 +255,8 @@ function describeReason(reason: DeclineReason): string {
       return reason.video ? "a video sticker" : "an animated sticker";
     case "contents":
       return `a file whose contents are ${reason.format ?? "unrecognised"}`;
+    case "too-large":
+      return `a ${reason.bytes}-byte ${reason.mediaKind} past the Bot API's ${reason.limit}-byte ceiling`;
   }
 }
 

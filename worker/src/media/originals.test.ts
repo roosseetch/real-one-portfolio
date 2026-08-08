@@ -85,7 +85,13 @@ describe("files that never reach the bucket", () => {
 
     const result = await storeOriginal(env(), "activity1", request({ bytes: MAX_DOWNLOAD_BYTES + 1 }));
 
-    expect(result).toEqual({ status: "unavailable" });
+    // Named rather than folded into `unavailable`: the author has to be told a
+    // size, and a transport failure has no size to tell them.
+    expect(result).toEqual({
+      status: "too-large",
+      bytes: MAX_DOWNLOAD_BYTES + 1,
+      limit: MAX_DOWNLOAD_BYTES,
+    });
     expect(calls).toEqual([]);
   });
 
@@ -96,7 +102,11 @@ describe("files that never reach the bucket", () => {
 
     const result = await storeOriginal(env(), "activity1", request());
 
-    expect(result).toEqual({ status: "unavailable" });
+    expect(result).toEqual({
+      status: "too-large",
+      bytes: MAX_DOWNLOAD_BYTES + 1,
+      limit: MAX_DOWNLOAD_BYTES,
+    });
     expect(calls.map((c) => c.method)).toEqual(["getFile"]);
   });
 

@@ -1,0 +1,2 @@
+-r requirements-media.txt
+pytest

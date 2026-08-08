@@ -1,0 +1,69 @@
+name: Check media sanitiser
+
+# Until now, editing scripts/sanitize_media.py or process-media.yml ran nothing
+# at all: the worker's vitest suite is scoped to worker/**, and check-config
+# only reads the workflow files for undeclared secrets. The first time anyone
+# found out a change was wrong was on a real dispatch, after a draft had already
+# moved to `processing` and promised the author a published record.
+#
+# Deliberately a separate workflow rather than a job inside check-config.yml.
+# That gate is credential-free and finishes in seconds, and it exists to catch a
+# typo before it merges; bolting two minutes of apt and ffmpeg onto it would
+# blunt the one check that is currently instant.
+#
+# No secrets and no variables: every fixture is generated at test time, so this
+# needs nothing but the tools.
+
+# The two path lists are duplicated rather than shared through a YAML anchor:
+# the Actions workflow parser does not resolve anchors, so one would be a file
+# that looks right and never runs.
+on:
+  pull_request:
+    paths:
+      - "scripts/sanitize_media.py"
+      - "scripts/tests/**"
+      - "scripts/requirements-media*.txt"
+      - "config/media-decoy.json"
+      - ".github/workflows/process-media.yml"
+      - ".github/workflows/check-media.yml"
+      - "pytest.ini"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/sanitize_media.py"
+      - "scripts/tests/**"
+      - "scripts/requirements-media*.txt"
+      - "config/media-decoy.json"
+      - ".github/workflows/process-media.yml"
+      - ".github/workflows/check-media.yml"
+      - "pytest.ini"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    env:
+      # A developer's machine may lack exiftool or an ffmpeg with libx264, and
+      # the suite skips what it cannot run there. Here a skip would be a hole
+      # that looks exactly like a pass, so the guards fail instead.
+      MEDIA_TESTS_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg and exiftool
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libimage-exiftool-perl
+
+      - name: Install the sanitiser's dependencies
+        run: python -m pip install --quiet -r scripts/requirements-media-dev.txt
+
+      - name: Run the suite
+        run: python -m pytest

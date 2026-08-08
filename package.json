@@ -9,7 +9,8 @@
     "profile:publish": "tsx scripts/publish-profile.ts",
     "profile:fetch": "tsx scripts/fetch-profile.ts",
     "record:unpublish": "tsx scripts/unpublish-record.ts",
-    "logs:read": "bash scripts/read-error-logs.sh"
+    "logs:read": "bash scripts/read-error-logs.sh",
+    "test:media": "python -m pytest"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
