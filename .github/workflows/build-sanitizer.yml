@@ -1,0 +1,90 @@
+name: Build media sanitiser
+
+# Compiles sanitizer/ once per change and attaches the binary to a release, so
+# that process-media.yml can fetch it in seconds.
+#
+# The alternative was building inside process-media.yml itself, and the reason
+# not to is latency in the one place it is felt: that job is dispatched when an
+# author approves a draft, and the draft has already told them it is
+# processing. A cold cargo build of rav1e is three to five minutes of someone
+# waiting. Here nobody is waiting.
+#
+# The tests run before the binary is published, because this is the artifact
+# production actually executes. A green PR is not the same promise: a PR is
+# tested at its own merge base, and this runs at whatever main became.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sanitizer/**"
+      - "config/media-decoy.json"
+      - ".github/workflows/build-sanitizer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-sanitizer
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # A skip here would be a hole that looks exactly like a pass.
+      MEDIA_TESTS_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sanitizer
+
+      - name: Install the tools the tests need
+        run: |
+          sudo apt-get update -qq
+          # ffmpeg and exiftool are for the tests. The sanitiser itself needs
+          # only ffmpeg; exiftool is the independent oracle the EXIF writer is
+          # checked against, since our own reader would agree with our own
+          # writer about a malformed block.
+          #
+          # nasm is for rav1e's assembly paths. Without it the AVIF encoder
+          # silently falls back to C and takes several times as long.
+          sudo apt-get install -y -qq ffmpeg libimage-exiftool-perl nasm
+          ffmpeg -hide_banner -encoders | grep -q ' libx264 '
+
+      - name: Test
+        working-directory: sanitizer
+        run: cargo test --locked
+
+      - name: Build
+        working-directory: sanitizer
+        run: cargo build --release --locked
+
+      - name: Publish the binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -m1 '^version' sanitizer/Cargo.toml | cut -d'"' -f2)
+          tag="sanitizer-v${version}"
+          binary=sanitizer/target/release/sanitize-media
+
+          "$binary" --help >/dev/null || { echo "::error::the built binary does not run"; exit 1; }
+
+          # One release per version, replaced in place. A version bump makes a
+          # new one; an edit that does not bump overwrites the asset, which is
+          # what makes "latest" mean "current main" rather than "whenever
+          # someone last remembered to bump".
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$binary" --clobber
+          else
+            gh release create "$tag" "$binary" \
+              --title "Media sanitiser ${version}" \
+              --notes "Built from ${GITHUB_SHA}. Consumed by process-media.yml." \
+              --latest=false
+          fi
+          echo "published $tag from $GITHUB_SHA"

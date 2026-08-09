@@ -42,6 +42,10 @@ dist/
 __pycache__/
 *.pyc
 .pytest_cache/
+# The sanitiser's build output. Cargo.lock stays tracked: the media workflows
+# build with --locked, so an untracked lockfile would mean CI resolving its own
+# dependency versions for the binary that handles the originals.
+sanitizer/target/
 
 # Editor / OS noise
 .DS_Store

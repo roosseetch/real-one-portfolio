@@ -1,0 +1,3 @@
+# The Containerfile copies nothing, but the build context is still transferred,
+# and target/ is gigabytes of rav1e object files.
+target/

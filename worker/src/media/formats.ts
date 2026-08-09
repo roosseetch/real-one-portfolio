@@ -13,11 +13,11 @@
  * signature — so every format is one `FormatEntry` and the lookups only differ
  * in their key.
  *
- * The accepted set is not a matter of taste: it is exactly what
- * `scripts/sanitize_media.py` can open, which is Pillow plus the one plugin
- * `.github/workflows/process-media.yml` installs, and ffmpeg for the videos.
- * Adding a row here without adding the decoder there moves a silent Actions
- * failure back into existence.
+ * The accepted set is not a matter of taste: it is exactly what `sanitizer/` can
+ * open, which is the decoders enabled on the `image` crate in its Cargo.toml
+ * (JPEG, PNG, WebP, TIFF, GIF, BMP) and ffmpeg for the videos. Adding a row here
+ * without enabling the decoder there moves a silent Actions failure back into
+ * existence.
  */
 
 export type MediaKind = "image" | "video";
@@ -59,8 +59,8 @@ const video = (label: string, extension: string, open = true): FormatEntry => ({
 const JPEG = image("JPEG", "jpg");
 const PNG = image("PNG", "png");
 const WEBP = image("WebP", "webp");
-// Pillow opens a GIF at its first frame, and `convert("RGB")` in the sanitiser
-// keeps it there. That is the intent: the site publishes stills.
+// The sanitiser decodes a GIF to its first frame and flattens it there. That is
+// the intent: the site publishes stills.
 const GIF = image("GIF", "gif");
 const TIFF = image("TIFF", "tif");
 const BMP = image("BMP", "bmp");
@@ -68,12 +68,12 @@ const BMP = image("BMP", "bmp");
 /**
  * Real pictures with no decoder behind them.
  *
- * HEIC needs `pillow-heif` and SVG needs a rasteriser, and the workflow
- * installs neither. AVIF is the awkward one: `pillow-avif-plugin` is installed
- * and recent Pillow reads AVIF natively, so it may well work — but nothing pins
- * the version and nothing proves it, and the whole point of refusing here is to
- * stop guessing at what the pipeline can do. Prove it in the workflow first,
- * then flip `open`.
+ * The sanitiser writes AVIF but does not read one: `image` decodes AVIF only
+ * with its `avif-native` feature, which pulls in dav1d, and HEIC needs a decoder
+ * no Rust crate ships cleanly. SVG needs a rasteriser. None of the three is
+ * enabled in `sanitizer/Cargo.toml`, so all three are refused here rather than
+ * accepted and failed in Actions where nothing tells the author anything. Enable
+ * the decoder there first, prove it, then flip `open`.
  */
 const HEIC = image("HEIC", "heic", false);
 const AVIF = image("AVIF", "avif", false);
