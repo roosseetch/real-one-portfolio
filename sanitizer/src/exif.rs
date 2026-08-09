@@ -285,6 +285,7 @@ pub fn jpeg_with_exif(jpeg: &[u8], exif: &[u8]) -> Result<Vec<u8>> {
 // WebP
 // ---------------------------------------------------------------------------
 
+const WEBP_FLAG_ALPHA: u8 = 0x10;
 const WEBP_FLAG_EXIF: u8 = 0x08;
 
 /// Rewrites a simple-format WebP into the extended format, carrying EXIF.
@@ -311,6 +312,7 @@ pub fn webp_with_exif(webp: &[u8], exif: &[u8], width: u32, height: u32) -> Resu
     }
 
     let mut existing: Vec<u8> = Vec::new();
+    let mut has_alpha = false;
     let mut offset = 12;
     while offset + 8 <= webp.len() {
         let fourcc = &webp[offset..offset + 4];
@@ -330,6 +332,13 @@ pub fn webp_with_exif(webp: &[u8], exif: &[u8], width: u32, height: u32) -> Resu
         // it for our inputs, and carrying an unexamined chunk across would be
         // the one way source metadata could survive this path.
         if fourcc == b"VP8 " || fourcc == b"VP8L" || fourcc == b"ALPH" {
+            // The VP8X flag byte has to agree with the chunks that follow it. A
+            // carried ALPH with the alpha bit clear is a file some decoders
+            // reject and others render without transparency. Nothing here
+            // produces one today -- the pixels are flattened to RGB long before
+            // this -- but a header that contradicts its own body is not a thing
+            // to leave lying around in a container writer.
+            has_alpha |= fourcc == b"ALPH";
             existing.extend_from_slice(&webp[offset..end]);
         }
         offset = end;
@@ -345,7 +354,7 @@ pub fn webp_with_exif(webp: &[u8], exif: &[u8], width: u32, height: u32) -> Resu
     // 24-bit little-endian.
     body.extend_from_slice(b"VP8X");
     body.extend_from_slice(&10u32.to_le_bytes());
-    body.push(WEBP_FLAG_EXIF);
+    body.push(WEBP_FLAG_EXIF | if has_alpha { WEBP_FLAG_ALPHA } else { 0 });
     body.extend_from_slice(&[0, 0, 0]);
     body.extend_from_slice(&(width - 1).to_le_bytes()[0..3]);
     body.extend_from_slice(&(height - 1).to_le_bytes()[0..3]);
@@ -504,6 +513,35 @@ mod tests {
             0,
             "a RIFF chunk must end on an even boundary"
         );
+    }
+
+    #[test]
+    fn a_carried_alpha_chunk_sets_the_flag_that_declares_it() {
+        let mut simple = b"RIFF".to_vec();
+        let mut payload = b"ALPH\x02\x00\x00\x00ab".to_vec();
+        payload.extend_from_slice(b"VP8 \x04\x00\x00\x00abcd");
+        simple.extend_from_slice(&((4 + payload.len()) as u32).to_le_bytes());
+        simple.extend_from_slice(b"WEBP");
+        simple.extend_from_slice(&payload);
+
+        let out = webp_with_exif(&simple, b"EXIFBYTES", 8, 8).unwrap();
+
+        // A header that says "no alpha" over a body that carries one is a file
+        // some decoders reject and others render opaque.
+        assert_eq!(out[20] & WEBP_FLAG_ALPHA, WEBP_FLAG_ALPHA);
+        assert_eq!(out[20] & WEBP_FLAG_EXIF, WEBP_FLAG_EXIF);
+    }
+
+    #[test]
+    fn an_opaque_webp_does_not_claim_an_alpha_channel() {
+        let mut simple = b"RIFF".to_vec();
+        let payload = b"VP8 \x04\x00\x00\x00abcd";
+        simple.extend_from_slice(&((4 + payload.len()) as u32).to_le_bytes());
+        simple.extend_from_slice(b"WEBP");
+        simple.extend_from_slice(payload);
+
+        let out = webp_with_exif(&simple, b"EXIFBYTES", 8, 8).unwrap();
+        assert_eq!(out[20] & WEBP_FLAG_ALPHA, 0);
     }
 
     #[test]
