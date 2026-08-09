@@ -1,0 +1,51 @@
+# Build and test environment for the media sanitiser.
+#
+# A developer's machine is unlikely to have all three of a Rust toolchain, an
+# ffmpeg built with libx264, and exiftool -- the machine this was written on had
+# none of them. Rather than have the suite skip what it cannot run locally and
+# only find out in CI, everything runs in here.
+#
+#   podman build -t media-sanitizer-dev sanitizer/
+#   podman run --rm -v "$PWD":/repo:z -w /repo/sanitizer media-sanitizer-dev cargo test
+# trixie rather than bookworm, and the version matters: bookworm ships ffmpeg
+# 5.1, which has no `-display_rotation`. The rotated-video fixture needs it to
+# write a display matrix the way a phone does, and CI's runner has a new enough
+# ffmpeg -- so on bookworm that one test would fail here and pass there, which
+# is the worst way round.
+FROM docker.io/library/rust:1-trixie
+
+# ffmpeg for the transcode, and exiftool purely as an independent oracle in the
+# tests: the sanitiser itself no longer shells out to it. Reading back our own
+# EXIF with our own parser would let a bug in the writer pass its own test.
+#
+# nasm and cmake are for the assembly paths in rav1e (AVIF) and libwebp; without
+# them both fall back to slower C and the AVIF encode stops being affordable.
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends \
+      ffmpeg \
+      libimage-exiftool-perl \
+      nasm \
+      cmake \
+      pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+# The transcode is H.264 and nothing else. libopenh264 accepts neither -crf nor
+# -preset, so an image without libx264 would not fail over -- it would quietly
+# encode something the sanitiser never asked for.
+RUN ffmpeg -hide_banner -encoders | grep -q ' libx264 '
+
+# check-media.yml gates on both, so they have to be runnable here or the first
+# anyone hears about a formatting or lint failure is the pull request.
+RUN rustup component add rustfmt clippy
+
+# A skip is a hole that looks exactly like a pass. In here every tool is
+# present by construction, so the guards fail instead of skipping.
+ENV MEDIA_TESTS_REQUIRED=1
+
+# Each test runs a whole sanitise, and a sanitise deliberately uses the machine:
+# rayon across the derivatives, ffmpeg and rav1e across their own threads. On a
+# many-core host the test harness multiplies that by another N and ffmpeg starts
+# failing to open encoders, which looks like a bug in the sanitiser and is not
+# -- nothing in production runs thirty-two sanitises at once. CI runners have
+# few enough cores that they never reach this.
+ENV RUST_TEST_THREADS=4

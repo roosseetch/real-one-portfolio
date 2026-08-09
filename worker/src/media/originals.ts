@@ -41,7 +41,7 @@ export function originalKey(activityId: string, mediaId: string, extension: stri
  * Telegram's own path usually carries the extension; the format the bytes turn
  * out to be is the fallback.
  *
- * Nothing downstream reads it — Pillow opens by content — so this is only about
+ * Nothing downstream reads it — the sanitiser opens by content — so this is only about
  * the private bucket describing itself honestly. It used to guess `jpg` or
  * `mp4` from the requested type, which is exactly the kind of small lie that
  * costs an hour when something later goes wrong.
@@ -155,8 +155,9 @@ export async function storeOriginal(
   }
 
   // The bytes outrank the claim. A video filed as an image is not a cosmetic
-  // mistake: the media workflow selects on `type == "image"`, so Pillow would
-  // be handed an mp4 and the run would fail with nothing said to anyone.
+  // mistake: the media workflow selects on `type == "image"`, so the sanitiser
+  // would hand an mp4 to a picture decoder and the run would fail with nothing
+  // said to anyone.
   if (format.kind !== request.type) {
     console.warn(`Filed as ${format.kind} rather than ${request.type}: the bytes are a ${format.label}`);
   }

@@ -5,7 +5,7 @@ A reusable, fully static personal portfolio system.
 - **Site:** static HTML/CSS/TS (Vite), deployed to GitHub Pages. Page reads never touch a Worker, database, or runtime API.
 - **Content:** immutable JSON chunks + manifest in a public Cloudflare R2 bucket; media in a separate public R2 bucket.
 - **Authoring:** Telegram bot → Cloudflare Worker → Workers AI, with preview / edit / regenerate / cancel / publish in the same channel.
-- **Media pipeline:** GitHub Actions sanitizes photos/videos (metadata scrub + configured decoy metadata) in ephemeral storage before anything becomes public.
+- **Media pipeline:** GitHub Actions sanitizes photos/videos (metadata scrub + configured decoy metadata) in ephemeral storage before anything becomes public. The sanitiser is a Rust binary in `sanitizer/`.
 - **Infrastructure:** reusable Terraform (bootstrap + main stacks, R2 state backend).
 
 No personal names, domains, account IDs, bucket names, or secrets appear in tracked files. All personalization comes from gitignored local files, GitHub variables/secrets, and Worker secrets. See `tasks/plan.md` for the implementation plan.
@@ -16,11 +16,38 @@ No personal names, domains, account IDs, bucket names, or secrets appear in trac
 site/            static portfolio site (Vite + vanilla TS)
 profile/         approved public profile JSONs (facts, personality, design, portfolio)
 worker/          Cloudflare Worker (Telegram webhook, drafts, AI, publishing)
+sanitizer/       Rust media sanitiser: strips originals, injects the decoy
 infrastructure/  Terraform: bootstrap/ (state bucket) and main/ (everything else)
 scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 .github/         workflows + config-inventory.json (every variable and secret they use)
 tasks/           implementation plan and task checklist
 ```
+
+## Media sanitiser
+
+`sanitizer/` holds the program that turns a draft's originals into public
+derivatives. It removes metadata by re-encoding rather than by deleting tags —
+a picture is decoded to pixels and written out again, a video is transcoded —
+and only then injects the decoy values from `config/media-decoy.json`. It needs
+`ffmpeg` (built with libx264) and nothing else at runtime.
+
+Build and test it in a container, because it needs an ffmpeg with libx264 and
+the tests additionally want exiftool, and few machines have both:
+
+```sh
+podman build -t media-sanitizer-dev sanitizer/
+podman run --rm -v "$PWD":/repo:z -w /repo/sanitizer media-sanitizer-dev cargo test
+```
+
+exiftool is a test dependency only. The sanitiser writes its own EXIF, so the
+suite checks those writes against an implementation that shares no code with it
+— our own reader would happily agree with our own writer about a malformed
+block.
+
+`build-sanitizer.yml` compiles the binary on push to `main` and attaches it to a
+`sanitizer-v<version>` release; `process-media.yml` fetches that exact version
+rather than building, because that job runs while an author waits on a draft.
+Bump `version` in `sanitizer/Cargo.toml` to cut a new one.
 
 ## Repository variables and secrets
 

@@ -1,0 +1,60 @@
+[package]
+name = "sanitize-media"
+version = "1.0.0"
+edition = "2021"
+description = "Sanitises source photos and videos into public web derivatives"
+license = "MIT"
+
+[[bin]]
+name = "sanitize-media"
+path = "src/main.rs"
+
+[lib]
+name = "sanitize_media"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rayon = "1"
+rand = "0.8"
+
+# Decoding only. The encoders come from libwebp and rav1e below, which are the
+# ones that can hit the quality/size settings the site was tuned against.
+image = { version = "0.25", default-features = false, features = [
+  "jpeg", "png", "webp", "tiff", "gif", "bmp",
+] }
+# SIMD Lanczos3. The image crate's own resize is correct but scalar, and the
+# resize is the one part of the picture path that is actually hot.
+fast_image_resize = { version = "5", features = ["image"] }
+# libwebp, for lossy WebP at a quality factor. The image crate's WebP encoder
+# is lossless-only, which would multiply the size of every derivative.
+webp = "0.3"
+# rav1e, and the only AVIF encoder in Rust that will embed EXIF for us.
+# 0.13 or newer specifically: `with_exif` does not exist before it, and without
+# it an AVIF derivative would have to carry its decoy by hand-splicing an Exif
+# item into the ISOBMFF -- offsets and all, which is the one thing worth
+# refusing to do by hand in a file whose job is privacy.
+ravif = "0.13"
+rgb = "0.8"
+imgref = "1"
+# Reading only: the source's orientation flag, and the tests' verification.
+# Nothing here writes EXIF -- exif.rs does that, so there is one definition of
+# what the decoy bytes are.
+kamadak-exif = "0.5"
+
+# rav1e is unusable unoptimised -- an AVIF derivative that takes under a second
+# in release takes the better part of a minute in a debug build, which turns the
+# test suite from seconds into minutes. Our own code stays unoptimised and
+# debuggable; only the dependencies are built with optimisations.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

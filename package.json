@@ -10,7 +10,7 @@
     "profile:fetch": "tsx scripts/fetch-profile.ts",
     "record:unpublish": "tsx scripts/unpublish-record.ts",
     "logs:read": "bash scripts/read-error-logs.sh",
-    "test:media": "python -m pytest"
+    "test:media": "podman build -q -t media-sanitizer-dev sanitizer/ && podman run --rm -v \"$PWD\":/repo:z -w /repo/sanitizer media-sanitizer-dev cargo test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

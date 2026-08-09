@@ -1,15 +1,15 @@
 name: Check media sanitiser
 
-# Until now, editing scripts/sanitize_media.py or process-media.yml ran nothing
-# at all: the worker's vitest suite is scoped to worker/**, and check-config
-# only reads the workflow files for undeclared secrets. The first time anyone
-# found out a change was wrong was on a real dispatch, after a draft had already
-# moved to `processing` and promised the author a published record.
+# Until this existed, editing the sanitiser or process-media.yml ran nothing at
+# all: the worker's vitest suite is scoped to worker/**, and check-config only
+# reads the workflow files for undeclared secrets. The first time anyone found
+# out a change was wrong was on a real dispatch, after a draft had already moved
+# to `processing` and promised the author a published record.
 #
 # Deliberately a separate workflow rather than a job inside check-config.yml.
 # That gate is credential-free and finishes in seconds, and it exists to catch a
-# typo before it merges; bolting two minutes of apt and ffmpeg onto it would
-# blunt the one check that is currently instant.
+# typo before it merges; bolting apt and a Rust build onto it would blunt the
+# one check that is currently instant.
 #
 # No secrets and no variables: every fixture is generated at test time, so this
 # needs nothing but the tools.
@@ -20,50 +20,67 @@ name: Check media sanitiser
 on:
   pull_request:
     paths:
-      - "scripts/sanitize_media.py"
-      - "scripts/tests/**"
-      - "scripts/requirements-media*.txt"
+      - "sanitizer/**"
       - "config/media-decoy.json"
       - ".github/workflows/process-media.yml"
       - ".github/workflows/check-media.yml"
-      - "pytest.ini"
+      - ".github/workflows/build-sanitizer.yml"
   push:
     branches: [main]
     paths:
-      - "scripts/sanitize_media.py"
-      - "scripts/tests/**"
-      - "scripts/requirements-media*.txt"
+      - "sanitizer/**"
       - "config/media-decoy.json"
       - ".github/workflows/process-media.yml"
       - ".github/workflows/check-media.yml"
-      - "pytest.ini"
+      - ".github/workflows/build-sanitizer.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  pytest:
+  test:
     runs-on: ubuntu-latest
     env:
       # A developer's machine may lack exiftool or an ffmpeg with libx264, and
-      # the suite skips what it cannot run there. Here a skip would be a hole
+      # the suite reports what it cannot run there. Here a skip would be a hole
       # that looks exactly like a pass, so the guards fail instead.
       MEDIA_TESTS_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: "3.12"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sanitizer
 
       - name: Install ffmpeg and exiftool
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg libimage-exiftool-perl
+          # exiftool is a test dependency only. The sanitiser writes its own
+          # EXIF; this is the independent implementation those writes are
+          # checked against, so that a bug in our writer cannot pass its own
+          # test by agreeing with our reader.
+          #
+          # nasm is for rav1e's assembly paths, without which AVIF encoding
+          # falls back to C and the suite takes several times as long.
+          sudo apt-get install -y -qq ffmpeg libimage-exiftool-perl nasm
+          # The transcode is H.264 and nothing else. libopenh264 accepts neither
+          # -crf nor -preset, so a build without libx264 would not fail over --
+          # it would quietly produce something the sanitiser never asked for.
+          ffmpeg -hide_banner -encoders | grep -q ' libx264 '
 
-      - name: Install the sanitiser's dependencies
-        run: python -m pip install --quiet -r scripts/requirements-media-dev.txt
+      - name: Check formatting
+        working-directory: sanitizer
+        run: cargo fmt --check
+
+      - name: Lint
+        working-directory: sanitizer
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Run the suite
-        run: python -m pytest
+        working-directory: sanitizer
+        run: cargo test --locked
