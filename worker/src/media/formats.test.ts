@@ -42,7 +42,7 @@ describe("what a file claims to be", () => {
     expect(classifyFile({ mime: null, name: null })).toEqual({ status: "unknown" });
   });
 
-  it("names HEIC rather than calling it not an image, since Pillow has no plugin for it", () => {
+  it("names HEIC rather than calling it not an image, since the sanitiser has no decoder for it", () => {
     expect(classifyFile({ mime: "image/heic", name: "IMG_0421.HEIC" })).toEqual({
       status: "unopenable",
       kind: "image",

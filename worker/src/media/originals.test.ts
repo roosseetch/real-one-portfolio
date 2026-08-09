@@ -153,7 +153,7 @@ describe("files that never reach the bucket", () => {
 
 describe("what the bytes say against what was claimed", () => {
   // The workflow selects on `type == "image"`, so a video filed as an image is
-  // handed to Pillow and the run fails with nothing said to anyone.
+  // handed to a picture decoder and the run fails with nothing said to anyone.
   it("files an mp4 as a video even when the document claimed to be an image", async () => {
     telegramServing("mp4", { file_path: "documents/file_3.mp4" });
 
