@@ -21,7 +21,7 @@ pub mod video;
 
 use anyhow::Result;
 use rand::Rng;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use decoy::Decoy;
@@ -160,7 +160,3 @@ impl Outcome {
         }
     }
 }
-
-/// The manifest is keyed by media id and ordered, so two runs over the same
-/// mapping write byte-identical JSON.
-pub type Entries = BTreeMap<String, Vec<Entry>>;

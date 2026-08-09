@@ -511,14 +511,6 @@ pub fn normalise_tag_key(key: &str) -> String {
     lowered
 }
 
-/// Whether a container date is the epoch the bitexact flags leave behind.
-///
-/// MP4 counts seconds from 1904-01-01, so "no date" reads back as that date
-/// rather than as nothing at all.
-pub fn is_zeroed_date(value: &str) -> bool {
-    value.starts_with("1904:01:01") || value.starts_with("1904-01-01") || value.starts_with("0000")
-}
-
 /// Tag keys ffprobe can still read that the output has no business carrying.
 ///
 /// The concrete form of "ffprobe shows no original metadata": handler_name,
@@ -999,12 +991,5 @@ mod tests {
             compare_properties(&before, &after, 640, 480),
             Vec::<String>::new()
         );
-    }
-
-    #[test]
-    fn the_mp4_zero_epoch_is_recognised_as_no_date_at_all() {
-        assert!(is_zeroed_date("1904:01:01 00:00:00"));
-        assert!(is_zeroed_date("0000:00:00 00:00:00"));
-        assert!(!is_zeroed_date("2026:04:11 08:14:22"));
     }
 }
