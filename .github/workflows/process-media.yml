@@ -99,31 +99,45 @@ jobs:
       # version in this checkout's Cargo.toml rather than by "latest", so the
       # binary and the workflow driving it cannot drift apart.
       #
-      # The fallback is not decoration: it covers the window after a version
-      # bump merges and before the build workflow has published, and a dispatch
-      # landing in that window would otherwise fail on a draft that has already
-      # promised the author a record.
+      # The fallback is not decoration, and it covers two different failures.
+      # One is the window after a version bump merges and before the build
+      # workflow has published. The other is subtler: the binary links against
+      # the runner image's glibc, so one built on a newer image than the one a
+      # dispatch happens to land on downloads perfectly and then will not exec.
+      # Both are caught by running it rather than by trusting the download, and
+      # a dispatch that failed either way would be failing a draft that has
+      # already promised the author a record.
       - name: Fetch the sanitiser
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(grep -m1 '^version' sanitizer/Cargo.toml | cut -d'"' -f2)
           tag="sanitizer-v${version}"
+          binary="$HOME/.local/bin/sanitize-media"
           mkdir -p "$HOME/.local/bin"
 
-          if gh release download "$tag" --pattern sanitize-media \
-               --output "$HOME/.local/bin/sanitize-media" 2>/dev/null; then
-            echo "using the prebuilt $tag"
+          usable=0
+          if gh release download "$tag" --pattern sanitize-media --output "$binary" 2>/dev/null; then
+            chmod +x "$binary"
+            if "$binary" --help >/dev/null 2>&1; then
+              usable=1
+              echo "using the prebuilt $tag"
+            else
+              echo "::warning::the prebuilt $tag will not run on this image; building from source"
+            fi
           else
             echo "::warning::$tag is not published yet; building from source"
-            sudo apt-get install -y -qq nasm
-            cargo build --release --locked --manifest-path sanitizer/Cargo.toml
-            cp sanitizer/target/release/sanitize-media "$HOME/.local/bin/sanitize-media"
           fi
 
-          chmod +x "$HOME/.local/bin/sanitize-media"
+          if [ "$usable" -eq 0 ]; then
+            sudo apt-get install -y -qq nasm
+            cargo build --release --locked --manifest-path sanitizer/Cargo.toml
+            cp sanitizer/target/release/sanitize-media "$binary"
+            chmod +x "$binary"
+          fi
+
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/sanitize-media" --help >/dev/null
+          "$binary" --help >/dev/null
 
       # Everything below stays under the runner's temp directory, which is
       # discarded with the runner. Never the workspace: the workspace is a git
