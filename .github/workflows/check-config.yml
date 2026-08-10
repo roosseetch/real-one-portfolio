@@ -1,7 +1,11 @@
 name: Check workflow config
 
-# Two checks over .github/workflows, both about references GitHub resolves to an
-# empty string instead of failing on.
+# Three checks over .github/workflows, all about mistakes that reach main
+# looking green.
+#
+# actionlint parses every workflow and checks each expression against the
+# contexts it is allowed to use. Workflows that only run on workflow_dispatch
+# are otherwise never parsed until someone dispatches them.
 #
 # Every secrets.* and vars.* reference must be declared in
 # .github/config-inventory.json, and every declaration must be referenced.
@@ -53,6 +57,18 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
+      # First, because a file GitHub cannot parse makes every other check on it
+      # moot. process-media.yml runs only on workflow_dispatch, so until this
+      # existed nothing in CI ever parsed it: `${{ cancelled() }}` in a step's
+      # `env:` -- legal-looking, and rejected only inside an `if:` -- merged
+      # green and took the whole workflow down on main, with media publication
+      # broken until it was found. actionlint parses every workflow and knows
+      # which contexts each expression may use.
+      #
+      # Pinned by version. Bump it deliberately: a floating tag would let a new
+      # release fail an unrelated pull request.
+      - uses: docker://rhysd/actionlint:1.7.7
+
       - run: npm ci
       - run: npm run config:check
       # The same class of silent failure one file over: an unknown step
