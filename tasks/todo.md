@@ -75,5 +75,12 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
       keeps them there along with declared permissions, accounted-for writes,
       and no unguarded secret a pull request can reach. One leak found and
       fixed: proxy.test.ts carried the live domain)
-- [ ] Task 30: README + runbook
+- [x] Task 30: README + runbook
+      (the README now carries an eleven-step deployment runbook — domain and
+      zone, local credentials, bootstrap stack, main stack, every repository
+      variable and secret with where its value comes from, profile and
+      manifest, Telegram, the Worker-then-hostname ordering, Pages and its
+      custom domain, the production gate, and a verification pass — plus the
+      draft lifecycle with its state table and a backups/export section naming
+      what has only one copy)
 - [ ] Checkpoint G: full spec compliance sweep
