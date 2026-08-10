@@ -383,16 +383,25 @@ jobs:
 
             if compgen -G "$WORK/public/*.mp4" > /dev/null; then
               echo
-              echo "| video | size | dimensions | duration | audio |"
-              echo "| --- | --- | --- | --- | --- |"
+              echo "| video | size | dimensions | duration | audio | changed |"
+              echo "| --- | --- | --- | --- | --- | --- |"
               for f in "$WORK"/public/*.mp4; do
                 probe=$(ffprobe -v error -show_format -show_streams -of json "$f")
-                printf '| %s | %s KiB | %s | %s s | %s |\n' \
+                # Whatever the author will be asked to confirm, so a run says
+                # why a draft is waiting on them without anyone reading the
+                # callback body.
+                changed=$(jq -r --arg file "$(basename "$f")" \
+                  '[.[][] | select(.file == $file) | (.visibleChanges // [])]
+                   | first // []
+                   | if length == 0 then "nothing visible" else join("; ") end' \
+                  "$WORK/public/manifest.json")
+                printf '| %s | %s KiB | %s | %s s | %s | %s |\n' \
                   "$(basename "$f")" \
                   "$(( $(stat -c%s "$f") / 1024 ))" \
                   "$(echo "$probe" | jq -r '[.streams[] | select(.codec_type=="video")][0] | "\(.width)x\(.height)"')" \
                   "$(echo "$probe" | jq -r '.format.duration | tonumber | . * 100 | round / 100')" \
-                  "$(echo "$probe" | jq -r '[.streams[] | select(.codec_type=="audio")][0].codec_name // "none"')"
+                  "$(echo "$probe" | jq -r '[.streams[] | select(.codec_type=="audio")][0].codec_name // "none"')" \
+                  "$changed"
               done
             fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -441,7 +450,13 @@ jobs:
                     poster: ($base + "/" + ($entries | widest("poster"; $id)).file),
                     thumbnail: ($base + "/" + ($entries | narrowest("poster"; $id)).file),
                     width: $video.width,
-                    height: $video.height
+                    height: $video.height,
+                    # What the transcode changed that the author would see. A
+                    # default rather than an error, unlike every lookup above:
+                    # the sanitiser omits the field entirely when the clip came
+                    # through unchanged, and the empty list is what tells the
+                    # Worker to publish it the way it publishes a photo.
+                    visibleChanges: ($video.visibleChanges // [])
                   }
                 else
                   ($entries | widest("image"; $id)) as $w |

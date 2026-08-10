@@ -156,6 +156,37 @@ fn the_decoy_config_the_workflow_names_is_there() {
     );
 }
 
+/// The confirmation gate crosses three languages: this crate writes the field
+/// into manifest.json, the workflow's jq copies it into the callback body, and
+/// the Worker decides whether to ask the author on it. Nothing compiles both
+/// sides, and the failure is the quiet kind -- a renamed field publishes every
+/// video without a question, which looks exactly like a video that needed none.
+#[test]
+fn the_field_gating_the_confirmation_is_read_by_the_name_it_is_written_under() {
+    let mut entry = sanitize_media::manifest::Entry::picture(
+        "a-1920.mp4".into(),
+        "mp4".into(),
+        sanitize_media::manifest::Role::Video,
+        1920,
+        1080,
+        9,
+    );
+    entry.visible_changes = vec!["scaled from 3840x2160 to 1920x1080".into()];
+
+    // Taken from the serialiser rather than written out here, so this cannot
+    // agree with a transcription of the name instead of the name itself.
+    let json = serde_json::to_string(&entry).expect("an entry serialises");
+    let name = json
+        .split('"')
+        .find(|token| token.eq_ignore_ascii_case("visiblechanges"))
+        .expect("the entry must carry the field at all");
+
+    assert!(
+        workflow().contains(name),
+        "process-media.yml never reads {name}, so no confirmation can ever be asked for"
+    );
+}
+
 /// The two workflows agree on how the binary gets to the runner: one publishes
 /// a tag built from the crate version, the other fetches exactly that tag.
 #[test]

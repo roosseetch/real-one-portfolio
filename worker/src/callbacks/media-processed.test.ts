@@ -22,13 +22,17 @@ const RECORD: DraftRecord = {
 let storage: FakeBucket;
 let content: FakeBucket;
 let sent: string[];
+/** Every Telegram call, as {method, body}, for the sends that carry no text. */
+let calls: Array<{ method: string; body: Record<string, unknown> }>;
 
 beforeEach(() => {
   storage = createFakeBucket();
   content = createFakeBucket();
   sent = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+  calls = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const body = JSON.parse(String(init?.body));
+    calls.push({ method: String(url).split("/").pop() ?? "", body });
     if (typeof body.text === "string") sent.push(body.text);
     return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
   });
@@ -78,7 +82,10 @@ async function videoDraft(): Promise<Draft> {
 }
 
 /** What the workflow's jq builds for a video: an mp4, and a poster to stand in. */
-function videoPayload(draft: Draft, poster?: string): string {
+function videoPayload(
+  draft: Draft,
+  opts: { poster?: string; visibleChanges?: unknown } = {},
+): string {
   const base = `${MEDIA_BASE}/media/activity-${draft.activityId}`;
   return payload(draft, {
     media: [
@@ -86,10 +93,13 @@ function videoPayload(draft: Draft, poster?: string): string {
         sourceId: "media0",
         type: "video",
         src: `${base}/media0-1280.mp4`,
-        poster: poster ?? `${base}/media0-poster-1280.webp`,
+        poster: opts.poster ?? `${base}/media0-poster-1280.webp`,
         thumbnail: `${base}/media0-poster-320.webp`,
         width: 1280,
         height: 720,
+        // The sanitiser omits the field on a clip it changed in no visible way,
+        // which is what the workflow's `// []` turns into an empty list.
+        ...(opts.visibleChanges === undefined ? {} : { visibleChanges: opts.visibleChanges }),
       },
     ],
   });
@@ -391,9 +401,159 @@ describe("publishing on a valid callback", () => {
     // The poster is a URL like any other and gets the same host check; a
     // published record must not embed a third party's address.
     const draft = await videoDraft();
-    const body = videoPayload(draft, "https://elsewhere.example/poster.webp");
+    const body = videoPayload(draft, { poster: "https://elsewhere.example/poster.webp" });
 
     expect((await handleMediaProcessed(await callback(body), env())).status).toBe(400);
+  });
+});
+
+describe("the confirmation gate (spec Phase 6)", () => {
+  const CHANGES = ["scaled from 3840x2160 to 1920x1080"];
+
+  it("publishes a clip the transcode changed in no visible way", async () => {
+    // The whole point of the gate being conditional: an ordinary clip is
+    // published exactly the way a photo is, with nothing to answer.
+    const draft = await videoDraft();
+    const response = await handleMediaProcessed(await callback(videoPayload(draft, { visibleChanges: [] })), env());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "published" });
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(1);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("published");
+  });
+
+  it("publishes when the field is absent altogether", async () => {
+    // Which is what an older sanitiser binary sends, and what the workflow's
+    // `// []` produces from a manifest entry that omits it.
+    const draft = await videoDraft();
+    const response = await handleMediaProcessed(await callback(videoPayload(draft)), env());
+
+    expect(await response.json()).toMatchObject({ status: "published" });
+  });
+
+  it("publishes nothing when the clip changed visibly", async () => {
+    const draft = await videoDraft();
+    const response = await handleMediaProcessed(
+      await callback(videoPayload(draft, { visibleChanges: CHANGES })),
+      env(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "awaiting-confirmation" });
+    // Nothing public: no chunk, no manifest entry, so the site is as it was.
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+  });
+
+  it("holds the draft with the processed media and a live button", async () => {
+    const draft = await videoDraft();
+    await handleMediaProcessed(await callback(videoPayload(draft, { visibleChanges: CHANGES })), env());
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("awaiting_approval");
+    expect(stored?.preview?.messageId).toBe(1);
+    expect(stored?.preview?.token).toHaveLength(12);
+    // The URLs are kept because publishing later must use these files rather
+    // than ask for the work a second time.
+    expect(stored?.processed?.media[0]).toMatchObject({
+      sourceId: "media0",
+      type: "video",
+      src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1280.mp4`,
+      visibleChanges: CHANGES,
+    });
+  });
+
+  it("sends the clip itself and names what changed", async () => {
+    const draft = await videoDraft();
+    await handleMediaProcessed(await callback(videoPayload(draft, { visibleChanges: CHANGES })), env());
+
+    const album = calls.find((call) => call.method === "sendMediaGroup");
+    expect(album?.body.media).toEqual([
+      { type: "video", media: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1280.mp4` },
+    ]);
+
+    // The change is named rather than summarised, and the link repeated: Telegram
+    // refuses a by-URL fetch over 20 MB, and the author still has to be able to
+    // watch what they are approving.
+    expect(sent[0]).toContain("scaled from 3840x2160 to 1920x1080");
+    expect(sent[0]).toContain(`${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1280.mp4`);
+    expect(sent[0]).toContain("Publishing this version?");
+  });
+
+  it("offers only Publish and Cancel", async () => {
+    // The text was approved on the first pass and the file is finished, so a
+    // Regenerate here could only be refused.
+    const draft = await videoDraft();
+    await handleMediaProcessed(await callback(videoPayload(draft, { visibleChanges: CHANGES })), env());
+
+    const question = calls.find((call) => call.method === "sendMessage");
+    const keyboard = (question?.body.reply_markup as { inline_keyboard: Array<Array<{ text: string }>> })
+      .inline_keyboard;
+    expect(keyboard.flat().map((button) => button.text)).toEqual(["Publish", "Cancel"]);
+  });
+
+  it("clamps what the pipeline says before repeating it to the author", async () => {
+    // Signed, but it is put in front of a person: an unbounded list from a
+    // process running third-party actions does not get to fill the chat.
+    const draft = await videoDraft();
+    const shouting = ["a".repeat(400), 42, "", "scaled", "b", "c", "d", "e", "f"];
+    await handleMediaProcessed(await callback(videoPayload(draft, { visibleChanges: shouting })), env());
+
+    const held = (await loadDraft(storage.bucket, draft.draftId))?.processed?.media[0].visibleChanges ?? [];
+    expect(held).toHaveLength(5);
+    expect(held[0]).toHaveLength(120);
+    expect(held).not.toContain("");
+    expect(held).not.toContain(42);
+  });
+
+  it("ignores changes claimed for a picture", async () => {
+    // Only a video is transcoded. A picture claiming one is a pipeline that has
+    // changed under us, not a question to put to the author — and it must not
+    // become one, because the confirmation sends what it asks about as a video.
+    const draft = await processingDraft();
+    const body = payload(draft, {
+      media: [
+        {
+          sourceId: "media0",
+          type: "image",
+          src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1600.webp`,
+          visibleChanges: ["scaled from 3840x2160 to 1920x1080"],
+        },
+      ],
+    });
+
+    expect(await (await handleMediaProcessed(await callback(body), env())).json()).toMatchObject({
+      status: "published",
+    });
+    expect(calls.map((call) => call.method)).not.toContain("sendMediaGroup");
+  });
+
+  it("answers a repeat of the same job rather than failing the run", async () => {
+    // The job sanitised, uploaded and reported correctly. Whether a person has
+    // looked at the result yet is not something a workflow run can fail over.
+    const draft = await videoDraft();
+    const body = videoPayload(draft, { visibleChanges: CHANGES });
+    await handleMediaProcessed(await callback(body), env());
+    calls.length = 0;
+
+    const repeat = await handleMediaProcessed(await callback(body), env());
+
+    expect(repeat.status).toBe(200);
+    expect(await repeat.json()).toMatchObject({ status: "awaiting-confirmation" });
+    // No second album, no second question, and no new token to invalidate the
+    // buttons already on screen.
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a repeat that does not carry the dispatched job token", async () => {
+    const draft = await videoDraft();
+    await handleMediaProcessed(await callback(videoPayload(draft, { visibleChanges: CHANGES })), env());
+
+    const forged = payload(draft, {
+      jobId: "some-other-job-token-here",
+      media: [{ sourceId: "media0", type: "video", src: `${MEDIA_BASE}/media/x.mp4` }],
+    });
+
+    expect((await handleMediaProcessed(await callback(forged), env())).status).toBe(400);
   });
 });
 

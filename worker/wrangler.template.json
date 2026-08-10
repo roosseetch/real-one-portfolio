@@ -19,6 +19,11 @@
     {
       "binding": "CONTENT_BUCKET",
       "bucket_name": "__CONTENT_BUCKET__"
+    },
+    {
+      "//": "Deleted from and never written to: a draft cancelled after the media pipeline uploaded its derivatives leaves files nothing references, and the author has just declined them. Everything in this bucket is written by GitHub Actions, after sanitisation.",
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "__MEDIA_BUCKET__"
     }
   ],
   "ai": {

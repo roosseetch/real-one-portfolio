@@ -48,7 +48,7 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 
 ## Phase 6 — Video pipeline
 - [ ] Task 25: Video intake + transcode + sanitize
-- [ ] Task 26: Optional processed-video confirmation + publication
+- [x] Task 26: Optional processed-video confirmation + publication
 - [ ] Checkpoint F: video publication end-to-end
 
 ## Phase 7 — Reliability and maintenance

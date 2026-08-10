@@ -26,3 +26,15 @@ export function randomId(length: number = DEFAULT_LENGTH): string {
   for (const byte of bytes) id += ALPHABET[byte % ALPHABET.length];
   return id;
 }
+
+/**
+ * Whether a string is one of ours, before it is pasted into an object key.
+ *
+ * Every id minted here goes into a path — `drafts/{id}/draft.json`,
+ * `media/activity-{id}/` — so anything with a slash or a dot in it could name a
+ * different prefix entirely. Deliberately wider than the alphabet above, since
+ * the check is about what a key may contain rather than about how one is drawn.
+ */
+export function isValidId(id: string): boolean {
+  return /^[0-9a-z]{8,64}$/.test(id);
+}

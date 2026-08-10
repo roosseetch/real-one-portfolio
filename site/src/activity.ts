@@ -89,6 +89,25 @@ function renderRecord(record: ActivityRecord): HTMLElement {
       figure.append(img);
       if (media.caption) figure.append(el("figcaption", undefined, media.caption));
       card.append(figure);
+    } else if (media.type === "video") {
+      const figure = el("figure", "activity-media");
+      const video = document.createElement("video");
+      video.src = media.src;
+      // preload="none" with a poster: the frame is a WebP of a few tens of KB
+      // and shows immediately, while the clip's megabytes are fetched only if
+      // someone presses play. Without the poster the element would be a blank
+      // box, since nothing has been downloaded to draw.
+      const poster = media.poster ?? media.thumbnail;
+      if (poster) video.poster = poster;
+      video.preload = "none";
+      video.controls = true;
+      // Or iOS Safari takes the video fullscreen the moment it starts.
+      video.playsInline = true;
+      // A video has no alt attribute; the same words become its accessible name.
+      if (media.alt) video.setAttribute("aria-label", media.alt);
+      figure.append(video);
+      if (media.caption) figure.append(el("figcaption", undefined, media.caption));
+      card.append(figure);
     }
   }
   if (record.tags?.length) {

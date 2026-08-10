@@ -250,6 +250,12 @@ pub struct VideoSpec {
     pub container: String,
     pub location: Option<String>,
     pub rotation: Option<i32>,
+    /// Encoder and pixel format, for a source that is not an ordinary eight-bit
+    /// H.264 clip. ProRes at yuv422p10le is what a phone records in ten bits,
+    /// and it is built into ffmpeg, so a fixture using it cannot be skipped for
+    /// want of an external encoder.
+    pub codec: String,
+    pub pix_fmt: String,
 }
 
 impl Default for VideoSpec {
@@ -262,6 +268,8 @@ impl Default for VideoSpec {
             container: "mp4".into(),
             location: None,
             rotation: None,
+            codec: "libx264".into(),
+            pix_fmt: "yuv420p".into(),
         }
     }
 }
@@ -294,14 +302,12 @@ pub fn make_video(dir: &Path, spec: VideoSpec) -> PathBuf {
     if spec.audio {
         args.extend(["-f".into(), "lavfi".into(), "-i".into(), sine]);
     }
-    args.extend([
-        "-c:v".into(),
-        "libx264".into(),
-        "-preset".into(),
-        "ultrafast".into(),
-        "-pix_fmt".into(),
-        "yuv420p".into(),
-    ]);
+    args.extend(["-c:v".into(), spec.codec.clone()]);
+    // Only x264 takes one, and prores refuses the whole invocation over it.
+    if spec.codec == "libx264" {
+        args.extend(["-preset".into(), "ultrafast".into()]);
+    }
+    args.extend(["-pix_fmt".into(), spec.pix_fmt.clone()]);
     if spec.audio {
         args.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "64k".into()]);
     }
