@@ -41,7 +41,7 @@ jobs:
         working-directory: infrastructure/${{ matrix.stack }}
     steps:
       - uses: actions/checkout@v7
-      - uses: hashicorp/setup-terraform@v4
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.13.3
           terraform_wrapper: false
@@ -94,7 +94,7 @@ jobs:
             exit 1
           fi
           echo "All three read-only credentials are present."
-      - uses: hashicorp/setup-terraform@v4
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.13.3
           terraform_wrapper: false

@@ -46,7 +46,7 @@ network, no variables, no secrets.
 | Workflow | Trigger | What it runs |
 | --- | --- | --- |
 | `tests.yml` | pull request, push to main | typechecks + every vitest suite, on the fixture profile |
-| `check-config.yml` | pull request, push to main | actionlint, the config inventory, the media workflow's steps |
+| `check-config.yml` | pull request, push to main | actionlint, the config inventory, the media workflow's steps, the security rules |
 | `check-media.yml` | pull request, push to main | the sanitiser's Rust tests |
 | `deploy-worker.yml` | push to main | typecheck + the Worker suite against the real profile, then deploys |
 
@@ -133,6 +133,72 @@ error until both exist.
    that derivation for the token in `infrastructure/.env` — read it for the
    mechanics rather than running it here, since it overwrites the write
    credentials in that file.
+
+## Security and log hygiene
+
+This repository is public, which makes every Actions log it produces public too.
+Three rules follow from that, and `npm run security:check` enforces the
+mechanical half of them on every pull request.
+
+**Nothing that authenticates appears anywhere.** Every credential is a
+repository secret, and GitHub masks those in logs. The Worker's own logs are
+held to the same rule from the other side: `console.warn` and `console.error`
+are captured into a durable object in the private bucket
+(`worker/src/logging/error-log.ts`), so anything a call site prints is written
+down and kept. The existing call sites print short literal messages, error text
+and status codes — never the author's words, never a chat id, never a token.
+`ai/generate.ts` goes further and removes the prompt from a model's error before
+logging it, because the prompt is what the author typed. Anything added later
+has to hold to that.
+
+**Deployment identifiers do appear, and are not credentials.** The site's
+domain, the bucket names derived from `PROJECT_SLUG`, the Cloudflare account and
+zone ids, and the Amplitude browser key are repository *variables*, and GitHub
+prints a job's environment block in the log. None of them grants access:
+the R2 endpoint they compose refuses every unsigned request, and the Amplitude
+key is inlined into the bundle every visitor downloads. Terraform still marks
+the account and zone ids `sensitive` so they stay out of plan and state output,
+where they would otherwise sit beside resource ids for ever.
+
+**A pull request cannot reach a secret.** `check-config.yml`, `check-media.yml`
+and `tests.yml` are credential-free by construction, so they run for forks.
+`terraform-plan.yml` is the one exception: its `plan` job holds read-only
+credentials and refuses to run for anything but a branch of this repository.
+`pull_request_target` is not used anywhere, and the check refuses to let it be.
+
+### The production environment
+
+`deploy-worker.yml` and `terraform-apply.yml` both declare
+`environment: production`. On this repository that environment requires a review
+from its owner and restricts deployments to `main`, so every Worker deploy and
+every infrastructure change waits for a person. `deploy-pages.yml` uses
+`github-pages`, also restricted to `main`, with no reviewer: it publishes what
+is already on `main` and changes nothing outside Pages.
+
+A run waiting on the gate reports `status: waiting` rather than running, which
+is why a Deploy Worker run can show an hour of "duration" and no failure:
+
+```
+gh api repos/<owner>/<repo>/actions/runs/<id>/pending_deployments
+```
+
+### Third-party actions
+
+Pinned by commit — or, for a container action, by image digest — never by tag.
+A tag is a name its owner can move, and these actions run on a runner holding
+credentials for the private bucket and for Cloudflare. GitHub's own `actions/*`
+stay on their major version, which is GitHub's documented advice and moves only
+when GitHub moves it.
+
+To bump one, resolve the new ref and update the trailing comment that names it:
+
+```
+gh api repos/<owner>/<repo>/commits/<tag> --jq .sha
+```
+
+Every `write` permission in `.github/workflows/` is listed with its reason in
+`scripts/check-workflow-security.ts`; adding one anywhere fails the check until
+it is written down there.
 
 ## Telegram webhook
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { handleAnalyticsProxy } from "./proxy";
 
-const ORIGIN = "https://dinahaman.com";
+const ORIGIN = "https://site.example";
 const API_KEY = "public-project-key";
 const env = { SITE_BASE_URL: ORIGIN, AMPLITUDE_API_KEY: API_KEY };
 const body = JSON.stringify({ api_key: API_KEY, events: [{ event_type: "[Amplitude] Page Viewed" }] });
@@ -20,7 +20,7 @@ function request(
   const clientIp = overrides.clientIp === undefined ? "203.0.113.7" : overrides.clientIp;
   if (clientIp !== null) headers["CF-Connecting-IP"] = clientIp;
 
-  return new Request("https://worker.dinahaman.com/analytics", {
+  return new Request("https://worker.example/analytics", {
     method,
     headers,
     ...(method === "POST" ? { body: overrides.body ?? body } : {}),
