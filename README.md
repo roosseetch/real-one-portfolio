@@ -23,6 +23,33 @@ scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 tasks/           implementation plan and task checklist
 ```
 
+## Tests
+
+```sh
+npm ci && npm ci --prefix worker && npm ci --prefix site
+npm test
+```
+
+That runs all three TypeScript suites: the profile validator (`scripts/`), the
+Worker (`worker/src/`), and the site's Activity loader (`site/src/`). Each
+package keeps its own `vitest.config.ts`, and needs one — with no config in its
+directory vitest walks up and finds the repository root's, whose include pattern
+covers `scripts/` only, so the suite silently reports no test files and passes.
+
+The Worker and the site both import `profile/*.json`, which is not tracked (it
+is one person's name and history). `npm test` copies `scripts/fixtures/valid/`
+into `profile/` when nothing is there, and never overwrites, so a checkout that
+has fetched the real profile keeps it. Run it on its own with `npm run
+profile:test-fixture`. This is what keeps the pull-request gate hermetic: no
+network, no variables, no secrets.
+
+| Workflow | Trigger | What it runs |
+| --- | --- | --- |
+| `tests.yml` | pull request, push to main | typechecks + every vitest suite, on the fixture profile |
+| `check-config.yml` | pull request, push to main | actionlint, the config inventory, the media workflow's steps |
+| `check-media.yml` | pull request, push to main | the sanitiser's Rust tests |
+| `deploy-worker.yml` | push to main | typecheck + the Worker suite against the real profile, then deploys |
+
 ## Media sanitiser
 
 `sanitizer/` holds the program that turns a draft's originals into public

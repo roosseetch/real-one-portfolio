@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+import facts from "../../../profile/facts.json";
+import personality from "../../../profile/personality.json";
 import { AUTHOR_CONTEXT } from "./author";
 
+/* Asserted against whatever profile is installed rather than against one
+   person's approved words: a deployment fetches its own profile before it
+   deploys, and CI runs on the tracked fixture. What has to hold either way is
+   that the prompt carries the voice material and says it is only voice. */
 describe("AUTHOR_CONTEXT", () => {
   it("carries the voice material the profile already approved", () => {
-    expect(AUTHOR_CONTEXT).toContain("How she writes");
-    expect(AUTHOR_CONTEXT).toContain("Direct and clear");
-    expect(AUTHOR_CONTEXT).toContain("What she cares about");
-    expect(AUTHOR_CONTEXT).toContain("Accuracy");
+    expect(AUTHOR_CONTEXT).toContain(`How she writes: ${personality.communicationStyle[0].name}`);
+    expect(AUTHOR_CONTEXT).toContain(`What she cares about: ${personality.values[0].name}`);
+    expect(AUTHOR_CONTEXT).toContain(`Name: ${facts.displayName}`);
+    expect(AUTHOR_CONTEXT).toContain(`Role: ${facts.headline}`);
   });
 
   it("states outright that it is not a source of facts", () => {

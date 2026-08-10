@@ -4,17 +4,29 @@
  *
  * Usage: tsx scripts/validate-profile.ts [profileDir]   (default: profile/)
  * Exit code 0 = all valid, 1 = any failure.
+ *
+ * The checks are exported as a function rather than run on import, so the test
+ * suite can assert on the problems themselves instead of scraping stdout. The
+ * command-line behaviour below is the contract CI depends on and is unchanged.
  */
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Ajv2020 as Ajv } from "ajv/dist/2020.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const profileDir = process.argv[2] ?? join(repoRoot, "profile");
-const schemaDir = join(repoRoot, "profile", "schemas");
 
-const FILES = ["facts", "personality", "design", "portfolio"] as const;
+export const PROFILE_FILES = ["facts", "personality", "design", "portfolio"] as const;
+export type ProfileFile = (typeof PROFILE_FILES)[number];
+
+/** Schemas describe the shape rather than the person, so they stay in the repo. */
+export const SCHEMA_DIR = join(repoRoot, "profile", "schemas");
+
+export interface ProfileProblem {
+  /** Which of the four files the problem was found in. */
+  file: ProfileFile;
+  message: string;
+}
 
 // Deployment-specific value detection. The repo must stay reusable: real
 // domains, absolute URLs, Cloudflare account/zone IDs, Telegram chat IDs,
@@ -35,55 +47,74 @@ const FORBIDDEN_KEYS = new Set([
   "telegramid", "chatid", "token", "secret", "apikey", "password",
 ]);
 
-let failCount = 0;
-const fail = (msg: string) => {
-  failCount++;
-  console.error(`  ✗ ${msg}`);
-};
-
-function scanValues(node: unknown, path: string): void {
+function scanValues(node: unknown, path: string, report: (message: string) => void): void {
   if (typeof node === "string") {
     for (const [pattern, label] of FORBIDDEN_PATTERNS) {
-      if (pattern.test(node)) fail(`${path}: contains ${label}: ${JSON.stringify(node)}`);
+      if (pattern.test(node)) report(`${path}: contains ${label}: ${JSON.stringify(node)}`);
     }
   } else if (Array.isArray(node)) {
-    node.forEach((item, i) => scanValues(item, `${path}[${i}]`));
+    node.forEach((item, i) => scanValues(item, `${path}[${i}]`, report));
   } else if (node !== null && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
       if (FORBIDDEN_KEYS.has(key.toLowerCase().replaceAll(/[_-]/g, ""))) {
-        fail(`${path}.${key}: forbidden deployment/secret key`);
+        report(`${path}.${key}: forbidden deployment/secret key`);
       }
-      scanValues(value, `${path}.${key}`);
+      scanValues(value, `${path}.${key}`, report);
     }
   }
 }
 
-const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
+/**
+ * Checks every profile file in `profileDir` and returns what is wrong with
+ * them. An empty array means the profile is publishable.
+ */
+export function validateProfile(profileDir: string, schemaDir: string = SCHEMA_DIR): ProfileProblem[] {
+  const ajv = new Ajv({ allErrors: true, allowUnionTypes: true });
+  const problems: ProfileProblem[] = [];
 
-for (const name of FILES) {
-  const schemaPath = join(schemaDir, `${name}.schema.json`);
-  const dataPath = join(profileDir, `${name}.json`);
-  const before = failCount;
-  console.log(`${name}.json`);
+  for (const name of PROFILE_FILES) {
+    const report = (message: string) => problems.push({ file: name, message });
 
-  let data: unknown;
-  try {
-    data = JSON.parse(readFileSync(dataPath, "utf8"));
-  } catch (err) {
-    fail(`cannot read/parse ${dataPath}: ${(err as Error).message}`);
-    continue;
+    let data: unknown;
+    const dataPath = join(profileDir, `${name}.json`);
+    try {
+      data = JSON.parse(readFileSync(dataPath, "utf8"));
+    } catch (err) {
+      report(`cannot read/parse ${dataPath}: ${(err as Error).message}`);
+      continue;
+    }
+
+    const validate = ajv.compile(JSON.parse(readFileSync(join(schemaDir, `${name}.schema.json`), "utf8")));
+    if (!validate(data)) {
+      for (const e of validate.errors ?? []) report(`schema: ${e.instancePath || "/"} ${e.message}`);
+    }
+    scanValues(data, name, report);
   }
 
-  const validate = ajv.compile(JSON.parse(readFileSync(schemaPath, "utf8")));
-  if (!validate(data)) {
-    for (const e of validate.errors ?? []) fail(`schema: ${e.instancePath || "/"} ${e.message}`);
-  }
-  scanValues(data, name);
-  if (failCount === before) console.log("  ✓ valid");
+  return problems;
 }
 
-if (failCount > 0) {
-  console.error(`\nProfile validation FAILED (${failCount} problem${failCount === 1 ? "" : "s"})`);
-  process.exit(1);
+/** Prints the per-file report the command line has always printed. */
+function main(profileDir: string): number {
+  const problems = validateProfile(profileDir);
+
+  for (const name of PROFILE_FILES) {
+    console.log(`${name}.json`);
+    const own = problems.filter((problem) => problem.file === name);
+    for (const problem of own) console.error(`  ✗ ${problem.message}`);
+    if (own.length === 0) console.log("  ✓ valid");
+  }
+
+  if (problems.length > 0) {
+    console.error(`\nProfile validation FAILED (${problems.length} problem${problems.length === 1 ? "" : "s"})`);
+    return 1;
+  }
+  console.log("\nProfile validation passed");
+  return 0;
 }
-console.log("\nProfile validation passed");
+
+// Only when run as a command. Importing the module — which the tests do — must
+// not validate anything or exit the process.
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exit(main(process.argv[2] ?? join(repoRoot, "profile")));
+}

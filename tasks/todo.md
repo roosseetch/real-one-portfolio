@@ -62,7 +62,11 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
       "Publication failed…" with Retry and Cancel. Retry reuses the same draft
       and activity id with a fresh job token, and republishes from the uploaded
       files rather than sanitising them twice)
-- [ ] Task 28: Test suite consolidation + CI
+- [x] Task 28: Test suite consolidation + CI
+      (`npm test` runs all three suites — profile validation, the Worker, the
+      site's Activity loader — and tests.yml runs them plus the typechecks on
+      every pull request. The suites take the tracked fixture profile when
+      profile/*.json is absent, so the gate needs no variables or secrets)
 - [ ] Task 29: Log hygiene + security pass
 - [ ] Task 30: README + runbook
 - [ ] Checkpoint G: full spec compliance sweep
