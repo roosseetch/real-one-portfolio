@@ -56,7 +56,12 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
       file shows only the decoy make/model/GPS, no creation_time, H.264/AAC)
 
 ## Phase 7 — Reliability and maintenance
-- [ ] Task 27: Failure flows + retry
+- [x] Task 27: Failure flows + retry
+      (a run that does not finish posts a signed report to
+      /callbacks/media-failed; the draft moves to `failed` and the author gets
+      "Publication failed…" with Retry and Cancel. Retry reuses the same draft
+      and activity id with a fresh job token, and republishes from the uploaded
+      files rather than sanitising them twice)
 - [ ] Task 28: Test suite consolidation + CI
 - [ ] Task 29: Log hygiene + security pass
 - [ ] Task 30: README + runbook

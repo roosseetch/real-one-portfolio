@@ -20,18 +20,22 @@ const MAX_MESSAGE = 4096;
 
 const EMPTY = "—";
 
-export const PREVIEW_ACTIONS = ["publish", "edit", "media", "regenerate", "cancel"] as const;
+export const PREVIEW_ACTIONS = ["publish", "edit", "media", "regenerate", "retry", "cancel"] as const;
 export type PreviewAction = (typeof PREVIEW_ACTIONS)[number];
 
 /**
  * Short codes keep callback_data inside Telegram's 64-byte limit alongside a
  * 16-character draft id and a 12-character token.
+ *
+ * Retry is `t` because `r` was already regenerate's, and a code that changes
+ * meaning would give a button still sitting in the chat a new one.
  */
 export const ACTION_CODES: Record<string, PreviewAction> = {
   p: "publish",
   e: "edit",
   m: "media",
   r: "regenerate",
+  t: "retry",
   c: "cancel",
 };
 
@@ -40,6 +44,7 @@ const CODE_FOR: Record<PreviewAction, string> = {
   edit: "e",
   media: "m",
   regenerate: "r",
+  retry: "t",
   cancel: "c",
 };
 
@@ -48,6 +53,7 @@ const LABELS: Record<PreviewAction, string> = {
   edit: "Edit text",
   media: "Change media",
   regenerate: "Regenerate",
+  retry: "Retry",
   cancel: "Cancel",
 };
 
@@ -101,18 +107,15 @@ export function formatPreview(record: DraftRecord, mediaDeclined = false): strin
  * independent, so carrying it reveals nothing; the token is what makes a
  * button from a superseded preview stop working.
  */
+function button(action: PreviewAction, draftId: string, token: string) {
+  return { text: LABELS[action], callback_data: `${CODE_FOR[action]}:${draftId}:${token}` };
+}
+
 export function previewKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
-  const button = (action: PreviewAction) => ({
-    text: LABELS[action],
-    callback_data: `${CODE_FOR[action]}:${draftId}:${token}`,
-  });
+  const key = (action: PreviewAction) => button(action, draftId, token);
 
   return {
-    inline_keyboard: [
-      [button("publish")],
-      [button("edit"), button("media")],
-      [button("regenerate"), button("cancel")],
-    ],
+    inline_keyboard: [[key("publish")], [key("edit"), key("media")], [key("regenerate"), key("cancel")]],
   };
 }
 
@@ -129,12 +132,26 @@ export function hasPreviewableRecord(draft: Draft): draft is Draft & { record: D
  * Same callback_data shape as above, so nothing about parsing a press changes.
  */
 export function confirmationKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
-  const button = (action: PreviewAction) => ({
-    text: LABELS[action],
-    callback_data: `${CODE_FOR[action]}:${draftId}:${token}`,
-  });
+  return {
+    inline_keyboard: [[button("publish", draftId, token)], [button("cancel", draftId, token)]],
+  };
+}
 
-  return { inline_keyboard: [[button("publish")], [button("cancel")]] };
+/**
+ * The buttons under a failed publication (spec §23).
+ *
+ * Retry and Cancel, and nothing else: the text was approved before any of this
+ * started, so editing or regenerating it now would answer a question nobody
+ * asked. What went wrong was the publishing, and the only two useful replies to
+ * that are "again" and "no".
+ *
+ * A fresh token per failure, like every other keyboard here, so the buttons under
+ * an earlier failure of the same draft stop working once a retry has moved it on.
+ */
+export function failureKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[button("retry", draftId, token), button("cancel", draftId, token)]],
+  };
 }
 
 /**

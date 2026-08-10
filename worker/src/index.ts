@@ -1,3 +1,4 @@
+import { handleMediaFailed } from "./callbacks/media-failed";
 import { handleMediaProcessed } from "./callbacks/media-processed";
 import { handleAnalyticsProxy } from "./analytics/proxy";
 import {
@@ -49,6 +50,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
   if (request.method === "POST" && pathname === "/callbacks/media-processed") {
     return handleMediaProcessed(request, env);
+  }
+
+  if (request.method === "POST" && pathname === "/callbacks/media-failed") {
+    return handleMediaFailed(request, env);
   }
 
   if ((request.method === "POST" || request.method === "OPTIONS") && pathname === "/analytics") {

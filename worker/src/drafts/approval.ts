@@ -14,8 +14,13 @@ import { randomId } from "../ids";
 import { resendsAsPhoto } from "../media/formats";
 import { deletePublishedMedia } from "../media/published";
 import { dispatchMediaProcessing, newJobToken, type DispatchEnv } from "../publishing/dispatch";
-import { publishProcessedMedia, type MediaPublishEnv } from "../publishing/media-record";
+import {
+  publishProcessedMedia,
+  type MediaPublishEnv,
+  type MediaPublishResult,
+} from "../publishing/media-record";
 import { publishRecord, type PublishEnv } from "../publishing/publish";
+import { failDraft } from "./failure";
 import { setPendingEdit } from "./pending";
 import {
   answerCallback,
@@ -50,6 +55,8 @@ const EDIT_PROMPT = "What should change? Send it as a message, and the whole ent
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 const PUBLISH_FAILED_MESSAGE = "Publication failed. The draft is still here — try again in a moment.";
+/** Said when a retry stopped at the same place. The buttons are still live, so this is the whole reply. */
+const RETRY_FAILED_MESSAGE = "That did not work either. The draft is still here — Retry when you want to try again.";
 const PROCESSING_MESSAGE = "Processing the media. This takes a couple of minutes; the link follows when it is done.";
 
 export interface ApprovalEnv extends TelegramApiEnv, AiEnv, PublishEnv, DispatchEnv, MediaPublishEnv {
@@ -214,7 +221,14 @@ export async function handlePreviewCallback(
   // been replaced" would send the author looking for a newer one that does not
   // exist. Nothing is given away by saying so: reaching here already required
   // an allowlisted sender and an unguessable draft id.
-  if (draft.state !== "awaiting_approval") {
+  //
+  // A failed draft is the one state other than `awaiting_approval` that still
+  // has live buttons, and it has exactly the two the failure message drew.
+  const failedAction = parsed.action === "retry" || parsed.action === "cancel";
+  const actionable =
+    draft.state === "awaiting_approval" || (draft.state === "failed" && failedAction);
+
+  if (!actionable) {
     await answerCallback(env, query.id, `Already ${draft.state.replace("_", " ")}.`);
     return;
   }
@@ -244,6 +258,24 @@ export async function handlePreviewCallback(
     await answerCallback(env, query.id, "Send the change you want.");
     await setPendingEdit(env.PRIVATE_BUCKET, draft.source.chatId, draft.draftId);
     await sendMessage(env, draft.source.chatId, EDIT_PROMPT);
+    return;
+  }
+
+  if (parsed.action === "retry") {
+    // Only a failed draft has anything to run again. The button is drawn nowhere
+    // else, so a press from a live preview is hand-made rather than something
+    // the author could have tapped — and on a draft still awaiting approval it
+    // would otherwise publish, which is not what the word says.
+    if (draft.state !== "failed") {
+      await answerCallback(env, query.id, NOT_YET);
+      return;
+    }
+
+    // Answered first, like regenerate: a retry re-runs whatever failed, and
+    // Telegram gives up on an unanswered callback long before a dispatch or a
+    // manifest write comes back.
+    await answerCallback(env, query.id, "Trying again…");
+    await retryDraft(env, draft);
     return;
   }
 
@@ -300,12 +332,33 @@ async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
     return;
   }
 
-  const result = await publishRecord(env, toPublicRecord(draft.record));
+  const result = await publishTextRecord(env, draft);
 
   if (result.status !== "published") {
+    // The draft is left in `awaiting_approval` with its buttons still on screen,
+    // so pressing Publish again is the retry. Nothing was dispatched and nothing
+    // is half-done, which is what makes that safe here and not on the media path.
     await sendMessage(env, draft.source.chatId, PUBLISH_FAILED_MESSAGE);
     return;
   }
+
+  if (draft.preview !== null) {
+    await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
+  }
+}
+
+/**
+ * Writes a record with no media, retires the draft, and sends the link.
+ *
+ * Shaped like `publishProcessedMedia` — same result, same message, same
+ * bookkeeping — so the callers that can reach either one do not have to care
+ * which they got.
+ */
+async function publishTextRecord(env: ApprovalEnv, draft: Draft): Promise<MediaPublishResult> {
+  if (draft.record === null) return { status: "failed" };
+
+  const result = await publishRecord(env, toPublicRecord(draft.record));
+  if (result.status !== "published") return { status: "failed" };
 
   const url = `${env.SITE_BASE_URL.replace(/\/$/, "")}/#activity`;
   const published: Draft = {
@@ -318,16 +371,76 @@ async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
   try {
     await saveDraft(env.PRIVATE_BUCKET, published);
   } catch {
-    // The record is live; only the bookkeeping failed. Stripping the keyboard
-    // below is what stops a second press from publishing it twice, so say
-    // nothing to the author about a problem that no longer affects them.
+    // The record is live; only the bookkeeping failed. The caller strips the
+    // keyboard, which is what stops a second press from publishing it twice, so
+    // say nothing to the author about a problem that no longer affects them.
     console.error("Published, but could not record it on the draft");
+  }
+
+  await sendMessage(env, draft.source.chatId, `Published. ${url}`);
+  return { status: "published", url };
+}
+
+/**
+ * Runs a failed publication again (spec §23).
+ *
+ * The same draft and the same activity id, deliberately: every derivative's name
+ * is built from the activity id, so a second run overwrites whatever the first
+ * one half-wrote instead of leaving an orphaned set beside it. The job token is
+ * the one thing minted fresh, which is what stops a straggling run from the
+ * previous attempt reporting against this one.
+ *
+ * How much is repeated depends on how far the first attempt got. Media that was
+ * already sanitised and uploaded is not sanitised again — the files are in the
+ * public bucket and asking for them a second time would only produce identical
+ * ones.
+ */
+async function retryDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
+  if (draft.published !== null) {
+    await sendMessage(env, draft.source.chatId, `Already published. ${draft.published.url}`);
+    return;
+  }
+
+  const processed = draft.processed ?? null;
+
+  // Nothing survived the first attempt, so the whole job runs again.
+  // startMediaProcessing is what moves the draft back into `processing`, and it
+  // leaves the buttons alone until that write has landed.
+  if (processed === null && draft.originals.length > 0) {
+    await startMediaProcessing(env, draft);
+    return;
+  }
+
+  // Either the media is already sanitised or there never was any: what failed
+  // was the write that makes the record public, and that is all that repeats.
+  // Back through `processing` first so a second press finds a draft that is
+  // already running rather than starting a second publication.
+  const resuming: Draft = { ...transition(draft, "processing"), preview: null, job: null };
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, resuming);
+  } catch {
+    // Still `failed` in the bucket with its buttons live, so the next press is
+    // another retry rather than nothing at all.
+    console.error("Could not mark the draft as retrying; nothing was published");
+    await sendMessage(env, draft.source.chatId, RETRY_FAILED_MESSAGE);
+    return;
   }
 
   if (draft.preview !== null) {
     await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
   }
-  await sendMessage(env, draft.source.chatId, `Published. ${url}`);
+
+  const result =
+    processed !== null
+      ? await publishProcessedMedia(env, resuming, processed.media)
+      : await publishTextRecord(env, resuming);
+
+  if (result.status !== "published") {
+    // Back to `failed` with a fresh pair of buttons, rather than stranded in
+    // `processing` with nothing running and nothing to press.
+    await failDraft(env, resuming, "publish");
+  }
 }
 
 /**
@@ -427,9 +540,11 @@ async function startMediaProcessing(env: ApprovalEnv, draft: Draft): Promise<voi
   const dispatched = await dispatchMediaProcessing(env, draft.draftId, jobToken);
 
   if (!dispatched) {
-    // The draft stays in `processing` on purpose: the retry flow picks it up
-    // from there, and silently reverting would hide that anything went wrong.
-    await sendMessage(env, draft.source.chatId, PUBLISH_FAILED_MESSAGE);
+    // Nothing is running, and nothing ever will be: no workflow started, so no
+    // workflow can report this. Marking it failed here is what puts the Retry
+    // button on screen — left in `processing` the draft would sit there with no
+    // job and no buttons, after the author was told a link would follow.
+    await failDraft(env, processing, "dispatch");
     return;
   }
 
@@ -449,7 +564,12 @@ async function cancelDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
   // Cancelled after the pipeline had already uploaded: the files are in the
   // public bucket, unreferenced by any record or manifest, and the author has
   // just said no to them. Unreachable is not the same as gone.
-  if ((draft.processed ?? null) !== null) {
+  //
+  // A failed draft is swept for the same reason without knowing whether there is
+  // anything to sweep. The upload step runs before the callback, so a run that
+  // stopped after it left a complete set behind; one that stopped during it left
+  // part of a set. Listing an empty prefix costs one call and answers both.
+  if ((draft.processed ?? null) !== null || draft.state === "failed") {
     await deletePublishedMedia(env.MEDIA_BUCKET, draft.activityId);
   }
 

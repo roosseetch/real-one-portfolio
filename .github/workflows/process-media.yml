@@ -154,7 +154,12 @@ jobs:
           # author's text, and neither belongs in a job log.
           jq -r '"originals: \(.originals | length), activity: \(.activityId)"' "$WORK/draft.json"
 
+      # Every step from here to the callback carries an id. The failure report
+      # at the end reads their outcomes to name the stage that stopped, which is
+      # the difference between telling the author "your files could not be
+      # cleaned" and telling them nothing.
       - name: Download the originals
+        id: download
         run: |
           mkdir -p "$WORK/originals"
           # An explicit allowlist, and it must stay in step with the mapping
@@ -185,6 +190,7 @@ jobs:
       # identifying tag survived into an output. A failure here must fail the
       # job: a half-scrubbed photo is worse than no photo.
       - name: Strip metadata and inject decoys
+        id: sanitize
         run: |
           sanitize-media "$WORK/originals" "$WORK/public" "$WORK/mapping.json" \
             --widths "$DERIVATIVE_WIDTHS" \
@@ -194,6 +200,7 @@ jobs:
             --decoy-config config/media-decoy.json
 
       - name: Verify nothing identifying survived
+        id: verify
         run: |
           fail=0
           for f in "$WORK"/public/*.webp; do
@@ -243,6 +250,7 @@ jobs:
       # uploaded. A half-complete set would leave the page with broken images
       # for whichever width the browser picked.
       - name: Check the derivative set is complete
+        id: verify_set
         run: |
           fail=0
 
@@ -329,6 +337,7 @@ jobs:
       # Write-only on the media bucket, set here rather than at job level so the
       # read-only private credentials cannot be used for a write by accident.
       - name: Upload the derivatives
+        id: upload
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_MEDIA_RW_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_MEDIA_RW_SECRET_ACCESS_KEY }}
@@ -410,6 +419,7 @@ jobs:
       # That split is deliberate: the manifest decides what the site shows, and
       # a runner holding media credentials must not be able to write it.
       - name: Tell the Worker the media is ready
+        id: publish
         env:
           CALLBACK_HMAC_SECRET: ${{ secrets.CALLBACK_HMAC_SECRET }}
           JOB_TOKEN: ${{ inputs.jobToken }}
@@ -493,6 +503,78 @@ jobs:
 
           echo "worker answered $status"
           [ "$status" = "200" ] || exit 1
+
+      # A run that did not finish has to say so. The author was told the link
+      # would follow, and without this the draft sits in `processing` for ever
+      # with no job behind it and no button on it — which is how a failure
+      # becomes indistinguishable from a bot that stopped answering.
+      #
+      # The Worker moves it to `failed` and offers Retry and Cancel (spec §23).
+      # Nothing public is touched either side of this: the upload step is the
+      # last one that writes anything, and a draft is private.
+      #
+      # `failure() || cancelled()` rather than `always()`: a run that got as far
+      # as the callback above has already reported itself, and `always()` would
+      # have a successful run contradict it. `cancelled()` is separate because
+      # `failure()` is false for a cancelled job, and a cancelled job strands a
+      # draft exactly as thoroughly as a failed one.
+      - name: Tell the Worker the job did not finish
+        if: ${{ failure() || cancelled() }}
+        env:
+          CALLBACK_HMAC_SECRET: ${{ secrets.CALLBACK_HMAC_SECRET }}
+          JOB_TOKEN: ${{ inputs.jobToken }}
+          CANCELLED: ${{ cancelled() }}
+          OUT_DOWNLOAD: ${{ steps.download.outcome }}
+          OUT_SANITIZE: ${{ steps.sanitize.outcome }}
+          OUT_VERIFY: ${{ steps.verify.outcome }}
+          OUT_VERIFY_SET: ${{ steps.verify_set.outcome }}
+          OUT_UPLOAD: ${{ steps.upload.outcome }}
+          OUT_PUBLISH: ${{ steps.publish.outcome }}
+        run: |
+          # One word from a closed set the Worker turns into a sentence for the
+          # author. Never a log line and never a step's output: this reaches a
+          # chat, and these steps run third-party actions over the author's own
+          # photographs. A step that never ran reports an empty outcome, so a
+          # stage the job stopped short of can never be named.
+          stage=unknown
+          if   [ "$OUT_DOWNLOAD"  = failure ]; then stage=download
+          elif [ "$OUT_SANITIZE"  = failure ]; then stage=sanitize
+          elif [ "$OUT_VERIFY"    = failure ] || [ "$OUT_VERIFY_SET" = failure ]; then stage=verify
+          elif [ "$OUT_UPLOAD"    = failure ]; then stage=upload
+          elif [ "$OUT_PUBLISH"   = failure ]; then stage=publish
+          fi
+          # Overrides whatever was mid-flight: a cancelled job is one somebody
+          # stopped, which is a different thing to tell the author than a step
+          # that broke. An `if` rather than `&&`, because the runner's shell is
+          # `bash -e` and a trailing test that fails would fail this step.
+          if [ "$CANCELLED" = true ]; then stage=cancelled; fi
+
+          # $RUNNER_TEMP, not $WORK: the step that creates $WORK is itself one of
+          # the ones that can fail, and this must still be able to report that.
+          body="$RUNNER_TEMP/failure.json"
+          jq -n --arg draftId "$DRAFT_ID" --arg jobId "$JOB_TOKEN" --arg stage "$stage" \
+            '{draftId: $draftId, jobId: $jobId, stage: $stage}' > "$body"
+
+          timestamp=$(( $(date +%s) * 1000 ))
+          nonce="$(openssl rand -hex 16)"
+          signature=$(printf '%s.%s.' "$timestamp" "$nonce" \
+            | cat - "$body" \
+            | openssl dgst -sha256 -hmac "$CALLBACK_HMAC_SECRET" -hex \
+            | awk '{print $NF}')
+
+          # Status only. The body names the draft and the job token.
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST "${WORKER_BASE_URL%/}/callbacks/media-failed" \
+            -H 'content-type: application/json' \
+            -H "X-Callback-Timestamp: $timestamp" \
+            -H "X-Callback-Nonce: $nonce" \
+            -H "X-Callback-Signature: $signature" \
+            --data-binary @"$body")
+
+          echo "reported stage $stage; worker answered $status"
+          # Never exits non-zero. The job has already failed, and a second red
+          # step would only hide which one was the real cause.
+          [ "$status" = "200" ] || echo "::warning::the failure report was not accepted"
 
       - name: Confirm nothing was left behind
         if: always()

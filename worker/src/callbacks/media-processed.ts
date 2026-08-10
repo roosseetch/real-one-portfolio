@@ -11,7 +11,7 @@
  * on the configured media domain — a signed callback naming an attacker's host
  * would otherwise put their images on her site.
  */
-import { hmacSha256Hex, timingSafeEqual } from "../crypto";
+import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
 import { publishProcessedMedia, type MediaPublishEnv } from "../publishing/media-record";
 import { sendMediaGroup, sendMessage, type TelegramApiEnv } from "../telegram/api";
@@ -19,21 +19,13 @@ import { confirmationKeyboard, formatMediaConfirmation } from "../telegram/previ
 import { transition } from "../drafts/state";
 import { loadDraft, saveDraft } from "../drafts/store";
 import type { Draft, ProcessedMedia } from "../drafts/types";
-import { claimNonce } from "./nonces";
-
-/**
- * How stale a signature may be. Long enough to survive a slow upload and clock
- * skew between GitHub and Cloudflare, short enough that a captured request is
- * useless by the time anyone could use it.
- */
-const MAX_AGE_MS = 5 * 60 * 1000;
+import { readSignedCallback, refuse, type SignedCallbackEnv } from "./signature";
 
 /** Matches the approval loop's preview tokens: unguessable inside 64 bytes of callback_data. */
 const CONFIRMATION_TOKEN_LENGTH = 12;
 
-export interface CallbackEnv extends MediaPublishEnv, TelegramApiEnv {
+export interface CallbackEnv extends MediaPublishEnv, TelegramApiEnv, SignedCallbackEnv {
   PRIVATE_BUCKET: R2Bucket;
-  CALLBACK_HMAC_SECRET: string;
   MEDIA_BASE_URL: string;
   SITE_BASE_URL: string;
 }
@@ -78,11 +70,6 @@ function acceptableChanges(value: unknown): string[] {
     );
 }
 
-/** Terse and uniform. A caller that failed a check learns that it failed, not which one. */
-function refuse(status: number): Response {
-  return new Response(status === 401 ? "Unauthorized" : "Bad request", { status });
-}
-
 function parseBody(raw: string): CallbackBody | null {
   let parsed: unknown;
   try {
@@ -107,36 +94,11 @@ function parseBody(raw: string): CallbackBody | null {
 }
 
 export async function handleMediaProcessed(request: Request, env: CallbackEnv): Promise<Response> {
-  if (!env.CALLBACK_HMAC_SECRET) {
-    // Fail closed, and say so once: an unconfigured secret means every callback
-    // is refused, which is otherwise a mystifying 401.
-    // Keep this visible to a live tail without allowing arbitrary callers to
-    // create a durable error-log object for every request.
-    console.warn("CALLBACK_HMAC_SECRET is not configured; refusing every callback");
-    return refuse(401);
-  }
+  // 1 to 4. Timestamp, signature and single-use nonce.
+  const signed = await readSignedCallback(request, env);
+  if (signed.status !== "verified") return refuse(401);
 
-  const timestamp = request.headers.get("X-Callback-Timestamp");
-  const nonce = request.headers.get("X-Callback-Nonce");
-  const signature = request.headers.get("X-Callback-Signature");
-  if (!timestamp || !nonce || !signature) return refuse(401);
-
-  // 1. Timestamp is recent. Checked before the signature so an ancient replay
-  //    costs nothing to reject.
-  const sentAt = Number(timestamp);
-  if (!Number.isFinite(sentAt) || Math.abs(Date.now() - sentAt) > MAX_AGE_MS) return refuse(401);
-
-  const raw = await request.text();
-
-  // 2 and 3. Signature matches, compared in constant time.
-  const expected = await hmacSha256Hex(env.CALLBACK_HMAC_SECRET, `${timestamp}.${nonce}.${raw}`);
-  if (!timingSafeEqual(signature, expected)) return refuse(401);
-
-  // 4. Nonce was not used. Only now, so an unauthenticated caller cannot burn
-  //    nonces, and only once, because claiming is what spends it.
-  if (!(await claimNonce(env.PRIVATE_BUCKET, nonce))) return refuse(401);
-
-  const body = parseBody(raw);
+  const body = parseBody(signed.raw);
   if (body === null) return refuse(400);
 
   // 5. Draft exists.

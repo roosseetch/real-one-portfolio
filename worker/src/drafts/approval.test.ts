@@ -23,20 +23,23 @@ let content: FakeBucket;
 let media: FakeBucket;
 /** Every Telegram call, as {method, body}. */
 let calls: Array<{ method: string; body: Record<string, unknown> }>;
+/** What GitHub answers a dispatch with; see refuseDispatch. */
+let dispatchStatus: number;
 
 beforeEach(() => {
   storage = createFakeBucket();
   content = createFakeBucket();
   media = createFakeBucket();
   calls = [];
+  dispatchStatus = 204;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const method = String(url).split("/").pop() ?? "";
-    calls.push({ method, body: JSON.parse(String(init?.body)) });
+    calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : {} });
 
     // GitHub answers a workflow dispatch with 204 and no body; Telegram answers
     // with 200 and a result. Getting this wrong is how a dispatch silently
     // looks like a failure.
-    if (method === "dispatches") return new Response(null, { status: 204 });
+    if (method === "dispatches") return new Response(null, { status: dispatchStatus });
     return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }), { status: 200 });
   });
 });
@@ -69,6 +72,21 @@ function press(draft: Draft, code: string, token = draft.preview?.token): Telegr
 }
 
 const answers = () => calls.filter((c) => c.method === "answerCallbackQuery").map((c) => c.body.text);
+
+/** The labels on a send's inline keyboard, flattened, so a keyboard can be named rather than indexed. */
+function buttonsOn(call: { body: Record<string, unknown> } | undefined): string[] {
+  const markup = call?.body.reply_markup as { inline_keyboard?: Array<Array<{ text: string }>> } | undefined;
+  return (markup?.inline_keyboard ?? []).flat().map((button) => button.text);
+}
+
+/**
+ * Makes GitHub turn down the next workflow dispatch, leaving every other call as
+ * it was. A toggle rather than a second mock, so a test can refuse one dispatch
+ * and let the retry's succeed.
+ */
+function refuseDispatch(refused = true): void {
+  dispatchStatus = refused ? 403 : 204;
+}
 
 describe("sendPreview", () => {
   it("moves the draft to awaiting_approval and records the message and token", async () => {
@@ -608,22 +626,24 @@ describe("publishing a draft with media", () => {
     expect(calls.find((c) => c.method === "sendMessage")?.body.text).toContain("Processing the media");
   });
 
-  it("leaves the draft in processing when GitHub refuses", async () => {
-    // Silently reverting would hide the failure; the retry flow starts from
-    // processing.
+  it("fails the draft when GitHub refuses, rather than stranding it in processing", async () => {
+    // Nothing is running and nothing ever will be: no workflow started, so no
+    // workflow can report this. Left in `processing` the draft would have no
+    // job and no buttons, after the author was promised a link.
     const draft = await withMedia();
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      const method = String(url).split("/").pop() ?? "";
-      calls.push({ method, body: init?.body ? JSON.parse(String(init.body)) : {} });
-      if (method === "dispatches") return new Response("no", { status: 403 });
-      return new Response(JSON.stringify({ ok: true, result: { message_id: 4242 } }));
-    });
+    refuseDispatch();
     calls.length = 0;
 
     await handlePreviewCallback(press(draft, "p"), env());
 
-    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("processing");
-    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toContain("Publication failed");
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("failed");
+    // The buttons the failure message drew, so a retry can be recognised as one.
+    expect(stored?.preview?.token).toHaveLength(12);
+
+    const message = calls.find((c) => c.method === "sendMessage");
+    expect(message?.body.text).toContain("Publication failed");
+    expect(buttonsOn(message)).toEqual(["Retry", "Cancel"]);
   });
 
   it("still publishes a text-only draft directly", async () => {
@@ -755,5 +775,244 @@ describe("confirming a processed video (spec Phase 6)", () => {
     await handlePreviewCallback(press(draft, "c"), env());
 
     expect(media.objects.size).toBe(2);
+  });
+});
+
+/**
+ * `processing → failed → retry → processing` (spec §22–23).
+ *
+ * A failed draft is the only state other than `awaiting_approval` that still has
+ * live buttons, and it has exactly two: run it again, or give up. Everything here
+ * turns on the same promise — nothing public changed, so a retry is free to
+ * repeat whatever the first attempt did.
+ */
+describe("retrying a failed publication (spec §23)", () => {
+  const MEDIA_BASE = "https://media.example";
+
+  beforeEach(async () => {
+    await createManifest(content.bucket, emptyManifest());
+  });
+
+  /** A media draft whose dispatch GitHub refused: the shortest real route into `failed`. */
+  async function failed(): Promise<Draft> {
+    const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "at the campus");
+    const draft = await sendPreview(env(), {
+      ...created,
+      record: RECORD,
+      originals: [
+        { mediaId: "media0", type: "image", fileId: "file-0", key: `originals/${created.activityId}/media0.jpg` },
+      ],
+    });
+
+    refuseDispatch();
+    await handlePreviewCallback(press(draft, "p"), env());
+    refuseDispatch(false);
+
+    const stored = (await loadDraft(storage.bucket, draft.draftId))!;
+    expect(stored.state).toBe("failed");
+    return stored;
+  }
+
+  /** A draft whose media was sanitised and uploaded, and whose publication then failed. */
+  async function failedAfterUpload(): Promise<Draft> {
+    const draft = await failed();
+    const base = `${MEDIA_BASE}/media/activity-${draft.activityId}`;
+    const withProcessed: Draft = {
+      ...draft,
+      record: { ...RECORD, media: [{ mediaId: "media0", alt: "A cup", caption: "The first" }] },
+      processed: {
+        media: [
+          {
+            sourceId: "media0",
+            type: "image",
+            src: `${base}/media0-1600.webp`,
+            thumbnail: `${base}/media0-320.webp`,
+            visibleChanges: [],
+          },
+        ],
+        at: new Date().toISOString(),
+      },
+    };
+    await saveDraft(storage.bucket, withProcessed);
+    return withProcessed;
+  }
+
+  it("offers Retry and Cancel, and nothing that would re-ask an answered question", async () => {
+    // The text was approved before any of this started; what broke was the
+    // publishing, and "Regenerate" is not an answer to that.
+    const draft = await failed();
+    const message = calls.filter((c) => c.method === "sendMessage").pop();
+
+    expect(buttonsOn(message)).toEqual(["Retry", "Cancel"]);
+    expect(draft.preview?.token).toHaveLength(12);
+  });
+
+  it("names the stage that stopped, so the message says what did not happen", async () => {
+    await failed();
+    const text = calls.filter((c) => c.method === "sendMessage").pop()?.body.text as string;
+
+    expect(text).toContain("Publication failed.");
+    expect(text).toContain("The processing job could not be started");
+    // Never a log line, a URL, or the author's own words.
+    expect(text).not.toContain("at the campus");
+    expect(text).not.toContain("403");
+  });
+
+  it("dispatches the same draft again with a fresh job token", async () => {
+    // The activity id is what every derivative's name is built from, so reusing
+    // it overwrites whatever the first attempt half-wrote.
+    const draft = await failed();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    const dispatch = calls.find((c) => c.method === "dispatches");
+    expect((dispatch?.body.inputs as { draftId: string }).draftId).toBe(draft.draftId);
+
+    const stored = (await loadDraft(storage.bucket, draft.draftId))!;
+    expect(stored.state).toBe("processing");
+    expect(stored.activityId).toBe(draft.activityId);
+    expect(stored.job?.jobToken).toHaveLength(32);
+    // Fresh, so a straggler from the first attempt cannot report against this one.
+    expect(stored.job?.jobToken).not.toBe(draft.job?.jobToken);
+  });
+
+  it("answers the button before the dispatch, so it stops spinning", async () => {
+    const draft = await failed();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    expect(calls[0]?.method).toBe("answerCallbackQuery");
+    expect(answers()).toContain("Trying again…");
+  });
+
+  it("publishes from the files already uploaded rather than sanitising them twice", async () => {
+    const draft = await failedAfterUpload();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    expect(calls.map((c) => c.method)).not.toContain("dispatches");
+    const manifest = (await readManifest(content.bucket))!.manifest;
+    expect(manifest.totalRecords).toBe(1);
+
+    const chunk = JSON.parse(content.objects.get(chunkKey(manifest.latest!)) as unknown as string);
+    expect(chunk[0].media[0]).toMatchObject({
+      src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1600.webp`,
+      alt: "A cup",
+    });
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("published");
+  });
+
+  it("goes back to failed with new buttons when the retry fails too", async () => {
+    const draft = await failedAfterUpload();
+    // No manifest to publish against, which is how publishRecord refuses.
+    content.objects.set("content/manifest.json", "not json");
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    const stored = (await loadDraft(storage.bucket, draft.draftId))!;
+    expect(stored.state).toBe("failed");
+    expect(stored.preview?.token).not.toBe(draft.preview?.token);
+
+    const message = calls.filter((c) => c.method === "sendMessage").pop();
+    expect(buttonsOn(message)).toEqual(["Retry", "Cancel"]);
+  });
+
+  it("refuses the buttons under a superseded failure", async () => {
+    // The same draft can fail twice; only the newest message may act on it.
+    const first = await failedAfterUpload();
+    content.objects.set("content/manifest.json", "not json");
+    await handlePreviewCallback(press(first, "t"), env());
+    calls.length = 0;
+
+    await handlePreviewCallback(press(first, "t"), env());
+
+    expect(answers()).toEqual(["This preview has been replaced. Use the newest one."]);
+  });
+
+  it("runs the job once however often Retry is pressed", async () => {
+    const draft = await failed();
+    await handlePreviewCallback(press(draft, "t"), env());
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    expect(calls.map((c) => c.method)).not.toContain("dispatches");
+    expect(answers()).toEqual(["Already processing."]);
+  });
+
+  it("hands back the link instead of publishing twice if the draft is already live", async () => {
+    const draft = await failedAfterUpload();
+    await saveDraft(storage.bucket, {
+      ...draft,
+      published: { recordId: "rec-1", url: "https://site.example/#activity" },
+    });
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toContain("Already published.");
+  });
+
+  it("refuses everything the failure keyboard does not offer", async () => {
+    // Those buttons only exist on a preview that is no longer on screen, so a
+    // press can only have come from a superseded message.
+    const draft = await failed();
+
+    for (const code of ["p", "e", "r", "m"]) {
+      calls.length = 0;
+      await handlePreviewCallback(press(draft, code), env());
+      expect(answers()).toEqual(["Already failed."]);
+    }
+
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+  });
+
+  it("cancels a failed draft and sweeps whatever the run had already uploaded", async () => {
+    // A run that stopped after the upload step left a complete set behind; one
+    // that stopped during it left part of a set. Neither is referenced.
+    const draft = await failed();
+    const prefix = `media/activity-${draft.activityId}/`;
+    media.objects.set(`${prefix}media0-1600.webp`, "webp bytes");
+    media.objects.set(`${prefix}media0-320.webp`, "thumb bytes");
+    media.objects.set("media/activity-elsewhere00/other-800.webp", "not ours");
+
+    await handlePreviewCallback(press(draft, "c"), env());
+
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("cancelled");
+    expect([...media.objects.keys()]).toEqual(["media/activity-elsewhere00/other-800.webp"]);
+  });
+
+  it("says so when the draft has expired out from under the buttons", async () => {
+    // The bucket's seven-day rule removes drafts, and the failure message with
+    // its buttons stays in the chat long after.
+    const draft = await failed();
+    await storage.bucket.delete(`drafts/${draft.draftId}/draft.json`);
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    expect(answers()).toEqual(["This draft is no longer available."]);
+    expect(calls.map((c) => c.method)).not.toContain("dispatches");
+  });
+});
+
+describe("Retry outside a failure", () => {
+  it("does nothing to a draft still awaiting approval", async () => {
+    // The button is drawn nowhere but the failure message, so this press is
+    // hand-made. Acting on it would publish, which is not what "Retry" says.
+    await createManifest(content.bucket, emptyManifest());
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "t"), env());
+
+    expect(answers()).toEqual(["Not available yet."]);
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("awaiting_approval");
   });
 });
