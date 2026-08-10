@@ -87,6 +87,9 @@ export async function createDraft(
     activityId: randomId(),
     mediaGroupId,
     originals: [],
+    // Nothing has been refused yet, and a note that never carries a file leaves
+    // this false for good.
+    mediaDeclined: false,
     input: { text },
     // Task 16 fills this in from Workers AI. It stays null if the model is
     // unavailable, which is what lets the draft survive a quota failure.
