@@ -10,7 +10,7 @@ A reusable, fully static personal portfolio system.
 
 No personal names, domains, account IDs, bucket names, or secrets appear in tracked files. All personalization comes from gitignored local files, GitHub variables/secrets, and Worker secrets.
 
-The implementation plan — phases, task breakdown, acceptance criteria, risks — is on this repository's wiki. What is left to do, and what was done and when, is on the project board: that is the single record, and the repository deliberately keeps no second copy of it to drift out of date.
+The implementation plan — phases, task breakdown, acceptance criteria, risks — is on the [wiki](https://github.com/roosseetch/real-one-portfolio/wiki/Implementation-Plan). What is left to do, and what was done and when, is on the [project board](https://github.com/users/roosseetch/projects/2/views/1): that is the single record, and the repository deliberately keeps no second copy of it to drift out of date. Both links point at this deployment's own wiki and board, and are the two things a fork has to repoint.
 
 ## Repository layout
 
