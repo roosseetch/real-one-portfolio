@@ -1,8 +1,10 @@
 import { handleMediaFailed } from "./callbacks/media-failed";
 import { handleMediaProcessed } from "./callbacks/media-processed";
 import { handleAnalyticsProxy } from "./analytics/proxy";
+import { sweepStrandedDrafts } from "./drafts/sweep";
 import {
   beginRequest,
+  beginScheduled,
   flush,
   installConsoleCapture,
   recordException,
@@ -90,6 +92,54 @@ export default {
 
       ctx.waitUntil(deferred.settled().then(() => flush(env.PRIVATE_BUCKET, log, response.status)));
       return response;
+    });
+  },
+
+  /**
+   * The cron trigger, whose only job is to notice drafts nothing came back for
+   * (see drafts/sweep.ts). Its schedule lives in wrangler.template.json, beside
+   * the handler rather than in Terraform, so deploying the Worker deploys the
+   * timer that drives it.
+   *
+   * Logged like a request, because a scheduled failure has nobody watching it.
+   * `500` is passed to flush on a throw for the same reason a 5xx is written
+   * there: "it failed and said nothing" is the hardest case to reconstruct.
+   *
+   * The flush is awaited rather than deferred. `fetch` defers because it has a
+   * response to hand back first; there is nothing to hand back here, and the
+   * runtime keeps the invocation alive for as long as this promise runs.
+   */
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    const log = beginScheduled(controller.cron);
+
+    await runWithLog(log, async () => {
+      let status = 200;
+
+      try {
+        const swept = await sweepStrandedDrafts(env);
+        // Only when it did something. A sweep that found nothing is the normal
+        // case and runs every quarter of an hour; saying so would be noise, and
+        // flush keeps nothing for a run that only ever succeeded.
+        if (swept.stranded > 0) {
+          console.error(`Swept ${swept.stranded} stranded draft(s) of ${swept.examined} examined`);
+        }
+      } catch (error) {
+        // sweepStrandedDrafts swallows its own faults, so reaching here means
+        // something outside it broke. Nothing retries a cron run, which is
+        // precisely why it has to leave a trace.
+        recordException(error);
+        status = 500;
+      }
+
+      try {
+        await flush(env.PRIVATE_BUCKET, log, status);
+      } catch (error) {
+        // `flush` swallows a failed write, so reaching here means the binding
+        // itself is what broke and there is nowhere left to put the log.
+        // Nothing retries a cron run, and rejecting would trade a readable line
+        // in `wrangler tail` for the platform's own opaque error.
+        console.error(`Could not write the scheduled run's log: ${(error as Error).message}`);
+      }
     });
   },
 } satisfies ExportedHandler<Env>;

@@ -12,6 +12,7 @@ import worker, { type Env } from "./index";
 import type { TelegramUpdate } from "./telegram/types";
 import { aiRecord, createFakeAi } from "./test-support/ai";
 import { createFakeBucket, type FakeBucket } from "./test-support/r2";
+import { createDraft, loadDraft, saveDraft } from "./drafts/store";
 
 /** Runs deferred work inline, so a test sees the same result the runtime would. */
 const ctx = (): ExecutionContext =>
@@ -265,5 +266,77 @@ describe("routing", () => {
     expect(posted.status).toBe(401);
 
     expect((await worker.fetch(new Request(url), testEnv(), ctx())).status).toBe(404);
+  });
+});
+
+/**
+ * The cron trigger. Its schedule lives in wrangler.template.json; what matters
+ * here is that the handler is exported, runs the sweep, and leaves a trace when
+ * it does something — a scheduled run has nobody watching it.
+ */
+describe("scheduled", () => {
+  const CRON = "*/15 * * * *";
+  const controller = () =>
+    ({ cron: CRON, scheduledTime: Date.now(), noRetry: () => {} }) as ScheduledController;
+
+  /** A draft dispatched to Actions long enough ago that nothing is coming back. */
+  async function stranded(): Promise<string> {
+    const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "coffee");
+    const dispatchedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    await saveDraft(storage.bucket, {
+      ...created,
+      state: "processing",
+      record: { title: "Coffee", summary: null, body: null, eventDate: null, tags: [], media: [] },
+      job: { jobToken: "job-token-0123456789abcdef", dispatchedAt },
+      updatedAt: dispatchedAt,
+    });
+    return created.draftId;
+  }
+
+  it("sweeps a stranded draft and tells its author", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result: { message_id: 55 } })),
+    );
+    const draftId = await stranded();
+
+    await worker.scheduled(controller(), testEnv());
+
+    expect((await loadDraft(storage.bucket, draftId))?.state).toBe("failed");
+  });
+
+  it("records the sweep, because nothing else saw it happen", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, result: { message_id: 55 } })),
+    );
+    await stranded();
+
+    await worker.scheduled(controller(), testEnv());
+
+    const written = JSON.parse(storage.objects.get(errorLogs()[0]) as string);
+    // The cron expression stands in for the path: a literal from the deployed
+    // config, so nothing about a draft can reach the log through it.
+    expect(written).toMatchObject({ method: "CRON", path: CRON, status: 200 });
+    expect(written.entries).toContainEqual(
+      expect.objectContaining({ message: expect.stringContaining("Swept 1 stranded draft") }),
+    );
+  });
+
+  it("writes nothing when there was nothing to sweep", async () => {
+    // Every quarter of an hour, for ever. A log object per quiet run would be
+    // the bucket's largest tenant by a wide margin.
+    await worker.scheduled(controller(), testEnv());
+    expect(errorLogs()).toEqual([]);
+  });
+
+  it("leaves a trace when the sweep throws rather than dying with the isolate", async () => {
+    const exploding = testEnv();
+    Object.defineProperty(exploding, "PRIVATE_BUCKET", {
+      get() {
+        throw new Error("binding exploded");
+      },
+    });
+
+    // Nothing retries a cron run, so this must not reject either.
+    await expect(worker.scheduled(controller(), exploding)).resolves.toBeUndefined();
   });
 });

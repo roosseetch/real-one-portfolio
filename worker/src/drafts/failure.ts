@@ -38,6 +38,13 @@ export const FAILURE_STAGES = [
   "upload",
   "publish",
   "cancelled",
+  /**
+   * Nothing reported at all, and the draft has sat in `processing` past the
+   * point where a run could still be honestly slow. Never sent by a workflow —
+   * a workflow that could send it would not have stranded the draft — this is
+   * the scheduled sweep's own verdict. See sweep.ts.
+   */
+  "abandoned",
   "unknown",
 ] as const;
 export type FailureStage = (typeof FAILURE_STAGES)[number];
@@ -65,6 +72,7 @@ const STAGE_DETAIL: Record<FailureStage, string> = {
   upload: "The processed media could not be uploaded, so the site is unchanged.",
   publish: "The media is ready, but the entry itself could not be published.",
   cancelled: "The processing job was stopped before it finished. Nothing was published.",
+  abandoned: "The processing job never came back, and nothing was published.",
   unknown: "The processing job did not finish. Nothing was published.",
 };
 
