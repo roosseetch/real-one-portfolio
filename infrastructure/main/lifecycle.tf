@@ -54,6 +54,33 @@ resource "cloudflare_r2_bucket_lifecycle" "private" {
         }
       }
     },
+    # Messages sent through the contact form, and the per-address slots that
+    # throttle it. Both exist only to get a message across the gap between the
+    # Worker and the job that checks it: once it has reached Telegram there is
+    # no reason to keep a stranger's message and address in a bucket, so it goes
+    # on the same clock as an unapproved draft.
+    {
+      id      = "expire-contact"
+      enabled = true
+
+      conditions = {
+        prefix = "contact/"
+      }
+
+      delete_objects_transition = {
+        condition = {
+          type    = "Age"
+          max_age = local.draft_retention_seconds
+        }
+      }
+
+      abort_multipart_uploads_transition = {
+        condition = {
+          type    = "Age"
+          max_age = 86400
+        }
+      }
+    },
     {
       id      = "expire-originals"
       enabled = true

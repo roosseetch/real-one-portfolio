@@ -8,6 +8,10 @@ interface ImportMetaEnv {
   readonly VITE_CONTENT_BASE_URL?: string;
   /** Public media bucket base URL; enables real photos in place of placeholders. */
   readonly VITE_MEDIA_BASE_URL?: string;
+  /** Worker origin the contact form posts to. Unset renders the form as unavailable. */
+  readonly VITE_WORKER_BASE_URL?: string;
+  /** Public Turnstile site key for the contact form's challenge. Unset renders the form as unavailable. */
+  readonly VITE_TURNSTILE_SITE_KEY?: string;
 }
 
 interface ImportMeta {

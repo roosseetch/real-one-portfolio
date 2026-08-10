@@ -31,7 +31,12 @@
     },
     "CLOUDFLARE_ACCOUNT_ID": {
       "required": true,
-      "purpose": "Account owning the R2 buckets and the Worker. Also the host part of every R2 S3 endpoint URL."
+      "purpose": "Account owning the R2 buckets and the Worker. Also the host part of every R2 S3 endpoint URL, and of the Workers AI endpoint the contact check calls."
+    },
+    "CONTACT_WORKFLOW_FILE": {
+      "required": false,
+      "purpose": "Workflow file the Worker dispatches to check a contact-form message before it is forwarded.",
+      "whenUnset": "Falls back to validate-contact.yml at the reference site."
     },
     "CLOUDFLARE_ZONE_ID": {
       "required": true,
@@ -82,13 +87,18 @@
       "purpose": "Subdomain for the GitHub Pages site.",
       "whenUnset": "Matches the Terraform default: the site is served from the apex, with A and AAAA records rather than a CNAME."
     },
+    "TURNSTILE_SITE_KEY": {
+      "required": false,
+      "purpose": "Public half of the contact form's Turnstile widget, inlined into the site bundle. Public by construction, which is why it is a variable and not a secret; its secret half is a Worker secret.",
+      "whenUnset": "The contact page renders a notice instead of a form, because a form with no challenge is one the Worker would refuse anyway. The Pages workflow warns, because the two outcomes look identical until somebody tries to write."
+    },
     "TF_STATE_BUCKET": {
       "required": true,
       "purpose": "R2 bucket holding Terraform state, shared across projects and separated by state key prefix."
     },
     "WORKER_BASE_URL": {
       "required": true,
-      "purpose": "Public origin of the Worker. The media pipeline posts its completion callback there."
+      "purpose": "Public origin of the Worker. The media pipeline and the contact check post their callbacks there, and the site's contact form posts submissions to it."
     },
     "WORKER_ENABLED": {
       "required": false,
@@ -157,6 +167,14 @@
     "TELEGRAM_WEBHOOK_SECRET": {
       "required": true,
       "purpose": "Value Telegram was given at registration and sends back on every update; the Worker rejects anything without it."
+    },
+    "TURNSTILE_SECRET_KEY": {
+      "required": true,
+      "purpose": "Secret half of the contact form's Turnstile widget, synced to the Worker, which verifies every submission's token against it. Without it the Worker refuses every message."
+    },
+    "WORKERS_AI_API_TOKEN": {
+      "required": true,
+      "purpose": "Runs the model that screens a contact message. Account -> Workers AI -> Read and nothing else: deliberately not CLOUDFLARE_API_TOKEN, which can rewrite the buckets and the DNS."
     },
     "WORKER_DISPATCH_TOKEN": {
       "required": true,

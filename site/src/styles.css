@@ -435,6 +435,93 @@ main {
   font-size: 0.85rem;
 }
 
+/* Contact */
+.contact-intro {
+  max-width: 34rem;
+  color: var(--muted);
+}
+
+.contact-form {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 34rem;
+  margin-top: var(--space);
+}
+
+.form-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.form-field label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.form-field input,
+.form-field textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.8rem;
+  /* Without this a textarea can be dragged wider than the column it sits in. */
+  max-width: 100%;
+}
+
+.form-field textarea {
+  resize: vertical;
+}
+
+.form-field input:focus-visible,
+.form-field textarea:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+
+/* The submit control is a <button>, so it needs the parts .button assumes an
+   <a> already has. */
+.contact-form .button {
+  justify-self: start;
+  font: inherit;
+  font-weight: 500;
+  color: inherit;
+  cursor: pointer;
+}
+
+.contact-form .button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Empty until something has happened, and it must not leave a gap until then. */
+.form-status:empty {
+  display: none;
+}
+
+.form-status {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+/* Colour is not the only signal — the sentence itself says what went wrong —
+   so this stays a tint rather than the sole carrier of the outcome. */
+.form-status.is-error {
+  background: color-mix(in srgb, var(--muted) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.form-unavailable {
+  color: var(--muted);
+  border: 1px dashed var(--muted);
+  border-radius: 0.75rem;
+  padding: var(--space);
+  max-width: 34rem;
+}
+
 /* Footer */
 .footer {
   text-align: center;

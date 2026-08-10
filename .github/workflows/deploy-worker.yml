@@ -7,11 +7,12 @@ name: Deploy Worker
 # Repository variables:
 #   CLOUDFLARE_ACCOUNT_ID, PROJECT_SLUG, WORKER_NAME, CONTENT_BASE_URL,
 #   MEDIA_BASE_URL, SITE_BASE_URL, AMPLITUDE_API_KEY, and optionally
-#   MEDIA_WORKFLOW_FILE
+#   MEDIA_WORKFLOW_FILE and CONTACT_WORKFLOW_FILE
 #
 # Repository secrets:
 #   CLOUDFLARE_API_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
-#   TELEGRAM_ALLOWED_USER_IDS, WORKER_DISPATCH_TOKEN, CALLBACK_HMAC_SECRET
+#   TELEGRAM_ALLOWED_USER_IDS, WORKER_DISPATCH_TOKEN, CALLBACK_HMAC_SECRET,
+#   TURNSTILE_SECRET_KEY
 #
 # WORKER_DISPATCH_TOKEN becomes the Worker's GITHUB_DISPATCH_TOKEN. The names
 # differ because GitHub reserves the GITHUB_ prefix for secret names and refuses
@@ -65,6 +66,7 @@ jobs:
       MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
       SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}
       MEDIA_WORKFLOW_FILE: ${{ vars.MEDIA_WORKFLOW_FILE || 'process-media.yml' }}
+      CONTACT_WORKFLOW_FILE: ${{ vars.CONTACT_WORKFLOW_FILE || 'validate-contact.yml' }}
       # Public browser ingestion key, used to scope the fallback relay to this
       # project. It is the same variable embedded in the Pages bundle.
       AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY || '' }}
@@ -113,6 +115,10 @@ jobs:
           # See the note above: GitHub will not store a GITHUB_-prefixed secret.
           GITHUB_DISPATCH_TOKEN: ${{ secrets.WORKER_DISPATCH_TOKEN }}
           CALLBACK_HMAC_SECRET: ${{ secrets.CALLBACK_HMAC_SECRET }}
+          # The secret half of the contact form's Turnstile widget. The site key
+          # is its public counterpart and is a repository variable, because Vite
+          # inlines it into the bundle every visitor downloads.
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
         run: |
           jq -n \
             --arg botToken "$TELEGRAM_BOT_TOKEN" \
@@ -120,11 +126,13 @@ jobs:
             --arg allowedUserIds "$TELEGRAM_ALLOWED_USER_IDS" \
             --arg dispatchToken "$GITHUB_DISPATCH_TOKEN" \
             --arg callbackSecret "$CALLBACK_HMAC_SECRET" \
+            --arg turnstileSecret "$TURNSTILE_SECRET_KEY" \
             '{
               TELEGRAM_BOT_TOKEN: $botToken,
               TELEGRAM_WEBHOOK_SECRET: $webhookSecret,
               TELEGRAM_ALLOWED_USER_IDS: $allowedUserIds,
               GITHUB_DISPATCH_TOKEN: $dispatchToken,
-              CALLBACK_HMAC_SECRET: $callbackSecret
+              CALLBACK_HMAC_SECRET: $callbackSecret,
+              TURNSTILE_SECRET_KEY: $turnstileSecret
             }' \
             | npx wrangler secret bulk --config wrangler.generated.json

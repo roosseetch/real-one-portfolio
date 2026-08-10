@@ -22,6 +22,21 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return difference === 0;
 }
 
+function hex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * SHA-256 as lowercase hex.
+ *
+ * Used to turn a visitor's address into a throttling key. Not a secret and not
+ * reversible in any useful sense at that size, but it does mean the private
+ * bucket never holds a list of who visited the contact page.
+ */
+export async function sha256Hex(message: string): Promise<string> {
+  return hex(await crypto.subtle.digest("SHA-256", encoder.encode(message)));
+}
+
 /**
  * HMAC-SHA256 as lowercase hex.
  *
@@ -38,6 +53,5 @@ export async function hmacSha256Hex(secret: string, message: string): Promise<st
     ["sign"],
   );
 
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(message));
-  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return hex(await crypto.subtle.sign("HMAC", key, encoder.encode(message)));
 }

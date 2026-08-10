@@ -19,6 +19,7 @@ const outputPath = join(repoRoot, "worker", "wrangler.generated.json");
 
 const DEFAULTS: Record<string, string> = {
   MEDIA_WORKFLOW_FILE: "process-media.yml",
+  CONTACT_WORKFLOW_FILE: "validate-contact.yml",
 };
 
 const template = readFileSync(templatePath, "utf8");

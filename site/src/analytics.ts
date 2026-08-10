@@ -6,6 +6,24 @@ type TransportProvider = AmplitudeBrowser["config"]["transportProvider"];
 type Payload = Parameters<TransportProvider["send"]>[1];
 
 /**
+ * The instance initializeAnalytics started, or null in a deployment that ships
+ * without analytics. Module-level so a page can record an event of its own
+ * without every renderer being handed an SDK it mostly does not use.
+ */
+let instance: AmplitudeBrowser | null = null;
+
+/**
+ * Records one event, or does nothing at all when no API key was configured.
+ *
+ * A no-op rather than an optional dependency: a page that has to check whether
+ * analytics exists before saying something happened ends up checking in some
+ * places and not others.
+ */
+export function trackEvent(eventType: string, properties?: Record<string, unknown>): void {
+  instance?.track(eventType, properties);
+}
+
+/**
  * Starts Amplitude only when a project API key is supplied at build time.
  * VITE_ variables are embedded in the browser bundle, so only use Amplitude's
  * public project API key here—never a Secret Key.
@@ -58,6 +76,7 @@ export function initializeAnalytics() {
   }
 
   const amplitude = new AmplitudeBrowser();
+  instance = amplitude;
   const initialization = amplitude.init(apiKey, {
     // Ten seconds rather than the default one. A visit's engagement events then
     // coalesce into a handful of uploads, which matters because an ad-blocked

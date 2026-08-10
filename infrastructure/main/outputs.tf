@@ -33,3 +33,14 @@ output "worker_hostname" {
   value       = local.worker_hostname
   sensitive   = true
 }
+
+output "turnstile_site_key" {
+  description = "Value for the TURNSTILE_SITE_KEY repository variable. Public: the site bundle carries it."
+  value       = cloudflare_turnstile_widget.contact.sitekey
+}
+
+output "turnstile_secret_key" {
+  description = "Value for the TURNSTILE_SECRET_KEY repository secret, which the Worker verifies submissions against. Read it with `terraform output -raw turnstile_secret_key`."
+  value       = cloudflare_turnstile_widget.contact.secret
+  sensitive   = true
+}

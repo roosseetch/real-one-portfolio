@@ -1,6 +1,8 @@
+import { handleContactChecked } from "./callbacks/contact-checked";
 import { handleMediaFailed } from "./callbacks/media-failed";
 import { handleMediaProcessed } from "./callbacks/media-processed";
 import { handleAnalyticsProxy } from "./analytics/proxy";
+import { handleContactSubmission } from "./contact/intake";
 import { sweepStrandedDrafts } from "./drafts/sweep";
 import {
   beginRequest,
@@ -30,6 +32,7 @@ export interface Env {
   SITE_BASE_URL: string;
   GITHUB_REPOSITORY: string;
   MEDIA_WORKFLOW_FILE: string;
+  CONTACT_WORKFLOW_FILE: string;
   AMPLITUDE_API_KEY: string;
 
   // Secrets, set with `wrangler secret put` and never in any config file.
@@ -38,6 +41,7 @@ export interface Env {
   TELEGRAM_ALLOWED_USER_IDS: string;
   GITHUB_DISPATCH_TOKEN: string;
   CALLBACK_HMAC_SECRET: string;
+  TURNSTILE_SECRET_KEY: string;
 }
 
 // Once per isolate, before any request can log anything.
@@ -58,8 +62,19 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return handleMediaFailed(request, env);
   }
 
+  if (request.method === "POST" && pathname === "/callbacks/contact-checked") {
+    return handleContactChecked(request, env);
+  }
+
   if ((request.method === "POST" || request.method === "OPTIONS") && pathname === "/analytics") {
     return handleAnalyticsProxy(request, env);
+  }
+
+  // The one route a stranger is meant to reach. Every method reaches the
+  // handler, including the ones it refuses, because a browser's preflight and a
+  // wrong method both need a CORS answer rather than the blanket 404 below.
+  if (pathname === "/contact") {
+    return handleContactSubmission(request, env);
   }
 
   // Anything else is not part of the contract. Say nothing useful about what
@@ -68,8 +83,9 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 }
 
 /**
- * The Worker handles authoring plus the site's analytics fallback relay. Site
- * content and media still come straight from public R2.
+ * The Worker handles authoring, the site's analytics fallback relay, and the
+ * contact form's intake. Site content and media still come straight from
+ * public R2.
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
