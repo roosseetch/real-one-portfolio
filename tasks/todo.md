@@ -67,6 +67,13 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
       site's Activity loader — and tests.yml runs them plus the typechecks on
       every pull request. The suites take the tracked fixture profile when
       profile/*.json is absent, so the gate needs no variables or secrets)
-- [ ] Task 29: Log hygiene + security pass
+- [x] Task 29: Log hygiene + security pass
+      (audited every Worker log statement and eight real public run logs: no
+      credential appears anywhere, and the deployment identifiers that do are
+      variables rather than secrets by an earlier decision. Third-party actions
+      are now pinned by commit or image digest, and `npm run security:check`
+      keeps them there along with declared permissions, accounted-for writes,
+      and no unguarded secret a pull request can reach. One leak found and
+      fixed: proxy.test.ts carried the live domain)
 - [ ] Task 30: README + runbook
 - [ ] Checkpoint G: full spec compliance sweep
