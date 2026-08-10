@@ -17,6 +17,8 @@ interface ActivityRecord {
   summary?: string | null;
   body?: string | null;
   eventDate?: string | null;
+  /** Stamped by the Worker at publication. Absent on records published before it existed. */
+  publishedAt?: string | null;
   tags?: string[];
   media?: ActivityMedia[];
 }
@@ -66,11 +68,43 @@ async function loadRecords(): Promise<ActivityRecord[]> {
   return records;
 }
 
+/* Publication order, oldest first, for two records and the positions they
+   arrived in.
+
+   Records are ordered by when they were published, not by the date their text
+   happens to mention. eventDate is what the author's note said, and it is null
+   whenever the note named no date — so sorting on it dropped every undated entry
+   to the bottom however recent it was, and the whole feed rearranged itself each
+   time one was published.
+
+   A record with no publishedAt was published before the field existed, which
+   makes it older than every record that has one. Among themselves those keep the
+   order they were loaded in, which is the order the chunks store them in, which
+   is the order they were published in. */
+function comparePublication(
+  a: { record: ActivityRecord; position: number },
+  b: { record: ActivityRecord; position: number },
+): number {
+  const at = typeof a.record.publishedAt === "string" ? a.record.publishedAt : null;
+  const bt = typeof b.record.publishedAt === "string" ? b.record.publishedAt : null;
+
+  if (at !== null && bt !== null) {
+    // ISO 8601 in UTC, so lexicographic order is chronological order.
+    if (at !== bt) return at < bt ? -1 : 1;
+  } else if (at !== bt) {
+    return at === null ? -1 : 1;
+  }
+
+  return a.position - b.position;
+}
+
 function sortRecords(records: ActivityRecord[], ascending: boolean): ActivityRecord[] {
-  return [...records].sort((a, b) => {
-    const cmp = (a.eventDate ?? "").localeCompare(b.eventDate ?? "");
-    return ascending ? cmp : -cmp;
-  });
+  // The position is carried explicitly rather than left to the sort's stability,
+  // because it is the tiebreak itself: reversing for newest-first has to reverse
+  // two records sharing a timestamp too.
+  const ordered = records.map((record, position) => ({ record, position }));
+  ordered.sort((a, b) => (ascending ? comparePublication(a, b) : -comparePublication(a, b)));
+  return ordered.map((entry) => entry.record);
 }
 
 function renderRecord(record: ActivityRecord): HTMLElement {
