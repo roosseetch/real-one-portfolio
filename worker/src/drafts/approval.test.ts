@@ -396,9 +396,12 @@ describe("publish", () => {
     const [published] = JSON.parse(body);
 
     expect(Object.keys(published).sort()).toEqual(
-      ["body", "eventDate", "id", "media", "summary", "tags", "title"],
+      ["body", "eventDate", "id", "media", "publishedAt", "summary", "tags", "title"],
     );
     expect(published.title).toBe("Morning run by the river");
+    // The site orders the feed on this, so a record without one is a record that
+    // cannot be placed.
+    expect(published.publishedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // The private side of the draft never crosses over.
     expect(published.id).not.toBe(draft.draftId);
     expect(body).not.toContain(draft.draftId);
