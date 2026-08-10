@@ -80,8 +80,30 @@ export function createFakeBucket(): FakeBucket {
       };
     },
 
-    async delete(key: string) {
-      stored.delete(key);
+    // R2 takes either one key or many, and the media cleanup deletes a whole
+    // prefix in one call.
+    async delete(keys: string | string[]) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) stored.delete(key);
+    },
+
+    async list(options?: R2ListOptions) {
+      const prefix = options?.prefix ?? "";
+      const matching = [...stored.keys()].filter((key) => key.startsWith(prefix)).sort();
+
+      // Paged, so a caller that only reads the first page is not mistaken for
+      // one that read everything. The cursor is the last key returned, which is
+      // how R2's own works: an offset would shift under a caller deleting what
+      // it has already listed.
+      const limit = options?.limit ?? matching.length;
+      const after = options?.cursor;
+      const remaining = after === undefined ? matching : matching.filter((key) => key > after);
+      const page = remaining.slice(0, limit);
+
+      return {
+        objects: page.map((key) => ({ key })),
+        truncated: page.length < remaining.length,
+        cursor: page[page.length - 1] ?? "",
+      };
     },
   };
 
@@ -102,7 +124,7 @@ export function createFakeBucket(): FakeBucket {
   } as unknown as Map<string, string>;
 
   return {
-    // The Worker touches put, get and delete; asserting the full R2Bucket
+    // The Worker touches put, get, delete and list; asserting the full R2Bucket
     // surface here would be scaffolding nothing reads.
     bucket: bucket as unknown as R2Bucket,
     objects,

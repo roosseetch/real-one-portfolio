@@ -11,10 +11,14 @@ import {
 import { handleTelegramWebhook } from "./telegram/webhook";
 
 export interface Env {
-  // Bindings. There is deliberately no media bucket binding: the Worker never
-  // writes media, GitHub Actions does, after sanitizing it.
+  // Bindings. The Worker still never writes media — GitHub Actions does, after
+  // sanitizing it — but it does delete: a video declined at the confirmation
+  // step was uploaded before anyone was asked about it, and the author has said
+  // no to it. media/published.ts is the only thing that touches MEDIA_BUCKET,
+  // and it only lists and deletes.
   PRIVATE_BUCKET: R2Bucket;
   CONTENT_BUCKET: R2Bucket;
+  MEDIA_BUCKET: R2Bucket;
   AI: Ai;
 
   // Plain vars, generated into the Wrangler config at build time.

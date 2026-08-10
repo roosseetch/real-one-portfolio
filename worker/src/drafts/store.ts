@@ -9,16 +9,11 @@
  * these; nothing here deletes them, so an abandoned or failed draft stays
  * recoverable until it expires.
  */
-import { randomId } from "../ids";
+import { isValidId, randomId } from "../ids";
 import { DRAFT_SCHEMA_VERSION, type Draft, type DraftSource } from "./types";
 
 export function draftKey(draftId: string): string {
   return `drafts/${draftId}/draft.json`;
-}
-
-/** Rejects anything that could climb out of the drafts/ prefix or name a different object. */
-function isValidDraftId(draftId: string): boolean {
-  return /^[0-9a-z]{8,64}$/.test(draftId);
 }
 
 export async function saveDraft(bucket: R2Bucket, draft: Draft): Promise<void> {
@@ -33,7 +28,7 @@ export async function saveDraft(bucket: R2Bucket, draft: Draft): Promise<void> {
  * one to every caller, and both mean the same thing: there is nothing to act on.
  */
 export async function loadDraft(bucket: R2Bucket, draftId: string): Promise<Draft | null> {
-  if (!isValidDraftId(draftId)) return null;
+  if (!isValidId(draftId)) return null;
 
   const object = await bucket.get(draftKey(draftId));
   if (object === null) return null;
@@ -100,6 +95,8 @@ export async function createDraft(
     preview: null,
     published: null,
     job: null,
+    // Nothing has been sanitised, so there is nothing to publish from.
+    processed: null,
   };
 
   await saveDraft(bucket, draft);

@@ -28,6 +28,7 @@ function draftIn(state: DraftState): Draft {
     preview: null,
     published: null,
     job: null,
+    processed: null,
   };
 }
 
@@ -49,6 +50,18 @@ describe("the flows spec §22 names", () => {
 
   it("retries a failed publication", () => {
     expect(walk(["processing", "failed", "processing", "published"]).state).toBe("published");
+  });
+
+  it("sends a visibly changed video back for a final look", () => {
+    // Spec Phase 6's optional confirmation, and a second pass through the state
+    // that already means "waiting on the author" rather than a state of its own.
+    expect(
+      walk(["draft", "awaiting_approval", "processing", "awaiting_approval", "published"]).state,
+    ).toBe("published");
+  });
+
+  it("lets a declined confirmation be cancelled", () => {
+    expect(walk(["processing", "awaiting_approval", "cancelled"]).state).toBe("cancelled");
   });
 
   it("allows cancelling from every non-terminal state", () => {

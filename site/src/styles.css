@@ -398,8 +398,21 @@ main {
   margin-top: 0;
 }
 
-.activity-media img {
+.activity-media img,
+.activity-media video {
   border-radius: 0.75rem;
+}
+
+/* A video has no intrinsic size until its metadata loads, and preload="none"
+   means that never happens unless it is played — so without a width it would
+   render as a 300x150 box and then jump. */
+.activity-media video {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Behind the poster and behind any letterboxing, so a portrait clip sits on
+     something deliberate rather than on the browser's black. */
+  background: var(--text);
 }
 
 .activity-media figcaption {

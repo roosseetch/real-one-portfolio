@@ -79,6 +79,11 @@ pub struct VideoProperties {
     pub audio_codec: Option<String>,
     pub audio_channels: Option<u32>,
     pub rotation: i64,
+    /// Carries the bit depth: "yuv420p" is eight, "yuv420p10le" is ten.
+    pub pix_fmt: String,
+    /// The transfer function. "arib-std-b67" is HLG and "smpte2084" is PQ, which
+    /// are the two ways a phone records HDR.
+    pub color_transfer: Option<String>,
     pub format_tags: BTreeMap<String, String>,
     pub stream_tags: Vec<BTreeMap<String, String>>,
 }
@@ -217,6 +222,18 @@ pub fn probe(path: &Path) -> Result<VideoProperties> {
             .and_then(Value::as_u64)
             .map(|c| c as u32),
         rotation,
+        pix_fmt: video
+            .get("pix_fmt")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        // "unknown" is what ffprobe says for a file that never declared one, and
+        // that is not the same claim as HDR.
+        color_transfer: video
+            .get("color_transfer")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty() && *value != "unknown")
+            .map(str::to_string),
         format_tags: probed.get("format").map(tags_of).unwrap_or_default(),
         stream_tags: streams.iter().map(tags_of).collect(),
     })
@@ -611,6 +628,70 @@ pub fn compare_properties(
     problems
 }
 
+/// The two transfer functions a phone records HDR with.
+const HDR_TRANSFERS: &[&str] = &["arib-std-b67", "smpte2084"];
+
+fn is_hdr(props: &VideoProperties) -> bool {
+    props
+        .color_transfer
+        .as_deref()
+        .map(|transfer| HDR_TRANSFERS.contains(&transfer.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// Whether the pixel format carries more than eight bits per component.
+fn is_deep(pix_fmt: &str) -> bool {
+    let lowered = pix_fmt.to_lowercase();
+    ["10le", "10be", "12le", "12be", "16le", "16be"]
+        .iter()
+        .any(|depth| lowered.ends_with(depth))
+}
+
+/// What the author would see change, phrased for them rather than for a log.
+///
+/// This is the whole of the gate: a non-empty list here is what has the Worker
+/// send the processed clip back for a final look instead of publishing it. So
+/// the bar is deliberately what a person can *see*, not what a probe can
+/// measure. A re-encode at CRF 20 typically lands at a third of a phone's
+/// bitrate and looks the same, because CRF targets quality rather than size --
+/// gating on that would ask a question about every video ever sent, and the task
+/// asks for an optional confirmation, not a compulsory one.
+///
+/// Anything that fails `compare_properties` is not here: that is a broken
+/// output, and a broken output fails the job rather than arriving as a question.
+pub fn visible_changes(before: &VideoProperties, after: &VideoProperties) -> Vec<String> {
+    let mut changes = Vec::new();
+
+    if (after.width, after.height) != (before.width, before.height) {
+        changes.push(format!(
+            "scaled from {}x{} to {}x{}",
+            before.width, before.height, after.width, after.height
+        ));
+    }
+
+    // Two separate facts about the same clip, and a phone can produce either
+    // without the other: HLG at eight bits, or ten-bit SDR from a pro camera.
+    if is_hdr(before) && !is_hdr(after) {
+        changes.push("high dynamic range flattened to standard range".into());
+    }
+    if is_deep(&before.pix_fmt) && !is_deep(&after.pix_fmt) {
+        changes.push("10-bit colour reduced to 8-bit".into());
+    }
+
+    // Wider than muxer rounding, narrower than the tolerance compare_properties
+    // fails on -- so a drift big enough to be a fault still fails the job, and
+    // only the band between the two is worth a question.
+    let noise = (0.01 * before.duration).max(0.25);
+    if (after.duration - before.duration).abs() > noise {
+        changes.push(format!(
+            "{:.2}s became {:.2}s",
+            before.duration, after.duration
+        ));
+    }
+
+    changes
+}
+
 /// Whether the decoy location actually landed in the container.
 ///
 /// Read back rather than trusted: a claimed decoy that is not there would have
@@ -709,6 +790,10 @@ pub fn derivatives(
     entry.duration_seconds = Some((after.duration * 1000.0).round() / 1000.0);
     entry.has_audio = Some(after.has_audio);
     entry.decoy_location = claimed.clone();
+    // Read off the same two probes the checks above used. This process is the
+    // only one that ever holds both the original and the output, so it is the
+    // only one that can say what the transcode did to the picture.
+    entry.visible_changes = visible_changes(&before, &after);
 
     let mut outcome = Outcome {
         entries: vec![entry],
@@ -756,6 +841,7 @@ mod tests {
             has_audio,
             audio_codec: has_audio.then(|| "aac".to_string()),
             audio_channels: has_audio.then_some(1),
+            pix_fmt: "yuv420p".into(),
             ..Default::default()
         }
     }
@@ -987,6 +1073,92 @@ mod tests {
     fn a_clean_transcode_reports_nothing() {
         let before = props(640, 480, true);
         let after = props(640, 480, true);
+        assert_eq!(
+            compare_properties(&before, &after, 640, 480),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_clip_that_came_through_at_its_own_size_and_depth_asks_nothing() {
+        // The ordinary case, and the one that decides how often the author is
+        // interrupted: an in-cap SDR clip is republished without a question.
+        let before = props(1920, 1080, true);
+        let after = props(1920, 1080, true);
+        assert_eq!(visible_changes(&before, &after), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_scaled_clip_says_what_it_was_and_what_it_became() {
+        let before = props(3840, 2160, true);
+        let after = props(1920, 1080, true);
+        assert_eq!(
+            visible_changes(&before, &after),
+            vec!["scaled from 3840x2160 to 1920x1080"]
+        );
+    }
+
+    #[test]
+    fn flattened_hdr_and_reduced_depth_are_two_separate_answers() {
+        let mut before = props(1920, 1080, true);
+        before.color_transfer = Some("arib-std-b67".into());
+        before.pix_fmt = "yuv420p10le".into();
+        let after = props(1920, 1080, true);
+
+        assert_eq!(
+            visible_changes(&before, &after),
+            vec![
+                "high dynamic range flattened to standard range",
+                "10-bit colour reduced to 8-bit",
+            ]
+        );
+
+        // Either without the other: HLG at eight bits is what a phone writes,
+        // ten-bit SDR is what a camera does.
+        let mut hlg_only = props(1920, 1080, true);
+        hlg_only.color_transfer = Some("smpte2084".into());
+        assert_eq!(
+            visible_changes(&hlg_only, &after),
+            vec!["high dynamic range flattened to standard range"]
+        );
+    }
+
+    #[test]
+    fn an_ordinary_sdr_transfer_is_not_a_flattening() {
+        let mut before = props(1920, 1080, true);
+        before.color_transfer = Some("bt709".into());
+        let mut after = props(1920, 1080, true);
+        after.color_transfer = Some("bt709".into());
+        assert_eq!(visible_changes(&before, &after), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_duration_drift_is_reported_only_once_it_is_past_muxer_rounding() {
+        let mut before = props(640, 480, true);
+        before.duration = 60.0;
+
+        let mut rounded = props(640, 480, true);
+        rounded.duration = 60.1;
+        assert_eq!(visible_changes(&before, &rounded), Vec::<String>::new());
+
+        let mut trimmed = props(640, 480, true);
+        trimmed.duration = 59.2;
+        assert_eq!(
+            visible_changes(&before, &trimmed),
+            vec!["60.00s became 59.20s"]
+        );
+    }
+
+    /// The band between the two has to be non-empty, or the gate can never fire
+    /// on duration: anything wider fails the job before it is ever asked about.
+    #[test]
+    fn a_drift_worth_reporting_is_still_inside_what_the_job_tolerates() {
+        let mut before = props(640, 480, true);
+        before.duration = 60.0;
+        let mut after = props(640, 480, true);
+        after.duration = 59.2;
+
+        assert!(!visible_changes(&before, &after).is_empty());
         assert_eq!(
             compare_properties(&before, &after, 640, 480),
             Vec::<String>::new()

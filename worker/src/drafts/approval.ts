@@ -12,7 +12,9 @@ import { toPublicRecord } from "../content/records";
 import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
 import { resendsAsPhoto } from "../media/formats";
+import { deletePublishedMedia } from "../media/published";
 import { dispatchMediaProcessing, newJobToken, type DispatchEnv } from "../publishing/dispatch";
+import { publishProcessedMedia, type MediaPublishEnv } from "../publishing/media-record";
 import { publishRecord, type PublishEnv } from "../publishing/publish";
 import { setPendingEdit } from "./pending";
 import {
@@ -50,8 +52,13 @@ const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can cont
 const PUBLISH_FAILED_MESSAGE = "Publication failed. The draft is still here — try again in a moment.";
 const PROCESSING_MESSAGE = "Processing the media. This takes a couple of minutes; the link follows when it is done.";
 
-export interface ApprovalEnv extends TelegramApiEnv, AiEnv, PublishEnv, DispatchEnv {
+export interface ApprovalEnv extends TelegramApiEnv, AiEnv, PublishEnv, DispatchEnv, MediaPublishEnv {
   PRIVATE_BUCKET: R2Bucket;
+  /**
+   * Only ever deleted from, and only for a draft cancelled after its media was
+   * already uploaded. Everything written there is written by GitHub Actions.
+   */
+  MEDIA_BUCKET: R2Bucket;
   /** Where the published record becomes visible, for the link sent back to the author. */
   SITE_BASE_URL: string;
 }
@@ -265,6 +272,24 @@ async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
     return;
   }
 
+  // Already sanitised, and shown to the author because the transcode changed it
+  // visibly. This press is the confirmation, so it publishes from the files the
+  // pipeline produced rather than asking for the work a second time.
+  const processed = draft.processed ?? null;
+  if (processed !== null) {
+    const result = await publishProcessedMedia(env, draft, processed.media);
+
+    if (result.status !== "published") {
+      await sendMessage(env, draft.source.chatId, PUBLISH_FAILED_MESSAGE);
+      return;
+    }
+
+    if (draft.preview !== null) {
+      await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
+    }
+    return;
+  }
+
   // Media goes the long way round: the files have to be stripped of their
   // metadata before anything of them becomes public, and that happens in a
   // GitHub Actions runner rather than here (spec §10.2).
@@ -418,6 +443,13 @@ async function cancelDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
   };
 
   await saveDraft(env.PRIVATE_BUCKET, cancelled);
+
+  // Cancelled after the pipeline had already uploaded: the files are in the
+  // public bucket, unreferenced by any record or manifest, and the author has
+  // just said no to them. Unreachable is not the same as gone.
+  if ((draft.processed ?? null) !== null) {
+    await deletePublishedMedia(env.MEDIA_BUCKET, draft.activityId);
+  }
 
   if (draft.preview !== null) {
     await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);

@@ -20,12 +20,14 @@ const RECORD: DraftRecord = {
 
 let storage: FakeBucket;
 let content: FakeBucket;
+let media: FakeBucket;
 /** Every Telegram call, as {method, body}. */
 let calls: Array<{ method: string; body: Record<string, unknown> }>;
 
 beforeEach(() => {
   storage = createFakeBucket();
   content = createFakeBucket();
+  media = createFakeBucket();
   calls = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const method = String(url).split("/").pop() ?? "";
@@ -48,6 +50,7 @@ function env(...steps: AiStep[]) {
     PRIVATE_BUCKET: storage.bucket,
     TELEGRAM_BOT_TOKEN: "test-token",
     CONTENT_BUCKET: content.bucket,
+    MEDIA_BUCKET: media.bucket,
     SITE_BASE_URL: "https://site.example",
     GITHUB_REPOSITORY: "owner/repo",
     MEDIA_WORKFLOW_FILE: "process-media.yml",
@@ -626,5 +629,128 @@ describe("publishing a draft with media", () => {
 
     expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(1);
     expect(calls.map((c) => c.method)).not.toContain("dispatches");
+  });
+});
+
+/**
+ * The second pass through `awaiting_approval`: the media pipeline has already
+ * run, the transcode changed the clip visibly, and the author is looking at the
+ * result. Only the press is left.
+ */
+describe("confirming a processed video (spec Phase 6)", () => {
+  const MEDIA_BASE = "https://media.example";
+
+  const confirming = async (): Promise<Draft> => {
+    const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "a run");
+    const base = `${MEDIA_BASE}/media/activity-${created.activityId}`;
+    const draft: Draft = {
+      ...created,
+      record: { ...RECORD, media: [{ mediaId: "media0", alt: "Along the river", caption: "Eight easy km" }] },
+      originals: [
+        { mediaId: "media0", type: "video", fileId: "file-0", key: `originals/${created.activityId}/media0.mov` },
+      ],
+      job: { jobToken: "job-token-0123456789abcdef", dispatchedAt: new Date().toISOString() },
+      processed: {
+        media: [
+          {
+            sourceId: "media0",
+            type: "video",
+            src: `${base}/media0-1920.mp4`,
+            poster: `${base}/media0-poster-1600.webp`,
+            thumbnail: `${base}/media0-poster-320.webp`,
+            visibleChanges: ["scaled from 3840x2160 to 1920x1080"],
+          },
+        ],
+        at: new Date().toISOString(),
+      },
+    };
+    // sendPreview is what puts a live token on it, the same way the callback does.
+    return sendPreview(env(), draft);
+  };
+
+  beforeEach(async () => {
+    await createManifest(content.bucket, emptyManifest());
+    // What the pipeline uploaded before anyone was asked about it, plus one
+    // object belonging to a different activity.
+    media.objects.set("media/activity-elsewhere00/other-800.webp", "not ours");
+  });
+
+  it("publishes from the files the pipeline produced, without dispatching again", async () => {
+    const draft = await confirming();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect(calls.map((c) => c.method)).not.toContain("dispatches");
+    const manifest = (await readManifest(content.bucket))!.manifest;
+    expect(manifest.totalRecords).toBe(1);
+
+    const chunk = JSON.parse(content.objects.get(chunkKey(manifest.latest!)) as unknown as string);
+    expect(chunk[0].media[0]).toMatchObject({
+      type: "video",
+      src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1920.mp4`,
+      poster: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-poster-1600.webp`,
+      // The author's approved words, taken from the draft rather than the pipeline.
+      alt: "Along the river",
+      caption: "Eight easy km",
+    });
+  });
+
+  it("retires the draft and sends the link", async () => {
+    const draft = await confirming();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("published");
+    expect(stored?.preview).toBeNull();
+    expect(calls.find((c) => c.method === "sendMessage")?.body.text).toBe(
+      "Published. https://site.example/#activity",
+    );
+    // And the buttons come off the message that was answered.
+    expect(calls.map((c) => c.method)).toContain("editMessageReplyMarkup");
+  });
+
+  it("publishes once however often the button is pressed", async () => {
+    const draft = await confirming();
+    await handlePreviewCallback(press(draft, "p"), env());
+    await handlePreviewCallback(press(draft, "p"), env());
+
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(1);
+    expect(answers()).toContain("Already published.");
+  });
+
+  it("refuses a press from the preview the confirmation replaced", async () => {
+    const draft = await confirming();
+    await handlePreviewCallback(press(draft, "p", "an-older-token"), env());
+
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+    expect(answers()).toContain("This preview has been replaced. Use the newest one.");
+  });
+
+  it("removes the uploaded derivatives when the author cancels", async () => {
+    // Nothing references them — no record, no manifest entry — but unreachable
+    // is not gone, and the author has just declined them.
+    const draft = await confirming();
+    const prefix = `media/activity-${draft.activityId}/`;
+    media.objects.set(`${prefix}media0-1920.mp4`, "mp4 bytes");
+    media.objects.set(`${prefix}media0-poster-1600.webp`, "poster bytes");
+    media.objects.set(`${prefix}media0-poster-320.webp`, "thumb bytes");
+
+    await handlePreviewCallback(press(draft, "c"), env());
+
+    expect([...media.objects.keys()]).toEqual(["media/activity-elsewhere00/other-800.webp"]);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("cancelled");
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+  });
+
+  it("touches no media when a draft is cancelled before anything was processed", async () => {
+    const draft = await awaitingApproval();
+    media.objects.set(`media/activity-${draft.activityId}/media0-1920.mp4`, "should not exist, but prove it");
+
+    await handlePreviewCallback(press(draft, "c"), env());
+
+    expect(media.objects.size).toBe(2);
   });
 });

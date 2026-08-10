@@ -65,6 +65,27 @@ export interface DraftOriginal {
   bytes?: number;
 }
 
+/**
+ * One sanitised item as the media pipeline reported it (spec §13.2).
+ *
+ * Held on the draft only when the author still has to look at it: a video the
+ * transcode changed visibly is shown before it is published, and publishing it
+ * afterwards has to use these exact URLs rather than ask for the work again.
+ */
+export interface ProcessedMedia {
+  sourceId: string;
+  type: "image" | "video";
+  src: string;
+  thumbnail?: string;
+  poster?: string;
+  /**
+   * What the transcode changed that the author would see, in words meant for
+   * them. Empty for a picture and for a clip that came through as it was —
+   * a non-empty list on any item is the whole of the confirmation gate.
+   */
+  visibleChanges: string[];
+}
+
 export interface Draft {
   schemaVersion: number;
   draftId: string;
@@ -111,6 +132,20 @@ export interface Draft {
    * replayed or forged one can be refused without trusting the draft id alone.
    */
   job: { jobToken: string; dispatchedAt: string } | null;
+  /**
+   * What the pipeline produced, held between the callback and the author's
+   * final look at it.
+   *
+   * Only ever set when the transcode changed something visible, and it is what
+   * tells the second pass through `awaiting_approval` from the first: a draft
+   * with originals and no `processed` still has to be sanitised, one with
+   * `processed` is waiting to be published from these very URLs.
+   *
+   * Absent rather than null on drafts written before this existed, which is why
+   * every read of it goes through `?? null` — those are still inside their
+   * seven-day lifecycle.
+   */
+  processed: { media: ProcessedMedia[]; at: string } | null;
 }
 
 export const DRAFT_SCHEMA_VERSION = 1;
