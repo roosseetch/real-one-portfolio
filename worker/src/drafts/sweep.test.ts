@@ -15,6 +15,12 @@ const RECORD: DraftRecord = {
   media: [{ mediaId: "media0", alt: "A cup", caption: "The first" }],
 };
 
+/* As long as Telegram's own, because the test below asserts the sweep's log
+   does not name the chat, and draft ids are random base32 with digits in the
+   alphabet: a two-digit chat id turns up inside one about once in seventy
+   runs, which is a red pull request for nobody's mistake. */
+const CHAT_ID = 4155320198;
+
 const NOW = new Date("2026-08-10T12:00:00.000Z");
 /** Comfortably past the threshold, so a test never turns on the exact boundary. */
 const LONG_AGO = new Date(NOW.getTime() - STRANDED_AFTER_MS - 60_000).toISOString();
@@ -40,7 +46,7 @@ const env = () => ({ PRIVATE_BUCKET: storage.bucket, TELEGRAM_BOT_TOKEN: "test-t
 
 /** A draft dispatched to Actions at `dispatchedAt` and never heard from since. */
 async function processing(dispatchedAt: string, overrides: Partial<Draft> = {}): Promise<Draft> {
-  const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "coffee");
+  const created = await createDraft(storage.bucket, { chatId: CHAT_ID, senderId: 42, messageId: 7 }, "coffee");
   const draft: Draft = {
     ...created,
     state: "processing",
@@ -140,7 +146,7 @@ describe("sweeping drafts nothing came back for", () => {
     // There are far more nonces than drafts. Reading each one would make a
     // quarter-hourly sweep cost more than everything else the Worker does.
     await processing(LONG_AGO);
-    await setPendingEdit(storage.bucket, 99, "aaaaaaaaaaaaaaaa");
+    await setPendingEdit(storage.bucket, CHAT_ID, "aaaaaaaaaaaaaaaa");
     for (let i = 0; i < 5; i++) {
       storage.objects.set(`drafts/callback-nonces/nonce-${i}.json`, "{}");
     }
@@ -158,7 +164,7 @@ describe("sweeping drafts nothing came back for", () => {
 
     expect(errors.join("\n")).toContain(draftKey(draft.draftId));
     expect(errors.join("\n")).not.toContain("coffee");
-    expect(errors.join("\n")).not.toContain("99");
+    expect(errors.join("\n")).not.toContain(String(CHAT_ID));
   });
 
   it("keeps going when one draft is unreadable", async () => {
