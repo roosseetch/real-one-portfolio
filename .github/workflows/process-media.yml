@@ -262,7 +262,7 @@ jobs:
             infix=$2
             widths=""
             widest=0
-            for f in "$WORK"/public/"$id$infix"-*.webp; do
+            for f in "$WORK/public/$id$infix"-*.webp; do
               [ -e "$f" ] || continue
               w=${f##*-}
               w=${w%.webp}
@@ -523,7 +523,11 @@ jobs:
         env:
           CALLBACK_HMAC_SECRET: ${{ secrets.CALLBACK_HMAC_SECRET }}
           JOB_TOKEN: ${{ inputs.jobToken }}
-          CANCELLED: ${{ cancelled() }}
+          # Not `cancelled()`: the status functions are legal only in an `if:`,
+          # and one here is a file GitHub refuses to parse at all — which takes
+          # the whole workflow down, not just this step. `job.status` carries the
+          # same fact and is available wherever a step can read a context.
+          JOB_STATUS: ${{ job.status }}
           OUT_DOWNLOAD: ${{ steps.download.outcome }}
           OUT_SANITIZE: ${{ steps.sanitize.outcome }}
           OUT_VERIFY: ${{ steps.verify.outcome }}
@@ -547,7 +551,7 @@ jobs:
           # stopped, which is a different thing to tell the author than a step
           # that broke. An `if` rather than `&&`, because the runner's shell is
           # `bash -e` and a trailing test that fails would fail this step.
-          if [ "$CANCELLED" = true ]; then stage=cancelled; fi
+          if [ "$JOB_STATUS" = cancelled ]; then stage=cancelled; fi
 
           # $RUNNER_TEMP, not $WORK: the step that creates $WORK is itself one of
           # the ones that can fail, and this must still be able to report that.
