@@ -1,6 +1,6 @@
 name: Check workflow config
 
-# Three checks over .github/workflows, all about mistakes that reach main
+# Four checks over .github/workflows, all about mistakes that reach main
 # looking green.
 #
 # actionlint parses every workflow and checks each expression against the
@@ -11,6 +11,11 @@ name: Check workflow config
 # .github/config-inventory.json, and every declaration must be referenced.
 # Separately, process-media.yml's failure report must name steps that exist, and
 # its verification steps must still run before anything is uploaded.
+#
+# And the security rules: third-party actions pinned by commit rather than by a
+# tag their owner can move, permissions declared with every write accounted
+# for, and no secret reachable from a pull request that is not guarded against
+# forks (spec §24).
 #
 # GitHub resolves an unknown reference to an empty string instead of failing, so
 # a renamed or mistyped name ships a workflow that runs, reports success, and
@@ -29,6 +34,7 @@ on:
       - ".github/**"
       - "scripts/check-workflow-config.ts"
       - "scripts/check-media-workflow.ts"
+      - "scripts/check-workflow-security.ts"
       - "package.json"
       - "package-lock.json"
   push:
@@ -37,6 +43,7 @@ on:
       - ".github/**"
       - "scripts/check-workflow-config.ts"
       - "scripts/check-media-workflow.ts"
+      - "scripts/check-workflow-security.ts"
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:
@@ -65,12 +72,17 @@ jobs:
       # broken until it was found. actionlint parses every workflow and knows
       # which contexts each expression may use.
       #
-      # Pinned by version. Bump it deliberately: a floating tag would let a new
-      # release fail an unrelated pull request.
-      - uses: docker://rhysd/actionlint:1.7.7
+      # Pinned by digest, like every other third-party step here. A version tag
+      # is still a name its owner can re-push, and bumping deliberately is the
+      # point: a floating reference would let someone else's release fail an
+      # unrelated pull request, or run code nobody reviewed.
+      - uses: docker://rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 # 1.7.7
 
       - run: npm ci
       - run: npm run config:check
       # The same class of silent failure one file over: an unknown step
       # reference resolves to an empty string rather than failing the run.
       - run: npm run media:check
+      # Supply chain and permissions. Its own rules are proved by mutation in
+      # scripts/check-workflow-security.test.ts, which tests.yml runs.
+      - run: npm run security:check
