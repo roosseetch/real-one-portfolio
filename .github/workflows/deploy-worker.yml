@@ -58,6 +58,9 @@ jobs:
       WORKER_NAME: ${{ vars.WORKER_NAME }}
       PRIVATE_BUCKET: ${{ vars.PROJECT_SLUG }}-private
       CONTENT_BUCKET: ${{ vars.PROJECT_SLUG }}-content
+      # Bound so a cancelled confirmation can remove derivatives the media
+      # pipeline had already uploaded. The Worker never writes here.
+      MEDIA_BUCKET: ${{ vars.PROJECT_SLUG }}-media
       CONTENT_BASE_URL: ${{ vars.CONTENT_BASE_URL }}
       MEDIA_BASE_URL: ${{ vars.MEDIA_BASE_URL }}
       SITE_BASE_URL: ${{ vars.SITE_BASE_URL }}

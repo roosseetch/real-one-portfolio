@@ -1,6 +1,6 @@
 [package]
 name = "sanitize-media"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 description = "Sanitises source photos and videos into public web derivatives"
 license = "MIT"

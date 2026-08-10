@@ -1,10 +1,17 @@
 /**
  * The draft state machine (spec §22).
  *
- * The three flows the spec names are the only ones this table permits:
+ * The flows the spec names are the only ones this table permits:
  *   text-only   draft → awaiting_approval → published
  *   media       draft → awaiting_approval → processing → published
+ *   changed     draft → awaiting_approval → processing → awaiting_approval → published
  *   failure     processing → failed → processing (retry)
+ *
+ * The third is spec Phase 6's optional confirmation: a video the transcode
+ * changed visibly goes back for a final look, which is the same question
+ * `awaiting_approval` already means. It is a second pass through that state
+ * rather than a state of its own, and `draft.processed` is what tells the two
+ * apart — set, and the media is already sanitised and waiting to be published.
  *
  * Enforcing it here rather than at each call site is what stops a late callback
  * or a double-clicked button from moving a published draft back into
@@ -15,7 +22,7 @@ import type { Draft, DraftState } from "./types";
 const TRANSITIONS: Record<DraftState, readonly DraftState[]> = {
   draft: ["awaiting_approval", "cancelled"],
   awaiting_approval: ["processing", "published", "cancelled"],
-  processing: ["published", "failed", "cancelled"],
+  processing: ["awaiting_approval", "published", "failed", "cancelled"],
   failed: ["processing", "cancelled"],
   // Terminal. A published record is immutable, and a cancelled draft is left
   // for the lifecycle rule to remove.

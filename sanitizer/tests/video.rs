@@ -301,6 +301,66 @@ fn an_oversized_source_is_scaled_to_the_cap() {
     assert_eq!(run.result.failures, Vec::<String>::new());
     let entry = run.video("media0");
     assert_eq!((entry.width, entry.height), (1920, 1080));
+    // And the author is told, in their own terms, because this is the one
+    // published file that is not what they sent.
+    assert_eq!(
+        entry.visible_changes,
+        vec!["scaled from 3840x2160 to 1920x1080"]
+    );
+}
+
+/// The ordinary case, and the one that decides how often the author is asked
+/// anything: a clip inside the cap is republished without a question, exactly
+/// as a photo is.
+#[test]
+fn a_clip_that_needed_no_scaling_asks_the_author_nothing() {
+    needs_ffmpeg!();
+    let scratch = Scratch::new("unchanged");
+    let source = clip(&scratch, VideoSpec::default());
+    let run = sanitize(&scratch, &source, &[320]);
+
+    assert_eq!(run.result.failures, Vec::<String>::new());
+    assert_eq!(run.video("media0").visible_changes, Vec::<String>::new());
+
+    // Absent from the JSON rather than empty in it: absent is what the workflow
+    // and the Worker read as "publish this the way a photo is published".
+    let manifest = std::fs::read_to_string(run.work_dir.join("manifest.json")).unwrap();
+    assert!(!manifest.contains("visibleChanges"), "{manifest}");
+}
+
+/// A ten-bit source loses eight of its shades of grey to yuv420p, which is
+/// visible on any gradient. ProRes because it is built into ffmpeg: a fixture
+/// needing libx264's ten-bit build would skip on the machines that have the
+/// eight-bit one, and a skip is a hole that looks like a pass.
+#[test]
+fn a_ten_bit_source_says_what_the_eight_bit_output_cost() {
+    needs_ffmpeg!();
+    let scratch = Scratch::new("tenbit");
+    let source = clip(
+        &scratch,
+        VideoSpec {
+            name: "deep.mov".into(),
+            container: "mov".into(),
+            codec: "prores".into(),
+            pix_fmt: "yuv422p10le".into(),
+            seconds: 0.5,
+            ..Default::default()
+        },
+    );
+    let run = sanitize(&scratch, &source, &[320]);
+
+    assert_eq!(run.result.failures, Vec::<String>::new());
+    let entry = run.video("media0");
+    assert!(
+        entry
+            .visible_changes
+            .contains(&"10-bit colour reduced to 8-bit".to_string()),
+        "{:?}",
+        entry.visible_changes
+    );
+    // The output is the eight-bit file the claim describes.
+    let after = sanitize_media::video::probe(&run.file(entry)).unwrap();
+    assert_eq!(after.pix_fmt, "yuv420p");
 }
 
 #[test]

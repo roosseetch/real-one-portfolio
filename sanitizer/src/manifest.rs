@@ -39,6 +39,13 @@ pub struct Entry {
     /// decoy did not land. An honest null beats a claimed tag that is not
     /// there: the validation exempts GPS only when we know we wrote it.
     pub decoy_location: Option<String>,
+    /// What the transcode changed that the author would see, in their words.
+    ///
+    /// Absent rather than empty when nothing changed, because absent is what the
+    /// workflow and the Worker read as "publish this like a photo". A picture
+    /// never carries one: only a video is transcoded.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub visible_changes: Vec<String>,
 }
 
 impl Entry {
@@ -60,6 +67,7 @@ impl Entry {
             duration_seconds: None,
             has_audio: None,
             decoy_location: None,
+            visible_changes: Vec::new(),
         }
     }
 }
@@ -84,6 +92,8 @@ mod tests {
         // presence of durationSeconds, so a picture must not carry one.
         assert!(!json.contains("durationSeconds"), "{json}");
         assert!(!json.contains("hasAudio"), "{json}");
+        // Only a video is transcoded, so only a video can have changed.
+        assert!(!json.contains("visibleChanges"), "{json}");
         assert!(json.contains(r#""role":"image""#), "{json}");
         // Explicitly null rather than absent: absent would read as "not checked".
         assert!(json.contains(r#""decoyLocation":null"#), "{json}");
@@ -102,11 +112,29 @@ mod tests {
         entry.duration_seconds = Some(2.5);
         entry.has_audio = Some(true);
         entry.decoy_location = Some("Matterhorn".into());
+        entry.visible_changes = vec!["scaled from 3840x2160 to 1920x1080".into()];
         let json = serde_json::to_string(&entry).unwrap();
 
         assert!(json.contains(r#""durationSeconds":2.5"#), "{json}");
         assert!(json.contains(r#""hasAudio":true"#), "{json}");
         assert!(json.contains(r#""role":"video""#), "{json}");
         assert!(json.contains(r#""decoyLocation":"Matterhorn""#), "{json}");
+        // The name the workflow's callback jq reads, and the Worker's gate after
+        // it. Renaming this field silently stops every confirmation.
+        assert!(
+            json.contains(r#""visibleChanges":["scaled from 3840x2160 to 1920x1080"]"#),
+            "{json}"
+        );
+    }
+
+    #[test]
+    fn a_video_that_changed_in_no_visible_way_carries_no_field_at_all() {
+        let mut entry = Entry::picture("a-640.mp4".into(), "mp4".into(), Role::Video, 640, 480, 9);
+        entry.duration_seconds = Some(2.5);
+        let json = serde_json::to_string(&entry).unwrap();
+
+        // Absent, not empty: absent is what the Worker reads as "publish this
+        // the way a photo is published".
+        assert!(!json.contains("visibleChanges"), "{json}");
     }
 }

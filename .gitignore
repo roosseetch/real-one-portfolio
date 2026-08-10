@@ -35,6 +35,14 @@ private-inputs/
 # not the person.
 profile/*.json
 
+# The clip the Activity fixtures point at, for checking video rendering locally.
+# Generated rather than tracked, the way the sanitiser's fixtures are:
+#   ffmpeg -f lavfi -i testsrc=size=854x480:rate=24:duration=3 \
+#     -c:v libx264 -pix_fmt yuv420p -movflags +faststart site/fixtures/clip.mp4
+#   ffmpeg -i site/fixtures/clip.mp4 -frames:v 1 site/fixtures/clip-poster.webp
+site/fixtures/clip.mp4
+site/fixtures/clip-poster.webp
+
 # Build + deps
 node_modules/
 dist/

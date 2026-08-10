@@ -6,11 +6,14 @@
  * the body is never summarised, and after a regeneration the whole preview is
  * re-sent rather than the changed field alone.
  */
-import type { Draft, DraftRecord } from "../drafts/types";
+import type { Draft, DraftRecord, ProcessedMedia } from "../drafts/types";
 import type { InlineKeyboardMarkup } from "./api";
 
 /** Spec §7.2, quoted rather than paraphrased. */
 const APPROVAL_QUESTION = "Is this the information and media that should become public?";
+
+/** Spec Phase 6: the question asked when a transcode changed the clip visibly. */
+const CONFIRMATION_QUESTION = "Publishing this version?";
 
 /** Telegram rejects a sendMessage over 4096 characters outright. */
 const MAX_MESSAGE = 4096;
@@ -100,4 +103,52 @@ export function previewKeyboard(draftId: string, token: string): InlineKeyboardM
 
 export function hasPreviewableRecord(draft: Draft): draft is Draft & { record: DraftRecord } {
   return draft.record !== null;
+}
+
+/**
+ * The buttons under a processed video awaiting its final look.
+ *
+ * Publish and Cancel only. The text was approved on the first pass and the media
+ * is now a finished file in the public bucket, so there is nothing left to edit
+ * or regenerate — offering either would mean a button that can only be refused.
+ * Same callback_data shape as above, so nothing about parsing a press changes.
+ */
+export function confirmationKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
+  const button = (action: PreviewAction) => ({
+    text: LABELS[action],
+    callback_data: `${CODE_FOR[action]}:${draftId}:${token}`,
+  });
+
+  return { inline_keyboard: [[button("publish")], [button("cancel")]] };
+}
+
+/**
+ * What the author is asked when the transcode changed the clip visibly.
+ *
+ * Takes the clips that changed, already chosen by the caller — what counts as a
+ * visible change is the sanitiser's judgement and the callback's filter, not a
+ * formatting decision.
+ *
+ * The changes are named rather than summarised: "processed successfully" is not
+ * something anyone can approve. Every clip's URL is in the text as well as being
+ * sent as a video, because Telegram fetches a by-URL send itself and refuses
+ * anything over 20 MB — a refused fetch must still leave something to tap.
+ */
+export function formatMediaConfirmation(changed: ProcessedMedia[]): string {
+  const lines = [
+    changed.length === 1
+      ? "The video changed when it was processed:"
+      : "The videos changed when they were processed:",
+    "",
+  ];
+
+  for (const item of changed) {
+    for (const change of item.visibleChanges) lines.push(`• ${change}`);
+    lines.push(item.src, "");
+  }
+
+  lines.push(CONFIRMATION_QUESTION);
+
+  const text = lines.join("\n");
+  return text.length <= MAX_MESSAGE ? text : `${text.slice(0, MAX_MESSAGE - 1)}…`;
 }
