@@ -41,15 +41,19 @@ Tracking mirror: GitHub Project "Personal Portfolio" (the project board).
 
 ## Phase 5 — Photo pipeline
 - [x] Task 21: Photo intake + originals in private R2 + media preview
-- [ ] Task 22: GitHub Actions dispatch + process-media workflow — sanitization
+- [x] Task 22: GitHub Actions dispatch + process-media workflow — sanitization
 - [x] Task 23: Derivatives, validation, public upload
 - [x] Task 24: HMAC callback endpoint + media publication
 - [ ] Checkpoint E: photo publication end-to-end, decoy-only metadata live
 
 ## Phase 6 — Video pipeline
-- [ ] Task 25: Video intake + transcode + sanitize
+- [x] Task 25: Video intake + transcode + sanitize
 - [x] Task 26: Optional processed-video confirmation + publication
-- [ ] Checkpoint F: video publication end-to-end
+- [x] Checkpoint F: video publication end-to-end
+      (three clips published from Telegram — a 4K one confirmed through the
+      changed-video gate, an HD one straight through, and a 36.1 MB one refused
+      with the Bot API's 20 MB download limit named; ffprobe on a live published
+      file shows only the decoy make/model/GPS, no creation_time, H.264/AAC)
 
 ## Phase 7 — Reliability and maintenance
 - [ ] Task 27: Failure flows + retry
