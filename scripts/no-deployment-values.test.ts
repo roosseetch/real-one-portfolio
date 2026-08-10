@@ -98,7 +98,11 @@ describe("tracked files", () => {
   it("would notice one if it came back", () => {
     // Guards the matcher itself: a scan that quietly matches nothing would pass
     // the assertion above for ever.
-    const line = 'const ORIGIN = "https://someones-real-site.com";';
+    // Assembled rather than written out. This file is tracked, so the scan
+    // above reads it too, and a literal here is the very thing it forbids —
+    // which is how the first version of this test failed its own rule.
+    const url = ["https:/", "/someones-real-site.com"].join("");
+    const line = `const ORIGIN = "${url}";`;
     const hosts = [...line.matchAll(URL_PATTERN)]
       .map((match) => match[1])
       .filter((host) => !RESERVED.test(host) && !ALLOWED.has(host));
