@@ -11,12 +11,17 @@
     "profile:fetch": "tsx scripts/fetch-profile.ts",
     "record:unpublish": "tsx scripts/unpublish-record.ts",
     "logs:read": "bash scripts/read-error-logs.sh",
+    "profile:test-fixture": "tsx scripts/install-test-profile.ts",
+    "pretest": "npm run profile:test-fixture",
+    "test": "vitest run && npm test --prefix worker && npm test --prefix site",
+    "test:scripts": "vitest run",
     "test:media": "podman build -q -t media-sanitizer-dev sanitizer/ && podman run --rm -v \"$PWD\":/repo:z -w /repo/sanitizer media-sanitizer-dev cargo test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "ajv": "^8.17.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
   }
 }
