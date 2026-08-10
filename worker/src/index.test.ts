@@ -256,4 +256,14 @@ describe("routing", () => {
     const response = await worker.fetch(new Request("https://worker.example/", { method: "POST" }), testEnv(), ctx());
     expect(response.status).toBe(404);
   });
+
+  it("routes the failure callback, and refuses it unsigned", async () => {
+    // 401 rather than 404 is the whole assertion: it proves the path reaches
+    // the handler, which is the half a unit test of the handler cannot cover.
+    const url = "https://worker.example/callbacks/media-failed";
+    const posted = await worker.fetch(new Request(url, { method: "POST" }), testEnv(), ctx());
+    expect(posted.status).toBe(401);
+
+    expect((await worker.fetch(new Request(url), testEnv(), ctx())).status).toBe(404);
+  });
 });

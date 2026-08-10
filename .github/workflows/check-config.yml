@@ -1,7 +1,12 @@
 name: Check workflow config
 
-# Every secrets.* and vars.* reference in .github/workflows must be declared in
+# Two checks over .github/workflows, both about references GitHub resolves to an
+# empty string instead of failing on.
+#
+# Every secrets.* and vars.* reference must be declared in
 # .github/config-inventory.json, and every declaration must be referenced.
+# Separately, process-media.yml's failure report must name steps that exist, and
+# its verification steps must still run before anything is uploaded.
 #
 # GitHub resolves an unknown reference to an empty string instead of failing, so
 # a renamed or mistyped name ships a workflow that runs, reports success, and
@@ -19,6 +24,7 @@ on:
     paths:
       - ".github/**"
       - "scripts/check-workflow-config.ts"
+      - "scripts/check-media-workflow.ts"
       - "package.json"
       - "package-lock.json"
   push:
@@ -26,6 +32,7 @@ on:
     paths:
       - ".github/**"
       - "scripts/check-workflow-config.ts"
+      - "scripts/check-media-workflow.ts"
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:
@@ -48,3 +55,6 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run config:check
+      # The same class of silent failure one file over: an unknown step
+      # reference resolves to an empty string rather than failing the run.
+      - run: npm run media:check

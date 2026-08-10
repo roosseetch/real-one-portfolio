@@ -23,6 +23,14 @@ export interface FakeBucket {
   /** Makes the next put throw, for exercising the storage-failure path. */
   failNextPut(message?: string): void;
   /**
+   * Makes every put of a matching key throw, and leaves the rest working.
+   *
+   * `failNextPut` cannot express this: a handler that claims a nonce before it
+   * writes a draft would have the failure land on the nonce, which is a
+   * different path with a different answer.
+   */
+  failPutsFor(matches: (key: string) => boolean, message?: string): void;
+  /**
    * Runs once, just before the next put of `key` — the seam for simulating
    * another publication landing between a read and its conditional write.
    */
@@ -32,6 +40,7 @@ export interface FakeBucket {
 export function createFakeBucket(): FakeBucket {
   const stored = new Map<string, StoredObject>();
   let pendingFailure: string | null = null;
+  let failing: { matches: (key: string) => boolean; message: string } | null = null;
   let interception: { key: string; action: () => void | Promise<void> } | null = null;
   let etagCounter = 0;
 
@@ -45,6 +54,8 @@ export function createFakeBucket(): FakeBucket {
         pendingFailure = null;
         throw new Error(message);
       }
+
+      if (failing !== null && failing.matches(key)) throw new Error(failing.message);
 
       if (interception !== null && interception.key === key) {
         const { action } = interception;
@@ -131,6 +142,9 @@ export function createFakeBucket(): FakeBucket {
     cacheControl: (key: string) => stored.get(key)?.cacheControl,
     failNextPut(message = "R2 unavailable") {
       pendingFailure = message;
+    },
+    failPutsFor(matches: (key: string) => boolean, message = "R2 unavailable") {
+      failing = { matches, message };
     },
     interceptPut(key: string, action: () => void | Promise<void>) {
       interception = { key, action };
