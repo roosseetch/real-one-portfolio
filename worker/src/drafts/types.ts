@@ -107,6 +107,19 @@ export interface Draft {
   mediaGroupId: string | null;
   /** Originals in the private bucket. Empty for a text-only draft. */
   originals: DraftOriginal[];
+  /**
+   * Whether a file arrived for this draft and was refused.
+   *
+   * Kept because it changes what approving the draft means. With no surviving
+   * originals, publishing posts the words alone — which is worth offering, and
+   * the preview has to say so: without this the author sees the same five
+   * sections a note without any attachment produces, and the first time that
+   * happened a record went live describing a video it does not contain.
+   *
+   * Set per refused file rather than per message, so one bad photo in an album
+   * records it while its siblings still publish normally.
+   */
+  mediaDeclined: boolean;
   /** Exactly what arrived from Telegram, kept so an edit can start over from it. */
   input: { text: string };
   /** Null until Workers AI proposes one, which is why a quota failure can leave a usable draft. */

@@ -75,7 +75,9 @@ export async function sendPreview(env: ApprovalEnv, draft: Draft): Promise<Draft
   if (!hasPreviewableRecord(draft)) return draft;
 
   const token = randomId(TOKEN_LENGTH);
-  const text = formatPreview(draft.record);
+  // Only when nothing survived: an album that lost one of four still publishes
+  // the other three, and saying "none" there would be false.
+  const text = formatPreview(draft.record, draft.mediaDeclined === true && draft.originals.length === 0);
   const keyboard = previewKeyboard(draft.draftId, token);
   const messageId = await sendPreviewMessages(env, draft, text, keyboard);
 
