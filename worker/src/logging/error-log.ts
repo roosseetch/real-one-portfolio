@@ -57,6 +57,25 @@ export function beginRequest(request: Request): RequestLog {
   };
 }
 
+/**
+ * The same log for a run nobody made a request for.
+ *
+ * A scheduled invocation is where a durable trace matters most: there is no
+ * caller to see a 500 and no chat to answer, so an unnoticed failure of the
+ * sweep is exactly the kind that would go on failing quietly. The cron
+ * expression stands in for the path — it is a literal from the deployed
+ * configuration, so nothing about a draft can reach the log through it.
+ */
+export function beginScheduled(cron: string): RequestLog {
+  return {
+    id: randomId(8),
+    startedAt: new Date(),
+    method: "CRON",
+    path: cron,
+    entries: [],
+  };
+}
+
 /** Makes `log` the one that `console` calls inside `work` are recorded against. */
 export function runWithLog<T>(log: RequestLog, work: () => T): T {
   return active.run(log, work);
