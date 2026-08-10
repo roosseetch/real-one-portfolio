@@ -29,6 +29,13 @@
   "ai": {
     "binding": "AI"
   },
+  "//triggers": "Drives the scheduled handler in src/index.ts, which reports drafts stranded in `processing` by a run that never came back. Here rather than in Terraform on purpose: the schedule and the handler it invokes are one change, and deploy-worker runs on every push to worker/** while terraform-apply does not -- a cron owned by Terraform would silently not exist on a Worker deployed without an apply. Terraform still owns the custom domain, because that is a hostname in a zone rather than a property of the script.",
+  "//triggers.cadence": "Every quarter of an hour, against a stranded-after threshold of 30 minutes (drafts/sweep.ts): a stranded draft is reported 30 to 45 minutes after dispatch. Tightening this without lowering the threshold buys nothing but invocations.",
+  "triggers": {
+    "crons": [
+      "*/15 * * * *"
+    ]
+  },
   "vars": {
     "AMPLITUDE_API_KEY": "__AMPLITUDE_API_KEY__",
     "CONTENT_BASE_URL": "__CONTENT_BASE_URL__",
