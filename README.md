@@ -553,6 +553,14 @@ network, no variables, no secrets.
 | `check-media.yml` | pull request, push to main | the sanitiser's Rust tests |
 | `deploy-worker.yml` | push to main | typecheck + the Worker suite against the real profile, then deploys |
 
+Each of the three checks is path-filtered to what it can be affected by, and
+runs every one of its suites when it triggers at all. A pull request touching
+only documentation therefore reports no checks — an empty list there means
+nothing was relevant, not that something failed to start. A run that never
+appears when it should have is usually a workflow GitHub could not parse; those
+surface as a zero-second run named after the file, which `gh run list --branch`
+shows and `gh pr checks` does not.
+
 ## Media sanitiser
 
 `sanitizer/` holds the program that turns a draft's originals into public
