@@ -1,0 +1,89 @@
+name: Tests
+
+# Runs every TypeScript suite in the repository against the pull request, which
+# until now nothing did.
+#
+# The Worker's 400-odd tests ran in deploy-worker.yml -- on push to main, after
+# the merge, as the first step of the deploy they were meant to protect. A pull
+# request that broke them was green until it was already deploying, and the
+# only signal was a failed deploy on main. The site had no tests to run at all,
+# and neither did the profile validator.
+#
+# Deliberately credential-free, like check-config.yml, so it runs for forks and
+# cannot be the reason a contributor's pull request goes unchecked. That is why
+# the profile is a fixture rather than the real one: profile/*.json is not
+# tracked -- it is one person's name and history (spec §1) -- and fetching the
+# published one would put a live bucket in the path of every pull request, plus
+# a test that fails because someone edited their About text. The deploy
+# workflows still fetch the real profile and run the same suites against it.
+#
+# The sanitiser's Rust tests are check-media.yml's job: they need a toolchain
+# and several minutes, and gating a Worker change behind them would blunt this.
+
+on:
+  pull_request:
+    paths:
+      - "worker/**"
+      - "site/**"
+      - "scripts/**"
+      - "profile/schemas/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vitest.config.ts"
+      - ".github/workflows/tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - "site/**"
+      - "scripts/**"
+      - "profile/schemas/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vitest.config.ts"
+      - ".github/workflows/tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          # Three packages, three lockfiles, one cache key: a change to any of
+          # them should miss the cache, because any of them can change what npm
+          # installs.
+          cache-dependency-path: |
+            package-lock.json
+            worker/package-lock.json
+            site/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix worker
+          npm ci --prefix site
+
+      # The Worker imports the profile to build the author context and the site
+      # imports it to render every section, so nothing here compiles until a
+      # profile exists. `npm test` installs it too; this step is separate
+      # because the typechecks below run first and need it as much.
+      - name: Install the fixture profile
+        run: npm run profile:test-fixture
+
+      # vitest strips types rather than checking them, so a suite can pass on
+      # code that does not compile. Both checks or neither.
+      - name: Typecheck
+        run: |
+          npm run typecheck
+          npm run typecheck --prefix worker
+          npm run typecheck --prefix site
+
+      - name: Test
+        run: npm test
