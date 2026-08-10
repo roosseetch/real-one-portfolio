@@ -55,7 +55,18 @@ function section(label: string, value: string | null): string {
   return `${label}\n${value && value.trim() !== "" ? value : EMPTY}`;
 }
 
-export function formatPreview(record: DraftRecord): string {
+/**
+ * What is said when a file was attached and none of it survived intake.
+ *
+ * The refusal itself was explained in its own message; this is on the preview
+ * because the preview is what carries the Publish button, and approving one that
+ * looks exactly like a note's is how a record went live describing a video it
+ * does not contain. Publishing the words alone stays on offer — it just says so.
+ */
+const MEDIA_LOST =
+  "None. What you attached did not come through, so publishing this posts the text on its own.";
+
+export function formatPreview(record: DraftRecord, mediaDeclined = false): string {
   const body = [
     APPROVAL_QUESTION,
     "",
@@ -69,6 +80,10 @@ export function formatPreview(record: DraftRecord): string {
     "",
     section("Tags", record.tags.length > 0 ? record.tags.join(", ") : null),
   ];
+
+  if (mediaDeclined) {
+    body.push("", section("Media", MEDIA_LOST));
+  }
 
   // Media captions and alt text join here once there is media to describe.
   const text = body.join("\n");

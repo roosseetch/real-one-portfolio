@@ -52,6 +52,26 @@ describe("formatPreview", () => {
     const text = formatPreview({ ...RECORD, body: "a *bold* claim about _me_ <b>and</b> [links](x)" });
     expect(text).toContain("a *bold* claim about _me_ <b>and</b> [links](x)");
   });
+
+  it("says nothing about media for a note that never carried any", () => {
+    expect(formatPreview(RECORD)).not.toContain("Media");
+  });
+
+  it("says publishing posts the text alone when the attachment was refused", () => {
+    // Approving a preview that reads exactly like a note's is how a record went
+    // live describing a video it does not contain.
+    const text = formatPreview(RECORD, true);
+    expect(text).toContain("Media");
+    expect(text).toContain("posts the text on its own");
+  });
+
+  it("keeps the notice inside the message limit", () => {
+    // The notice is appended after the body, so it is the part a long entry
+    // would push out — and it is the part that must not be lost.
+    const text = formatPreview({ ...RECORD, body: "y".repeat(9000) }, true);
+    expect(text.length).toBeLessThanOrEqual(4096);
+    expect(text).toContain("Preview truncated");
+  });
 });
 
 describe("previewKeyboard", () => {

@@ -251,6 +251,27 @@ export async function intakeMedia(
   return { status: "started", ...started };
 }
 
+/**
+ * Marks the draft as having lost a file, and persists it.
+ *
+ * Written rather than kept in memory because an album's siblings arrive as
+ * separate updates and re-read the draft from R2: the item that was refused is
+ * not the item that previews. A failed write costs the notice on the preview,
+ * not the draft, so it is logged rather than raised.
+ */
+async function recordDecline(env: MediaIntakeEnv, draft: Draft): Promise<Draft> {
+  if (draft.mediaDeclined) return draft;
+
+  const marked: Draft = { ...draft, mediaDeclined: true, updatedAt: new Date().toISOString() };
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, marked);
+  } catch {
+    console.error("Could not record that a file was refused; the preview will not mention it");
+    return draft;
+  }
+  return marked;
+}
+
 async function appendOriginal(
   env: MediaIntakeEnv,
   draft: Draft,
@@ -264,7 +285,7 @@ async function appendOriginal(
   // contents now says so, rather than disappearing as quietly as a timeout.
   if (stored.status === "too-large") {
     return {
-      draft,
+      draft: await recordDecline(env, draft),
       declined: {
         kind: "too-large",
         mediaKind: request.type,
@@ -273,9 +294,14 @@ async function appendOriginal(
       },
     };
   }
-  if (stored.status === "unavailable") return { draft, declined: null };
+  // Reported to nobody — a timeout looks the same from here — but it is still a
+  // file the author attached and this draft does not have.
+  if (stored.status === "unavailable") return { draft: await recordDecline(env, draft), declined: null };
   if (stored.status === "wrong-format") {
-    return { draft, declined: { kind: "contents", format: stored.label, file } };
+    return {
+      draft: await recordDecline(env, draft),
+      declined: { kind: "contents", format: stored.label, file },
+    };
   }
 
   const originals: DraftOriginal[] = [...draft.originals, stored.original];

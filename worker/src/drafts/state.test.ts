@@ -23,6 +23,7 @@ function draftIn(state: DraftState): Draft {
     activityId: "act123def456ghjk",
     mediaGroupId: null,
     originals: [],
+    mediaDeclined: false,
     input: { text: "a morning run by the river" },
     record: null,
     preview: null,

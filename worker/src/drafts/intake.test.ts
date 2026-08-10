@@ -537,6 +537,27 @@ describe("a video Telegram will not hand over", () => {
     expect(sent.join(" ")).toContain("20.0 MB");
   });
 
+  it("says on the preview itself that publishing posts the text alone", async () => {
+    // The bug this exists for: the refusal arrived in its own message, the
+    // preview then looked exactly like a note's, and the record that went live
+    // described a video it does not contain.
+    await intakeUpdate(videoMessage(31_457_280, "the run itself"), SENDER, env());
+
+    const preview = sent.find((text) => text.includes("Is this the information"));
+    expect(preview).toContain("Media");
+    expect(preview).toContain("posts the text on its own");
+  });
+
+  it("records the refusal on the draft, so an edit does not lose the notice", async () => {
+    // Edit and Regenerate re-preview from the stored draft, and the words are
+    // still going out on their own however many times they are rewritten.
+    const result = await intakeUpdate(videoMessage(31_457_280, "the run itself"), SENDER, env());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    const stored = await loadDraft(storage.bucket, result.draft.draftId);
+    expect(stored?.mediaDeclined).toBe(true);
+  });
+
   it("writes nothing to the private bucket beyond the draft itself", async () => {
     await intakeUpdate(videoMessage(31_457_280, "the run itself"), SENDER, env());
 
