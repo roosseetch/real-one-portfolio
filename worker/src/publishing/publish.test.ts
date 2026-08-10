@@ -22,7 +22,16 @@ beforeEach(async () => {
 });
 
 function record(title: string): PublicRecord {
-  return { id: `id-${title}`, title, summary: null, body: null, eventDate: null, tags: [], media: [] };
+  return {
+    id: `id-${title}`,
+    title,
+    summary: null,
+    body: null,
+    eventDate: null,
+    publishedAt: "2026-08-10T09:00:00.000Z",
+    tags: [],
+    media: [],
+  };
 }
 
 const env = () => ({ CONTENT_BUCKET: content.bucket });

@@ -4,6 +4,7 @@
     "title": "First ballet class of the season",
     "summary": "Back at the barre after the summer break.",
     "eventDate": "2026-08-02",
+    "publishedAt": "2026-08-08T18:20:00.000Z",
     "tags": ["Ballet"],
     "media": []
   },
@@ -11,7 +12,8 @@
     "id": "rec-004",
     "title": "A few lengths of the pool",
     "summary": "Twenty minutes, early, before anyone else was in.",
-    "eventDate": "2026-08-04",
+    "eventDate": null,
+    "publishedAt": "2026-08-09T06:05:00.000Z",
     "tags": ["Swimming"],
     "media": [
       {
@@ -23,5 +25,14 @@
         "caption": "Quiet at that hour."
       }
     ]
+  },
+  {
+    "id": "rec-005",
+    "title": "A walk before the rain",
+    "summary": "No date in the note, published last of all.",
+    "eventDate": null,
+    "publishedAt": "2026-08-10T07:40:00.000Z",
+    "tags": ["Walking"],
+    "media": []
   }
 ]
