@@ -8,7 +8,9 @@ A reusable, fully static personal portfolio system.
 - **Media pipeline:** GitHub Actions sanitizes photos/videos (metadata scrub + configured decoy metadata) in ephemeral storage before anything becomes public. The sanitiser is a Rust binary in `sanitizer/`.
 - **Infrastructure:** reusable Terraform (bootstrap + main stacks, R2 state backend).
 
-No personal names, domains, account IDs, bucket names, or secrets appear in tracked files. All personalization comes from gitignored local files, GitHub variables/secrets, and Worker secrets. See `tasks/plan.md` for the implementation plan.
+No personal names, domains, account IDs, bucket names, or secrets appear in tracked files. All personalization comes from gitignored local files, GitHub variables/secrets, and Worker secrets.
+
+The implementation plan — phases, task breakdown, acceptance criteria, risks — is on this repository's wiki. What is left to do, and what was done and when, is on the project board: that is the single record, and the repository deliberately keeps no second copy of it to drift out of date.
 
 ## Repository layout
 
@@ -20,7 +22,6 @@ sanitizer/       Rust media sanitiser: strips originals, injects the decoy
 infrastructure/  Terraform: bootstrap/ (state bucket) and main/ (everything else)
 scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 .github/         workflows + config-inventory.json (every variable and secret they use)
-tasks/           implementation plan and task checklist
 ```
 
 ## Contents
