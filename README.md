@@ -561,6 +561,9 @@ Amplitude records `contact_page_viewed`, `contact_verification_requested` and
 one of `contact_verification_sent` / `contact_verification_skipped`, then
 `contact_form_submitted` (with the message's length, never its text), and
 finally `contact_message_queued` or `contact_form_rejected` with the reason.
+The Worker keeps its own account of the same journey, which is the one that
+survives a browser Amplitude never runs in at all — see
+[Analytics](#analytics).
 
 ### Proving the address
 
@@ -915,3 +918,49 @@ the relay one Worker invocation per interval for every ad-blocked visitor. For
 the same reason uploads are batched over ten seconds rather than the SDK's
 default one, and the final one goes out through `sendBeacon`, which is the only
 transport that survives the page being torn down.
+
+### What the Worker reports for itself
+
+The relay above carries the browser's events when Amplitude refuses its request.
+It cannot carry anything when the SDK never ran at all, and everything it does
+carry is the *page's* account of what happened. The contact funnel is worth
+knowing either way, so the Worker reports it directly
+(`worker/src/analytics/events.ts`): `contact_code_requested` on `/contact/verify`,
+and `contact_address_checked` and `contact_message_submitted` on `/contact`, each
+carrying `source: "worker"` and an `outcome`.
+
+Every branch is reported, not only the ones that worked — a code that was
+mistyped, a code that had aged out, a sender writing too often, a mail Resend
+would not take, a workflow that would not start. That is the point of having a
+second account of it: the browser reports what the visitor saw, and this reports
+what actually happened.
+
+**The challenge is the gate.** Nothing before Turnstile has passed reports
+anything: a wrong origin, an oversized body, a malformed address, a failed
+challenge. Those are what unattended traffic looks like, and a bot must not be
+able to write into the analytics project for free. It is also why field
+validation is unreported — those refusals are decided before the challenge is
+checked, and reordering that would spend a `siteverify` request on malformed
+junk. What does get through is bounded by the throttle the endpoints already
+have: one code request and one submission per network address per minute.
+
+The browser hands over its Amplitude device and session ids with each request,
+so a Worker event lands inside the visit rather than beside it. The SDK holds
+both whether or not a single upload of its has ever succeeded, which is exactly
+the case this is for. Without them the Worker mints a device of its own and
+stamps `stitched: false`, so the data says which it is rather than implying a
+device that was never there.
+
+**A proved address becomes the Amplitude user id**, on the Worker's events and,
+through `setUserId`, on the browser's for the rest of that visit and the next.
+Before this every event in the project was an anonymous device. It is the one
+thing here that hands a visitor's address to a third party, and it happens only
+once the Worker has accepted the code: an address somebody typed, or one whose
+code was refused, is a claim rather than an identity. Nothing else about the
+message goes: its length, and whether a company and a number were filled in —
+never a word of what was written, the sender's name, or their number.
+
+The upload is deferred rather than awaited, so it is not in the path of the
+answer, and its own failure is a warning rather than an error: an Amplitude
+outage must not write one durable log object per visitor
+(see [Reading Worker errors](#reading-worker-errors)).

@@ -668,3 +668,117 @@ describe("analytics", () => {
     expect(track).toHaveBeenCalledWith("contact_form_rejected", { reason: "challenge-incomplete" });
   });
 });
+
+describe("telling the Worker who is here", () => {
+  const IDENTITY = { deviceId: "0f2b1c3d-4e5f-6789-abcd-ef0123456789", sessionId: 1_754_900_000_000 };
+
+  /** The request to /contact/verify, which is a different body from the message. */
+  function verifyCall(send: ReturnType<typeof answering>): [string, RequestInit] {
+    const call = send.mock.calls.find(([url]) => isVerifyCall(url));
+    if (call === undefined) throw new Error("no code was ever asked for");
+    return call as unknown as [string, RequestInit];
+  }
+
+  it("sends the visit's ids with the message, so the Worker's events join it", async () => {
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch, identity: () => IDENTITY });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(bodyOf(messageCall(send)).analytics).toEqual(IDENTITY);
+  });
+
+  it("sends them when asking for a code too, which is the first thing it ever asks", async () => {
+    localStorage.clear();
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch, identity: () => IDENTITY });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(bodyOf(verifyCall(send)).analytics).toEqual(IDENTITY);
+  });
+
+  it("leaves the key off entirely when there is no analytics to join", async () => {
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch, identity: () => null });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(bodyOf(messageCall(send))).not.toHaveProperty("analytics");
+  });
+
+  it("sends nothing extra in a deployment that passes no identity at all", async () => {
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(bodyOf(messageCall(send))).not.toHaveProperty("analytics");
+  });
+
+  it("stops being anonymous once the Worker has accepted the address", async () => {
+    const identify = vi.fn();
+    const { section } = mount({ fetch: answering(202) as unknown as typeof fetch, identify });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(identify).toHaveBeenCalledWith("visitor@example.com");
+  });
+
+  it("names the visitor before the event that says the message went, so that one carries it", async () => {
+    const order: string[] = [];
+    const { section } = mount({
+      fetch: answering(202) as unknown as typeof fetch,
+      identify: () => order.push("identify"),
+      track: (event: string) => order.push(event),
+    });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(order.indexOf("identify")).toBeLessThan(order.indexOf("contact_message_queued"));
+  });
+
+  it("names nobody when the Worker refused the message: the address is not proved", async () => {
+    const identify = vi.fn();
+    const { section } = mount({ fetch: answering(403) as unknown as typeof fetch, identify });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(identify).not.toHaveBeenCalled();
+  });
+
+  it("names nobody when only a code has been asked for", async () => {
+    localStorage.clear();
+    const identify = vi.fn();
+    const { section } = mount({ fetch: answering(202) as unknown as typeof fetch, identify });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    // The first press ends with the code field showing; nothing has been proved.
+    await submit(form);
+
+    expect(identify).not.toHaveBeenCalled();
+  });
+});

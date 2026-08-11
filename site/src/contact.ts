@@ -1,5 +1,5 @@
 import "./styles.css";
-import { initializeAnalytics, trackEvent } from "./analytics";
+import { analyticsIdentity, identifyVisitor, initializeAnalytics, trackEvent } from "./analytics";
 import { renderContactForm } from "./contact-form";
 import { applyDesignTokens, renderFooterSection, renderNav } from "./shell";
 
@@ -44,6 +44,8 @@ function renderContactSection(): HTMLElement {
     endpoint: workerBase === null ? null : `${workerBase}/contact`,
     siteKey,
     track: trackEvent,
+    identity: analyticsIdentity,
+    identify: identifyVisitor,
     // Turnstile installs itself on window once its script has loaded, and the
     // form is rendered before that happens — so this is read at reset time
     // rather than captured now.

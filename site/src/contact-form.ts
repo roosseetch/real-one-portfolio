@@ -74,6 +74,18 @@ export interface ContactFormOptions {
   siteKey: string | null;
   /** Records an analytics event. A deployment without analytics passes a no-op. */
   track: (event: string, properties?: Record<string, unknown>) => void;
+  /**
+   * The Amplitude device and session this visit is using, sent with each request
+   * so the Worker's own events join this visitor rather than a second one. Null
+   * when there is no analytics to join, and the key is then left off the body.
+   */
+  identity?: () => { deviceId: string; sessionId: number | null } | null;
+  /**
+   * Attaches the address to this visitor, once the Worker has accepted a message
+   * and so proved it. Optional for the same reason `track` is a no-op without a
+   * key: a deployment without analytics has nobody to tell.
+   */
+  identify?: (email: string) => void;
   /** Injected so the tests can answer without a network. */
   fetch?: typeof fetch;
   /** Resets the challenge after a submission, so a second message can be sent. */
@@ -301,6 +313,19 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   }
 
   /**
+   * The ids the Worker needs to file its own events under this visit rather than
+   * under a visitor it invented.
+   *
+   * An absent key rather than a null one when there is no analytics to join, so
+   * the Worker reads "the page did not say" rather than a value that means
+   * nothing — the same rule the optional form fields follow.
+   */
+  function analyticsIds(): { analytics?: { deviceId: string; sessionId: number | null } } {
+    const identity = options.identity?.() ?? null;
+    return identity === null ? {} : { analytics: identity };
+  }
+
+  /**
    * Asks the Worker to email a code, and puts the form into the state where one
    * can be typed.
    *
@@ -318,7 +343,7 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
       response = await send(verifyEndpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.value, turnstileToken: token }),
+        body: JSON.stringify({ email: email.value, turnstileToken: token, ...analyticsIds() }),
       });
     } catch {
       say("network");
@@ -436,11 +461,12 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     // The optional fields are sent only when they were filled in, so an empty
     // one arrives as an absent key rather than as an empty string the Worker
     // would have to interpret.
-    const body: Record<string, string> = {
+    const body: Record<string, unknown> = {
       name: name.value,
       email: email.value,
       message: message.value,
       turnstileToken: token,
+      ...analyticsIds(),
     };
     if (company.value.trim() !== "") body.company = company.value;
     if (phone.value.trim() !== "") body.phone = phone.value;
@@ -471,6 +497,11 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
       if (typeof answered?.verificationToken === "string") {
         await remember(sentEmail, answered.verificationToken);
       }
+
+      // The Worker has just accepted this address as proved, which is the first
+      // moment it is worth more than the visitor's word. Before the event, so
+      // that one carries the id too, and everything the rest of the visit does.
+      options.identify?.(sentEmail);
 
       say(outcome);
       options.track("contact_message_queued");

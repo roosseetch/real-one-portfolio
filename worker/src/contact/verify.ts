@@ -12,6 +12,13 @@
  * endpoint's answer to give: a browser that has verified before holds a token
  * and never asks here at all.
  */
+import {
+  parseClientIdentity,
+  trackServerEvents,
+  type ClientIdentity,
+  type DeferContext,
+  type ServerAnalyticsEnv,
+} from "../analytics/events";
 import { CODE_TTL_MS, issueCode } from "./codes";
 import { answer, guard } from "./cors";
 import { sendVerificationCode, type ContactEmailEnv } from "./email";
@@ -24,14 +31,24 @@ const MAX_BODY_BYTES = 4 * 1024;
 /** Kept in step with the intake's own rule (worker/src/contact/intake.ts). */
 const EMAIL = { min: 7, max: 64, shape: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ } as const;
 
-export interface ContactVerifyEnv extends TurnstileEnv, ContactEmailEnv {
+export interface ContactVerifyEnv extends TurnstileEnv, ContactEmailEnv, ServerAnalyticsEnv {
   PRIVATE_BUCKET: R2Bucket;
   SITE_BASE_URL: string;
 }
 
+/**
+ * What became of a code request, once the challenge had been passed. Everything
+ * refused before that reports nothing at all: a bad origin, an oversized body, a
+ * malformed address and a failed challenge are the shapes a bot arrives in, and
+ * none of them should be able to write into the analytics project for free.
+ */
+type Outcome = "sent" | "throttled" | "too-many-codes" | "mail-failed" | "storage-failed";
+
 interface Requested {
   email: string;
   turnstileToken: string;
+  /** The page's Amplitude device and session, when it has them. Never required. */
+  identity: ClientIdentity | null;
 }
 
 function parseRequest(raw: string): Requested | null {
@@ -52,10 +69,14 @@ function parseRequest(raw: string): Requested | null {
   if (email.length < EMAIL.min || email.length > EMAIL.max || !EMAIL.shape.test(email)) return null;
   if (turnstileToken.length === 0 || turnstileToken.length > MAX_TOKEN_LENGTH) return null;
 
-  return { email, turnstileToken };
+  return { email, turnstileToken, identity: parseClientIdentity(body.analytics) };
 }
 
-export async function handleContactVerify(request: Request, env: ContactVerifyEnv): Promise<Response> {
+export async function handleContactVerify(
+  request: Request,
+  env: ContactVerifyEnv,
+  ctx: DeferContext,
+): Promise<Response> {
   const allowedOrigin = guard(request, env);
   if (allowedOrigin instanceof Response) return allowedOrigin;
 
@@ -82,6 +103,20 @@ export async function handleContactVerify(request: Request, env: ContactVerifyEn
     return answer(503, allowedOrigin, { status: "unavailable" });
   }
 
+  /**
+   * Every answer from here down, reported as it is returned.
+   *
+   * One place rather than one call beside each `return`: a branch added later
+   * has to go through this, so it cannot quietly become the one outcome nothing
+   * ever recorded.
+   */
+  const finish = (status: number, body: Record<string, string>, outcome: Outcome): Response => {
+    trackServerEvents(env, ctx, request, requested.identity, [
+      { type: "contact_code_requested", properties: { outcome } },
+    ]);
+    return answer(status, allowedOrigin, body);
+  };
+
   // Before anything is sent, and before the address is even looked up: an
   // address that is already verified still costs a read, and the point of the
   // throttle is to bound what one visitor can make this endpoint do.
@@ -90,9 +125,9 @@ export async function handleContactVerify(request: Request, env: ContactVerifyEn
     claimed = await claimVerificationSlot(env.PRIVATE_BUCKET, address);
   } catch {
     console.error("Could not claim a contact verification slot");
-    return answer(503, allowedOrigin, { status: "unavailable" });
+    return finish(503, { status: "unavailable" }, "storage-failed");
   }
-  if (!claimed) return answer(429, allowedOrigin, { status: "refused", reason: "throttled" });
+  if (!claimed) return finish(429, { status: "refused", reason: "throttled" }, "throttled");
 
   try {
     // No shortcut for an address that verified before, deliberately.
@@ -104,7 +139,7 @@ export async function handleContactVerify(request: Request, env: ContactVerifyEn
     // to /contact instead of ever reaching here.
     const issued = await issueCode(env.PRIVATE_BUCKET, requested.email);
     if (issued.status === "too-many") {
-      return answer(429, allowedOrigin, { status: "refused", reason: "too-many-codes" });
+      return finish(429, { status: "refused", reason: "too-many-codes" }, "too-many-codes");
     }
 
     const sent = await sendVerificationCode(
@@ -117,12 +152,12 @@ export async function handleContactVerify(request: Request, env: ContactVerifyEn
       // The code stays in the file. It is unreachable — nobody was told it — and
       // it ages out on its own, which is cheaper than a delete that could fail
       // in turn and leave the caller waiting.
-      return answer(503, allowedOrigin, { status: "unavailable" });
+      return finish(503, { status: "unavailable" }, "mail-failed");
     }
 
-    return answer(200, allowedOrigin, { status: "code-sent" });
+    return finish(200, { status: "code-sent" }, "sent");
   } catch {
     console.error("Could not record a contact verification code");
-    return answer(503, allowedOrigin, { status: "unavailable" });
+    return finish(503, { status: "unavailable" }, "storage-failed");
   }
 }

@@ -24,6 +24,36 @@ export function trackEvent(eventType: string, properties?: Record<string, unknow
 }
 
 /**
+ * The device and session this visit is already using, for handing to the Worker
+ * so its own events land on this visitor rather than inventing a second one.
+ *
+ * The SDK holds both whether or not a single upload of its has ever succeeded,
+ * which is the point: a browser where Amplitude is blocked outright can still
+ * say who it is, and the Worker's events are what that visit is then measured
+ * by. Null when this deployment ships without analytics.
+ */
+export function analyticsIdentity(): { deviceId: string; sessionId: number | null } | null {
+  const deviceId = instance?.getDeviceId();
+  if (deviceId === undefined) return null;
+
+  return { deviceId, sessionId: instance?.getSessionId() ?? null };
+}
+
+/**
+ * Stops this visitor being an anonymous device.
+ *
+ * Called once an address has been proved, and not before: an address somebody
+ * typed is a claim, and the Worker is what turns it into a fact. Amplitude keeps
+ * the id in its own storage, so a returning visitor on this browser is
+ * identified from their first event rather than from their next message.
+ *
+ * Lowercased to match what the Worker sends, or one person becomes two users.
+ */
+export function identifyVisitor(email: string): void {
+  instance?.setUserId(email.trim().toLowerCase());
+}
+
+/**
  * Starts Amplitude only when a project API key is supplied at build time.
  * VITE_ variables are embedded in the browser bundle, so only use Amplitude's
  * public project API key here—never a Secret Key.

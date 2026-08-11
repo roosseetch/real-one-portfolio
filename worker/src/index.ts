@@ -78,13 +78,13 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // handler, including the ones it refuses, because a browser's preflight and a
   // wrong method both need a CORS answer rather than the blanket 404 below.
   if (pathname === "/contact") {
-    return handleContactSubmission(request, env);
+    return handleContactSubmission(request, env, ctx);
   }
 
   // Every method again, and for the same reason: this one is called from the
   // page before the message is sent, to prove the address is readable.
   if (pathname === "/contact/verify") {
-    return handleContactVerify(request, env);
+    return handleContactVerify(request, env, ctx);
   }
 
   // Anything else is not part of the contract. Say nothing useful about what
