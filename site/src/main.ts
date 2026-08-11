@@ -1,8 +1,9 @@
 import "./styles.css";
 import { initializeAnalytics } from "./analytics";
-import { facts, design, portfolio } from "./profile";
+import { facts, portfolio } from "./profile";
 import { renderHero, renderAbout, renderExperience, renderHobbies, renderFooter } from "./sections";
 import { renderActivity } from "./activity";
+import { applyDesignTokens, renderNav } from "./shell";
 
 const SECTION_RENDERERS: Record<string, (section: HTMLElement) => void> = {
   hero: renderHero,
@@ -14,50 +15,8 @@ const SECTION_RENDERERS: Record<string, (section: HTMLElement) => void> = {
   footer: renderFooter
 };
 
-function applyDesignTokens() {
-  const palette = design.palette;
-  if (!palette) return;
-  const root = document.documentElement.style;
-  root.setProperty("--accent", palette.accent);
-  root.setProperty("--background", palette.background);
-  root.setProperty("--text", palette.text);
-  if (palette.surface) root.setProperty("--surface", palette.surface);
-  if (palette.muted) root.setProperty("--muted", palette.muted);
-}
-
-/** Primary navigation, built from portfolio.json. Labels come from the
-    navigation array, positionally matched to the landing page order, and fall
-    back to each section's own title so a profile without a navigation array
-    still gets a usable menu. */
-function renderNav(): HTMLElement {
-  const header = document.createElement("header");
-  header.className = "site-header";
-
-  const skip = document.createElement("a");
-  skip.className = "skip-link";
-  skip.href = "#main";
-  skip.textContent = "Skip to content";
-  header.append(skip);
-
-  const nav = document.createElement("nav");
-  nav.setAttribute("aria-label", "Primary");
-
-  const targets = portfolio.landingPageOrder.filter((id) => id !== "footer");
-  targets.forEach((id, index) => {
-    const label = portfolio.navigation[index] ?? portfolio.sections.find((s) => s.id === id)?.title ?? id;
-    const link = document.createElement("a");
-    link.className = "nav-link";
-    link.href = `#${id}`;
-    link.textContent = label;
-    nav.append(link);
-  });
-
-  header.append(nav);
-  return header;
-}
-
 function renderShell(app: HTMLElement) {
-  app.append(renderNav());
+  app.append(renderNav("home"));
   const main = document.createElement("main");
   main.id = "main";
   main.tabIndex = -1;

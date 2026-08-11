@@ -67,6 +67,19 @@ jobs:
           # Direct Amplitude ingestion remains the default. This relay is tried
           # only if the browser rejects the direct request.
           VITE_AMPLITUDE_SERVER_URL: ${{ vars.AMPLITUDE_SERVER_URL || '' }}
+          # WORKER_BASE_URL: where the contact form posts. The same origin the
+          # media pipeline calls back to, so there is one value rather than two
+          # that must agree.
+          VITE_WORKER_BASE_URL: ${{ vars.WORKER_BASE_URL }}
+          # TURNSTILE_SITE_KEY: the public half of the contact form's challenge.
+          # A variable rather than a secret for the same reason as the Amplitude
+          # key above: Vite inlines it into the bundle every visitor downloads,
+          # and calling it a secret would only disguise how public it already
+          # is. The secret half is a Worker secret and never appears here.
+          #
+          # Unset means the contact page renders a notice instead of a form,
+          # because a form with no challenge is one the Worker would refuse.
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY || '' }}
         run: npm run build
       - name: Report whether analytics shipped
         working-directory: site
@@ -75,6 +88,20 @@ jobs:
             echo "Amplitude is in the bundle; events will be sent."
           else
             echo "::warning::AMPLITUDE_API_KEY is not set, so the site ships without analytics and Amplitude will show no data."
+          fi
+      # Same reasoning as the analytics report above: a contact page that
+      # renders a notice instead of a form looks exactly like one that works
+      # until somebody tries to use it.
+      - name: Report whether the contact form shipped
+        working-directory: site
+        env:
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY || '' }}
+          WORKER_BASE_URL: ${{ vars.WORKER_BASE_URL }}
+        run: |
+          if [ -n "$TURNSTILE_SITE_KEY" ] && [ -n "$WORKER_BASE_URL" ]; then
+            echo "The contact form is configured and will accept messages."
+          else
+            echo "::warning::TURNSTILE_SITE_KEY or WORKER_BASE_URL is not set, so /contact/ renders a notice instead of a form."
           fi
       # Pages drops the custom domain on some deploys unless the artifact
       # carries a CNAME. The value comes from a repository variable so no

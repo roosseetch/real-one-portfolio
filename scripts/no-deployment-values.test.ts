@@ -31,6 +31,7 @@ const ALLOWED = new Set([
   "api.telegram.org",
   "t.me",
   "api.cloudflare.com",
+  "challenges.cloudflare.com",
   "dash.cloudflare.com",
   "developers.cloudflare.com",
   "api2.amplitude.com",

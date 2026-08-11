@@ -2,10 +2,11 @@
 
 A reusable, fully static personal portfolio system.
 
-- **Site:** static HTML/CSS/TS (Vite), deployed to GitHub Pages. Page reads never touch a Worker, database, or runtime API.
+- **Site:** static HTML/CSS/TS (Vite), deployed to GitHub Pages. Reading any page never touches a Worker, database, or runtime API. The contact page is the one place that calls out at all, and only once someone writes.
 - **Content:** immutable JSON chunks + manifest in a public Cloudflare R2 bucket; media in a separate public R2 bucket.
 - **Authoring:** Telegram bot → Cloudflare Worker → Workers AI, with preview / edit / regenerate / cancel / publish in the same channel.
 - **Media pipeline:** GitHub Actions sanitizes photos/videos (metadata scrub + configured decoy metadata) in ephemeral storage before anything becomes public. The sanitiser is a Rust binary in `sanitizer/`.
+- **Contact form:** its own static page at `/contact/`, behind a Cloudflare Turnstile challenge. A submission goes site → Worker → GitHub Actions, which screens it for spam before the Worker forwards it to the author's Telegram.
 - **Infrastructure:** reusable Terraform (bootstrap + main stacks, R2 state backend).
 
 No personal names, domains, account IDs, bucket names, or secrets appear in tracked files. All personalization comes from gitignored local files, GitHub variables/secrets, and Worker secrets.
@@ -28,6 +29,7 @@ scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 
 - [Deploying a new instance](#deploying-a-new-instance) — from an empty account to a live site
 - [Publishing: the draft lifecycle](#publishing-the-draft-lifecycle) — what happens between a Telegram message and a record
+- [The contact form](#the-contact-form) — what happens between a stranger writing and a message arriving
 - [Backups and export](#backups-and-export) — what has a second copy and what does not
 - [Tests](#tests) · [Media sanitiser](#media-sanitiser) · [Repository variables and secrets](#repository-variables-and-secrets)
 - [Security and log hygiene](#security-and-log-hygiene) · [Telegram webhook](#telegram-webhook) · [Reading Worker errors](#reading-worker-errors) · [Analytics](#analytics)
@@ -151,15 +153,17 @@ terraform -chdir=infrastructure/main apply
 ```
 
 That creates three buckets — `<slug>-private`, `<slug>-content`,
-`<slug>-media` — the lifecycle rules that expire drafts, originals and error
-logs, public custom domains for the content and media buckets, the cache rules,
-and the DNS records GitHub Pages needs.
+`<slug>-media` — the lifecycle rules that expire drafts, originals, contact
+messages and error logs, public custom domains for the content and media
+buckets, the cache rules, the DNS records GitHub Pages needs, and the Turnstile
+widget the contact form is challenged by.
 
 Read the values the next steps need back out of it:
 
 ```sh
 terraform -chdir=infrastructure/main output
-terraform -chdir=infrastructure/main output -raw worker_hostname   # marked sensitive
+terraform -chdir=infrastructure/main output -raw worker_hostname        # marked sensitive
+terraform -chdir=infrastructure/main output -raw turnstile_secret_key   # marked sensitive
 ```
 
 This first apply is the only one that has to happen locally. From here on
@@ -204,7 +208,9 @@ may reference and what each name is for. This is where the values come from.
 | `PAGES_BASE_PATH` | `/` when serving from a custom domain; unset means the `/<repo>/` project-pages subpath |
 | `PAGES_CUSTOM_DOMAIN` | the site hostname, once step 9 has configured it |
 | `AMPLITUDE_API_KEY`, `AMPLITUDE_SERVER_URL` | optional; see [Analytics](#analytics) |
+| `TURNSTILE_SITE_KEY` | main stack's `turnstile_site_key` output. Optional, but without it `/contact/` renders a notice instead of a form |
 | `MEDIA_WORKFLOW_FILE` | optional; defaults to `process-media.yml` |
+| `CONTACT_WORKFLOW_FILE` | optional; defaults to `validate-contact.yml` |
 
 **Secrets** (same page, Secrets tab):
 
@@ -217,8 +223,10 @@ may reference and what each name is for. This is where the values come from.
 | `R2_PRIVATE_RO_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | **Object Read-only** on `<slug>-private` |
 | `R2_MEDIA_RW_ACCESS_KEY_ID` / `..._SECRET_ACCESS_KEY` | **Object Read & Write** on `<slug>-media` |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_ALLOWED_USER_IDS` | step 7 |
-| `WORKER_DISPATCH_TOKEN` | a fine-grained GitHub token scoped to this repository alone, with **Actions: read and write**. It becomes the Worker's `GITHUB_DISPATCH_TOKEN` and is how a draft's media reaches the pipeline |
-| `CALLBACK_HMAC_SECRET` | `openssl rand -hex 32`. Shared with the media workflow, and the only reason the Worker believes a callback |
+| `WORKER_DISPATCH_TOKEN` | a fine-grained GitHub token scoped to this repository alone, with **Actions: read and write**. It becomes the Worker's `GITHUB_DISPATCH_TOKEN` and is how a draft's media, and a contact message, reach their pipelines |
+| `CALLBACK_HMAC_SECRET` | `openssl rand -hex 32`. Shared with the media and contact workflows, and the only reason the Worker believes a callback |
+| `TURNSTILE_SECRET_KEY` | main stack's `turnstile_secret_key` output. The Worker verifies every contact submission's token against it |
+| `WORKERS_AI_API_TOKEN` | a Cloudflare API token with **Account → Workers AI → Read** and nothing else. It runs the model that screens a contact message, and is deliberately not `CLOUDFLARE_API_TOKEN`, which can rewrite the buckets and the DNS |
 
 Each R2 API token yields an S3 pair directly: Cloudflare shows the access key id
 and the secret once, at creation. Scope each one to the buckets named above and
@@ -388,12 +396,16 @@ npm run config:check -- --live
 Then, in order of how much they prove:
 
 - the site loads on the custom domain, and its network tab shows requests to
-  Pages, `content.<domain>` and `media.<domain>` and nothing else;
+  Pages, `content.<domain>` and `media.<domain>` and nothing else — on
+  `/contact/`, add `challenges.cloudflare.com` for the Turnstile widget;
 - a message to the bot comes back as a preview within a few seconds;
 - **Publish** puts the record on the site after a reload;
 - a photo published the same way, run through `exiftool`, carries the decoy
   make, model and GPS from `config/media-decoy.json` and nothing of the
-  original.
+  original;
+- `/contact/` shows a form rather than a notice, and a message sent through it
+  arrives in Telegram a minute or two later, with a `Validate contact message`
+  run behind it.
 
 ## Publishing: the draft lifecycle
 
@@ -469,7 +481,7 @@ manifest, leaving the superseded chunk unreferenced. The manifest is written
 last: a chunk nothing points at is invisible, while a record missing from a
 chunk the manifest still points at would be a broken page.
 
-**What expires.** Drafts and originals are deleted after
+**What expires.** Drafts, originals and contact messages are deleted after
 `draft_retention_days` (7), error logs after `error_log_retention_days` (14),
 abandoned multipart uploads after a day. The content and media buckets have no
 lifecycle rule — published records and the media they reference are meant to
@@ -481,6 +493,55 @@ Changing the profile is not a publication and rebuilds nothing on its own:
 npm run profile:publish
 gh workflow run deploy-pages.yml --ref main
 ```
+
+## The contact form
+
+`/contact/` is a page in the same static build as everything else — a real
+`contact/index.html`, served by Pages with a 200 and its own title. Site
+routing is declared once in `site/src/routes.ts`, which is both the build's
+list of entry points and the browser's list of navigation links; nothing
+intercepts history and nothing falls back through `404.html`.
+
+Sending a message crosses four systems, and the split is the same one the media
+pipeline uses: the thing that screens content is not the thing that decides what
+reaches her.
+
+1. **The browser** solves a Cloudflare Turnstile challenge and posts the three
+   fields and the token to the Worker's `/contact`.
+2. **The Worker** accepts only its own site's origin, checks the field lengths,
+   allows one submission per address per minute, and asks Cloudflare to verify
+   the token. It then writes the message to `contact/<id>/submission.json` in
+   the private bucket and dispatches `validate-contact.yml`, passing a
+   submission id and a job token and nothing else — workflow inputs are visible
+   in the Actions UI. The visitor is told the message was *accepted*, which is
+   all that is true yet.
+3. **The Actions job** reads that one object with read-only credentials, asks
+   Workers AI whether the message is spam and whether it is coherent, and posts
+   the verdict back to `/callbacks/contact-checked`, signed with
+   `CALLBACK_HMAC_SECRET` exactly as the media callback is. It never prints the
+   message: not to a log, not to the run summary, and not through an API error,
+   which is scrubbed of the message text before it is shown.
+4. **The Worker** forwards the message to the first id in
+   `TELEGRAM_ALLOWED_USER_IDS` — the author, who is already identified to it —
+   or, on a `discard` verdict, sends nothing at all. The words that arrive are
+   the stored ones; a signed callback carrying different text could not put them
+   in front of her.
+
+The whole round trip is a minute or two, which is why the page never claims
+delivery. A job that fails at any stage reports `undetermined` rather than
+dying quietly, and the message is forwarded carrying a line saying it was never
+screened: a genuine message must not be lost because a model was unavailable. A
+message Telegram itself refuses stays in `checking`, so re-running the workflow
+delivers it.
+
+Three things turn it off rather than breaking it. Without `TURNSTILE_SITE_KEY`
+or `WORKER_BASE_URL` the page renders a notice instead of a form, and the Pages
+workflow warns. Without `TURNSTILE_SECRET_KEY` the Worker refuses every
+submission and says so once in its log.
+
+Amplitude records `contact_page_viewed`, `contact_form_submitted` (with the
+message's length, never its text), and then `contact_message_queued` or
+`contact_form_rejected` with the reason.
 
 ## Backups and export
 
@@ -550,7 +611,7 @@ network, no variables, no secrets.
 | Workflow | Trigger | What it runs |
 | --- | --- | --- |
 | `tests.yml` | pull request, push to main | typechecks + every vitest suite, on the fixture profile |
-| `check-config.yml` | pull request, push to main | actionlint, the config inventory, the media workflow's steps, the security rules |
+| `check-config.yml` | pull request, push to main | actionlint (which is what parses `process-media.yml` and `validate-contact.yml`, since nothing else ever does), the config inventory, the media workflow's steps, the security rules |
 | `check-media.yml` | pull request, push to main | the sanitiser's Rust tests |
 | `deploy-worker.yml` | push to main | typecheck + the Worker suite against the real profile, then deploys |
 
