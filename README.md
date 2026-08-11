@@ -83,6 +83,7 @@ in the file:
 ```
 Account | Workers R2 Storage      | Edit
 Account | Workers Scripts         | Edit
+Account | Turnstile               | Edit
 Zone    | DNS                     | Edit
 Zone    | Cache Rules             | Edit
 Zone    | Workers Routes          | Edit

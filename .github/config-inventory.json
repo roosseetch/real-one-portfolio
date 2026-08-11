@@ -118,7 +118,7 @@
     },
     "CLOUDFLARE_API_TOKEN": {
       "required": true,
-      "purpose": "Write credential for Terraform apply and for Wrangler. R2, Workers Scripts, DNS, Cache Rules, Workers Routes, Zone and SSL."
+      "purpose": "Write credential for Terraform apply and for Wrangler. R2, Workers Scripts, Turnstile, DNS, Cache Rules, Workers Routes, Zone and SSL."
     },
     "CLOUDFLARE_API_TOKEN_PLAN": {
       "required": true,
