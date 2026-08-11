@@ -23,6 +23,8 @@ let storage: FakeBucket;
 let outbound: string[];
 let challengePasses: boolean;
 let dispatchStatus: number;
+/** The token the fixture address's verification handed out. */
+let verifiedToken: string;
 
 beforeEach(async () => {
   storage = createFakeBucket();
@@ -30,11 +32,12 @@ beforeEach(async () => {
   challengePasses = true;
   dispatchStatus = 204;
 
-  // The address every fixture submission uses, already proven. Verification is
-  // a step of its own with its own suite (verify.test.ts); what these tests are
-  // about is what happens to a message once it is past that gate. The tests
-  // below that care about the gate itself set up their own state.
-  await recordVerification(storage.bucket, "visitor@example.com");
+  // The address every fixture submission uses, already proven, with the token
+  // that proof handed out. Verification is a step of its own with its own suite
+  // (verify.test.ts); what these tests are about is what happens to a message
+  // once it is past that gate. The tests below that care about the gate itself
+  // set up their own state.
+  verifiedToken = await recordVerification(storage.bucket, "visitor@example.com");
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
     const target = String(url);
@@ -61,12 +64,19 @@ const env = () => ({
   GITHUB_DISPATCH_TOKEN: "dispatch-token",
 });
 
-const VALID = {
+/**
+ * An ordinary submission from somebody who has written before: the fields, the
+ * challenge, and the token their last verification left in their browser.
+ *
+ * A getter rather than a constant because the token is minted per test.
+ */
+const valid = () => ({
   name: "A Visitor",
   email: "visitor@example.com",
   message: "Hello, I would like to talk about a project.",
   turnstileToken: "solved-token",
-};
+  verificationToken: verifiedToken,
+});
 
 function post(body: unknown, { origin = SITE, address = "203.0.113.7" } = {}): Request {
   const headers = new Headers({ "content-type": "application/json", Origin: origin });
@@ -92,7 +102,7 @@ describe("what reaches the handler at all", () => {
   });
 
   it("refuses another origin, and tells it nothing", async () => {
-    const response = await handleContactSubmission(post(VALID, { origin: "https://elsewhere.example" }), env());
+    const response = await handleContactSubmission(post(valid(), { origin: "https://elsewhere.example" }), env());
 
     expect(response.status).toBe(403);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
@@ -109,7 +119,7 @@ describe("what reaches the handler at all", () => {
     const request = new Request(`${SITE}/contact`, {
       method: "POST",
       headers: { Origin: SITE, "content-length": String(64 * 1024) },
-      body: JSON.stringify(VALID),
+      body: JSON.stringify(valid()),
     });
 
     expect((await handleContactSubmission(request, env())).status).toBe(413);
@@ -118,7 +128,7 @@ describe("what reaches the handler at all", () => {
 
   it("refuses a body that is over the ceiling despite what it declared", async () => {
     const response = await handleContactSubmission(
-      post({ ...VALID, message: "x".repeat(20 * 1024) }),
+      post({ ...valid(), message: "x".repeat(20 * 1024) }),
       env(),
     );
 
@@ -130,25 +140,25 @@ describe("the fields", () => {
   const refused: Array<[string, unknown]> = [
     ["not JSON at all", "{"],
     ["a JSON array", []],
-    ["a missing name", { ...VALID, name: undefined }],
-    ["a name of spaces", { ...VALID, name: "   " }],
-    ["an over-long name", { ...VALID, name: "n".repeat(101) }],
-    ["an address with no @", { ...VALID, email: "visitor.example.com" }],
-    ["an address with no dot in the domain", { ...VALID, email: "visitor@example" }],
-    ["a message under the minimum", { ...VALID, message: "too short" }],
-    ["a message over the maximum", { ...VALID, message: "m".repeat(301) }],
-    ["a missing token", { ...VALID, turnstileToken: "" }],
-    ["an absurd token", { ...VALID, turnstileToken: "t".repeat(4096) }],
-    ["a message that is only whitespace", { ...VALID, message: " ".repeat(50) }],
-    ["an address under the minimum", { ...VALID, email: "a@b.co" }],
-    ["an address over the maximum", { ...VALID, email: `${"v".repeat(60)}@example.com` }],
-    ["a company under the minimum", { ...VALID, company: "Ax" }],
-    ["a company over the maximum", { ...VALID, company: "c".repeat(65) }],
-    ["a company that is not a string", { ...VALID, company: 42 }],
-    ["a telephone number with too few digits", { ...VALID, phone: "12345" }],
-    ["a telephone number with letters in it", { ...VALID, phone: "call me maybe" }],
-    ["a telephone number longer than the field", { ...VALID, phone: `+${"1".repeat(30)}` }],
-    ["a telephone number that is not a string", { ...VALID, phone: ["+44 20 7946 0958"] }],
+    ["a missing name", { ...valid(), name: undefined }],
+    ["a name of spaces", { ...valid(), name: "   " }],
+    ["an over-long name", { ...valid(), name: "n".repeat(101) }],
+    ["an address with no @", { ...valid(), email: "visitor.example.com" }],
+    ["an address with no dot in the domain", { ...valid(), email: "visitor@example" }],
+    ["a message under the minimum", { ...valid(), message: "too short" }],
+    ["a message over the maximum", { ...valid(), message: "m".repeat(301) }],
+    ["a missing token", { ...valid(), turnstileToken: "" }],
+    ["an absurd token", { ...valid(), turnstileToken: "t".repeat(4096) }],
+    ["a message that is only whitespace", { ...valid(), message: " ".repeat(50) }],
+    ["an address under the minimum", { ...valid(), email: "a@b.co" }],
+    ["an address over the maximum", { ...valid(), email: `${"v".repeat(60)}@example.com` }],
+    ["a company under the minimum", { ...valid(), company: "Ax" }],
+    ["a company over the maximum", { ...valid(), company: "c".repeat(65) }],
+    ["a company that is not a string", { ...valid(), company: 42 }],
+    ["a telephone number with too few digits", { ...valid(), phone: "12345" }],
+    ["a telephone number with letters in it", { ...valid(), phone: "call me maybe" }],
+    ["a telephone number longer than the field", { ...valid(), phone: `+${"1".repeat(30)}` }],
+    ["a telephone number that is not a string", { ...valid(), phone: ["+44 20 7946 0958"] }],
   ];
 
   for (const [what, body] of refused) {
@@ -162,7 +172,7 @@ describe("the fields", () => {
   }
 
   it("stores what the visitor typed, trimmed and unmodified", async () => {
-    await handleContactSubmission(post({ ...VALID, name: "  A Visitor  " }), env());
+    await handleContactSubmission(post({ ...valid(), name: "  A Visitor  " }), env());
 
     const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
     expect(stored.message).toEqual({
@@ -175,7 +185,7 @@ describe("the fields", () => {
   });
 
   it("accepts a submission with neither optional field", async () => {
-    const response = await handleContactSubmission(post(VALID), env());
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(202);
     const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
@@ -185,7 +195,7 @@ describe("the fields", () => {
 
   it("stores the optional fields when they were given", async () => {
     await handleContactSubmission(
-      post({ ...VALID, company: "  Acme Research  ", phone: " +44 20 7946 0958 " }),
+      post({ ...valid(), company: "  Acme Research  ", phone: " +44 20 7946 0958 " }),
       env(),
     );
 
@@ -195,7 +205,7 @@ describe("the fields", () => {
   });
 
   it("treats a blank optional field as one that was left out", async () => {
-    await handleContactSubmission(post({ ...VALID, company: "   ", phone: "" }), env());
+    await handleContactSubmission(post({ ...valid(), company: "   ", phone: "" }), env());
 
     const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
     expect("company" in stored.message).toBe(false);
@@ -205,7 +215,7 @@ describe("the fields", () => {
   const shapes = ["(020) 7946 0958", "020-7946-0958", "+1 555 019 9900", "5550199"];
   for (const phone of shapes) {
     it(`accepts a telephone number written as ${phone}`, async () => {
-      const response = await handleContactSubmission(post({ ...VALID, phone }), env());
+      const response = await handleContactSubmission(post({ ...valid(), phone }), env());
 
       expect(response.status).toBe(202);
     });
@@ -216,7 +226,7 @@ describe("the challenge", () => {
   it("refuses a token Cloudflare does not recognise", async () => {
     challengePasses = false;
 
-    const response = await handleContactSubmission(post(VALID), env());
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ status: "refused", reason: "challenge" });
@@ -225,7 +235,7 @@ describe("the challenge", () => {
   });
 
   it("refuses everything, and blames nobody, when the secret is unset", async () => {
-    const response = await handleContactSubmission(post(VALID), {
+    const response = await handleContactSubmission(post(valid()), {
       ...env(),
       TURNSTILE_SECRET_KEY: undefined,
     });
@@ -237,14 +247,14 @@ describe("the challenge", () => {
   it("does not call a failed challenge a robot when Cloudflare is unreachable", async () => {
     vi.mocked(globalThis.fetch).mockRejectedValueOnce(new Error("network"));
 
-    const response = await handleContactSubmission(post(VALID), env());
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(503);
     expect(submissions()).toEqual([]);
   });
 
   it("passes the visitor's address to Turnstile", async () => {
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
 
     const [, init] = vi.mocked(globalThis.fetch).mock.calls[0];
     expect((init?.body as FormData).get("remoteip")).toBe("203.0.113.7");
@@ -253,7 +263,7 @@ describe("the challenge", () => {
 
 describe("accepting", () => {
   it("stores the submission, dispatches the check, and says only that it is queued", async () => {
-    const response = await handleContactSubmission(post(VALID), env());
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ status: "queued" });
@@ -265,7 +275,7 @@ describe("accepting", () => {
   });
 
   it("sends the job nothing but an id and a token", async () => {
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
 
     const call = vi.mocked(globalThis.fetch).mock.calls.find(([url]) => String(url).includes("/dispatches"));
     const body = JSON.parse(String(call?.[1]?.body));
@@ -275,7 +285,7 @@ describe("accepting", () => {
   });
 
   it("binds the dispatched token to the stored submission", async () => {
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
 
     const call = vi.mocked(globalThis.fetch).mock.calls.find(([url]) => String(url).includes("/dispatches"));
     const { inputs } = JSON.parse(String(call?.[1]?.body));
@@ -288,7 +298,7 @@ describe("accepting", () => {
   it("tells the visitor it failed when GitHub refuses the dispatch", async () => {
     dispatchStatus = 422;
 
-    const response = await handleContactSubmission(post(VALID), env());
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(502);
   });
@@ -296,7 +306,7 @@ describe("accepting", () => {
   it("stores nothing it cannot store", async () => {
     storage.failPutsFor((key) => key.endsWith("submission.json"));
 
-    const response = await handleContactSubmission(post(VALID), env());
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(503);
     expect(dispatched()).toEqual([]);
@@ -305,10 +315,10 @@ describe("accepting", () => {
 
 describe("proving the address", () => {
   /** A submission from an address nobody has verified. */
-  const stranger = { ...VALID, email: "stranger@example.com" };
+  const stranger = () => ({ ...valid(), email: "stranger@example.com", verificationToken: undefined });
 
   it("refuses a message from an address that has proved nothing", async () => {
-    const response = await handleContactSubmission(post(stranger), env());
+    const response = await handleContactSubmission(post(stranger()), env());
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ status: "refused", reason: "unverified" });
@@ -317,39 +327,98 @@ describe("proving the address", () => {
   });
 
   it("accepts one carrying the code that was mailed", async () => {
-    const issued = await issueCode(storage.bucket, stranger.email);
+    const issued = await issueCode(storage.bucket, "stranger@example.com");
     if (issued.status !== "issued") throw new Error("expected a code");
 
-    const response = await handleContactSubmission(post({ ...stranger, code: issued.code }), env());
+    const response = await handleContactSubmission(post({ ...stranger(), code: issued.code }), env());
 
     expect(response.status).toBe(202);
   });
 
   it("refuses one carrying a code that was never sent", async () => {
-    await issueCode(storage.bucket, stranger.email);
+    await issueCode(storage.bucket, "stranger@example.com");
 
-    const response = await handleContactSubmission(post({ ...stranger, code: "000000" }), env());
+    const response = await handleContactSubmission(post({ ...stranger(), code: "000000" }), env());
 
     expect(response.status).toBe(403);
     expect(submissions()).toEqual([]);
   });
 
   it("refuses a code of the wrong shape without reading the file", async () => {
-    const response = await handleContactSubmission(post({ ...stranger, code: "12345" }), env());
+    const response = await handleContactSubmission(post({ ...stranger(), code: "12345" }), env());
 
     expect(response.status).toBe(400);
   });
 
-  it("lets a recently verified address through with no code at all", async () => {
-    const response = await handleContactSubmission(post(VALID), env());
+  it("lets a browser holding the token through with no code at all", async () => {
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(202);
   });
 
+  it("refuses somebody who knows a verified address but holds no token", async () => {
+    // The gap this closes. The address is in verified.csv and inside its
+    // window; without the token that verification handed out, it proves that
+    // somebody once read that inbox, not that this sender can.
+    const response = await handleContactSubmission(
+      post({ ...valid(), verificationToken: undefined }),
+      env(),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ status: "refused", reason: "unverified" });
+    expect(submissions()).toEqual([]);
+  });
+
+  it("refuses a token that was never issued", async () => {
+    const response = await handleContactSubmission(
+      post({ ...valid(), verificationToken: "0123456789abcdefghjkmnpqrstvwxyz" }),
+      env(),
+    );
+
+    expect(response.status).toBe(403);
+  });
+
+  it("refuses a token of a shape it never mints, without reading the file", async () => {
+    const response = await handleContactSubmission(
+      post({ ...valid(), verificationToken: "../../etc/passwd" }),
+      env(),
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("hands back a token when a code is redeemed, so the browser can keep it", async () => {
+    const issued = await issueCode(storage.bucket, "stranger@example.com");
+    if (issued.status !== "issued") throw new Error("expected a code");
+
+    const response = await handleContactSubmission(post({ ...stranger(), code: issued.code }), env());
+    const answered = (await response.json()) as { status: string; verificationToken?: string };
+
+    expect(answered.status).toBe("queued");
+    expect(answered.verificationToken).toMatch(/^[0-9a-z]{32}$/);
+
+    // And it is the one that now works for that address.
+    const next = await handleContactSubmission(
+      post(
+        { ...stranger(), verificationToken: answered.verificationToken },
+        { address: "198.51.100.22" },
+      ),
+      env(),
+    );
+    expect(next.status).toBe(202);
+  });
+
+  it("does not repeat the token to a browser that already had it", async () => {
+    const response = await handleContactSubmission(post(valid()), env());
+
+    expect(await response.json()).toEqual({ status: "queued" });
+  });
+
   it("says nothing about which of the three ways it was wrong", async () => {
-    const never = await handleContactSubmission(post(stranger), env());
+    const never = await handleContactSubmission(post(stranger()), env());
     const wrong = await handleContactSubmission(
-      post({ ...stranger, code: "000000" }, { address: "198.51.100.9" }),
+      post({ ...stranger(), code: "000000" }, { address: "198.51.100.9" }),
       env(),
     );
 
@@ -360,7 +429,7 @@ describe("proving the address", () => {
 describe("the message record", () => {
   it("appends every field of the form, and when it was sent", async () => {
     await handleContactSubmission(
-      post({ ...VALID, company: "Acme Research", phone: "+44 20 7946 0958" }),
+      post({ ...valid(), company: "Acme Research", phone: "+44 20 7946 0958" }),
       env(),
     );
 
@@ -378,7 +447,7 @@ describe("the message record", () => {
   it("records nothing for a message it refused", async () => {
     challengePasses = false;
 
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
 
     expect(storage.objects.get(MESSAGES_KEY)).toBeUndefined();
   });
@@ -388,7 +457,7 @@ describe("the message record", () => {
     // them it failed would only have them send it again.
     storage.failPutsFor((key) => key === MESSAGES_KEY);
 
-    const response = await handleContactSubmission(post(VALID), env());
+    const response = await handleContactSubmission(post(valid()), env());
 
     expect(response.status).toBe(202);
   });
@@ -396,9 +465,9 @@ describe("the message record", () => {
 
 describe("throttling", () => {
   it("accepts one submission per address per minute", async () => {
-    expect((await handleContactSubmission(post(VALID), env())).status).toBe(202);
+    expect((await handleContactSubmission(post(valid()), env())).status).toBe(202);
 
-    const second = await handleContactSubmission(post(VALID), env());
+    const second = await handleContactSubmission(post(valid()), env());
 
     expect(second.status).toBe(429);
     expect(await second.json()).toEqual({ status: "refused", reason: "throttled" });
@@ -406,28 +475,28 @@ describe("throttling", () => {
   });
 
   it("refuses before spending an Actions run, which is what it is there to bound", async () => {
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
     outbound = [];
 
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
 
     expect(dispatched()).toEqual([]);
   });
 
   it("never charges a slot to a challenge that failed, so a retry is not refused", async () => {
     challengePasses = false;
-    expect((await handleContactSubmission(post(VALID), env())).status).toBe(403);
+    expect((await handleContactSubmission(post(valid()), env())).status).toBe(403);
 
     challengePasses = true;
-    const retry = await handleContactSubmission(post(VALID), env());
+    const retry = await handleContactSubmission(post(valid()), env());
 
     expect(retry.status).toBe(202);
   });
 
   it("counts addresses separately", async () => {
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
 
-    const other = await handleContactSubmission(post(VALID, { address: "198.51.100.4" }), env());
+    const other = await handleContactSubmission(post(valid(), { address: "198.51.100.4" }), env());
 
     expect(other.status).toBe(202);
   });
@@ -436,14 +505,14 @@ describe("throttling", () => {
     const request = new Request(`${SITE}/contact`, {
       method: "POST",
       headers: { Origin: SITE, "content-type": "application/json" },
-      body: JSON.stringify(VALID),
+      body: JSON.stringify(valid()),
     });
 
     expect((await handleContactSubmission(request, env())).status).toBe(202);
   });
 
   it("never stores the address it throttled on", async () => {
-    await handleContactSubmission(post(VALID), env());
+    await handleContactSubmission(post(valid()), env());
 
     const everything = [...storage.objects.keys()].join(" ") + [...storage.objects.keys()].map((key) => storage.objects.get(key)).join(" ");
     expect(everything).not.toContain("203.0.113.7");

@@ -13,6 +13,7 @@
  * type it, and refusing that would be punishing them for our latency.
  */
 import { timingSafeEqual } from "../crypto";
+import { randomId } from "../ids";
 import { appendRow, CODES_KEY, MESSAGES_KEY, readCsv, updateCsv, VERIFIED_KEY } from "./records";
 
 /** How long a code is worth typing. The issue's thirty minutes. */
@@ -40,11 +41,29 @@ export const MAX_LIVE_CODES = 5;
 
 /** codes.csv: address, code, issued at, wrong guesses so far. */
 const CODE_COLUMNS = 4;
-/** verified.csv: address, verified at. */
-const VERIFIED_COLUMNS = 2;
+/** verified.csv: address, verified at, the token that proves it. */
+const VERIFIED_COLUMNS = 3;
+
+/**
+ * 32 characters of a 32-character alphabet: 160 bits.
+ *
+ * This is a bearer token — whoever holds it may send as that address until it
+ * expires — so it is drawn the same way an unguessable object key is, and long
+ * enough that guessing is not a strategy.
+ */
+const TOKEN_LENGTH = 32;
 
 export type IssueOutcome = { status: "issued"; code: string } | { status: "too-many" };
 export type RedeemOutcome = "accepted" | "rejected" | "none";
+
+/**
+ * What redeeming a code produced: the outcome, and — only when it was accepted —
+ * the token the browser should keep so it is not asked again.
+ */
+export interface Redeemed {
+  outcome: RedeemOutcome;
+  token: string | null;
+}
 
 /**
  * Addresses are matched case-insensitively, because `A@Example.com` and
@@ -143,7 +162,7 @@ export async function redeemCode(
   email: string,
   code: string,
   now: Date = new Date(),
-): Promise<RedeemOutcome> {
+): Promise<Redeemed> {
   const address = normalizeEmail(email);
   const at = now.getTime();
   const offered = code.trim();
@@ -176,21 +195,37 @@ export async function redeemCode(
     );
   });
 
-  if (result.outcome === "accepted") await recordVerification(bucket, address, now);
-  return result.outcome;
+  if (result.outcome !== "accepted") return { outcome: result.outcome, token: null };
+
+  return { outcome: "accepted", token: await recordVerification(bucket, address, now) };
 }
 
-/** True when this address proved itself inside the window and need not do it again. */
+/**
+ * True when this address proved itself inside the window *and* the caller holds
+ * the token it was given for doing so.
+ *
+ * The token is the point. Without it, "this address verified itself three weeks
+ * ago" would let anybody who knows the address send as it — the record says the
+ * address was proven once, not that whoever is asking now is the one who proved
+ * it. The token is handed out exactly once, to the browser that redeemed the
+ * code, and is what turns a fact about the past into a claim about the present.
+ */
 export async function isVerified(
   bucket: R2Bucket,
   email: string,
+  token: string,
   now: Date = new Date(),
 ): Promise<boolean> {
+  if (token === "") return false;
+
   const address = normalizeEmail(email);
   const rows = await readCsv(bucket, VERIFIED_KEY);
 
   return rows.some((row) => {
+    // A row written before tokens existed has two columns and can prove
+    // nothing. Its address verifies again, once.
     if (row.length < VERIFIED_COLUMNS || row[0] !== address) return false;
+    if (!timingSafeEqual(row[2], token)) return false;
 
     const verified = Date.parse(row[1]);
     return !Number.isNaN(verified) && now.getTime() - verified < VERIFIED_TTL_MS;
@@ -198,23 +233,29 @@ export async function isVerified(
 }
 
 /**
- * Writes the address into verified.csv, replacing any earlier line for it.
+ * Writes the address into verified.csv with a fresh token, replacing any
+ * earlier line for it, and returns the token.
  *
  * Replaced rather than appended: this file answers one question — when did this
  * address last prove itself — and a row per verification would turn it into a
- * log of how often somebody writes to her.
+ * log of how often somebody writes to her. Replacing also retires the previous
+ * token, so verifying again on a second machine quietly signs the first one out
+ * rather than leaving two live claims on the same address.
  */
 export async function recordVerification(
   bucket: R2Bucket,
   email: string,
   now: Date = new Date(),
-): Promise<void> {
+): Promise<string> {
   const address = normalizeEmail(email);
+  const token = randomId(TOKEN_LENGTH);
 
   await updateCsv(bucket, VERIFIED_KEY, (rows) => [
     ...rows.filter((row) => row[0] !== address),
-    [address, now.toISOString()],
+    [address, now.toISOString(), token],
   ]);
+
+  return token;
 }
 
 /**

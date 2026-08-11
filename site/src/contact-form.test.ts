@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { isValidPhone, renderContactForm, type ContactFormOptions } from "./contact-form";
+import { recall, remember } from "./verified-store";
 
 const ENDPOINT = "https://worker.test/contact";
 const VERIFY = `${ENDPOINT}/verify`;
@@ -28,11 +29,11 @@ const isVerifyCall = (url: unknown) => String(url) === VERIFY;
  * and a test about what the Worker says to a *message* does not have to set up
  * a code first.
  */
-const answering = (status: number, verify = '{"status":"verified"}') =>
+const answering = (status: number, queued = '{"status":"queued"}') =>
   vi.fn(async (url: unknown, _init?: RequestInit) =>
     isVerifyCall(url)
-      ? new Response(verify, { status: 200 })
-      : new Response(status === 202 ? '{"status":"queued"}' : "", { status }),
+      ? new Response('{"status":"code-sent"}', { status: 200 })
+      : new Response(status === 202 ? queued : "", { status }),
   );
 
 /** The message POST, whichever call it turned out to be. */
@@ -121,11 +122,23 @@ async function submit(form: HTMLFormElement) {
   });
 }
 
-beforeEach(() => {
+/** The token a previous verification would have left in this browser. */
+const KEPT_TOKEN = "0123456789abcdefghjkmnpqrstvwxyz";
+
+/** Puts the browser in the state of somebody who has written before. */
+const hasVerifiedBefore = (email = "visitor@example.com") => remember(email, KEPT_TOKEN);
+
+beforeEach(async () => {
   // happy-dom has no layout, so reportValidity would be the only thing standing
   // between a filled-in form and the assertions. The fields are checked by the
   // Worker regardless, and one test below covers the browser's own refusal.
   HTMLFormElement.prototype.reportValidity = () => true;
+
+  // The default is a returning visitor, because most of what is worth testing
+  // here is what happens to a *message*. The suite that covers proving an
+  // address clears this and starts from nothing.
+  localStorage.clear();
+  await hasVerifiedBefore();
 });
 
 describe("configuration", () => {
@@ -165,28 +178,12 @@ describe("submitting", () => {
       name: "A Visitor",
       email: "visitor@example.com",
       message: "Hello, I would like to get in touch about a project.",
-      // The second token: the first was spent proving the address.
-      turnstileToken: "solved-token-1",
-    });
-  });
-
-  it("proves the address before it posts the message, and not the other way round", async () => {
-    const send = answering(202);
-    const { section } = mount({ fetch: send as unknown as typeof fetch });
-    const form = formOf(section);
-    fill(form);
-    solveChallenge(form);
-
-    await submit(form);
-
-    expect(send.mock.calls.map(([url]) => String(url))).toEqual([VERIFY, ENDPOINT]);
-    expect(bodyOf(send.mock.calls[0] as unknown as [string, RequestInit])).toEqual({
-      email: "visitor@example.com",
       turnstileToken: "solved-token",
+      verificationToken: KEPT_TOKEN,
     });
   });
 
-  it("never sends the same challenge token twice", async () => {
+  it("asks the verify endpoint nothing when this browser already holds a token", async () => {
     const send = answering(202);
     const { section } = mount({ fetch: send as unknown as typeof fetch });
     const form = formOf(section);
@@ -195,10 +192,9 @@ describe("submitting", () => {
 
     await submit(form);
 
-    const tokens = send.mock.calls.map(
-      ([, init]) => JSON.parse(String((init as RequestInit).body)).turnstileToken,
-    );
-    expect(new Set(tokens).size).toBe(tokens.length);
+    expect(send.mock.calls.map(([url]) => String(url))).toEqual([ENDPOINT]);
+    expect(bodyOf(messageCall(send)).verificationToken).toBe(KEPT_TOKEN);
+    expect(bodyOf(messageCall(send)).code).toBeUndefined();
   });
 
   it("sends the optional fields when they were filled in", async () => {
@@ -234,6 +230,7 @@ describe("submitting", () => {
       "message",
       "name",
       "turnstileToken",
+      "verificationToken",
     ]);
   });
 
@@ -276,16 +273,16 @@ describe("submitting", () => {
 
   it("resets the challenge whatever the outcome, so a second message can be sent", async () => {
     const resetChallenge = vi.fn();
-    const { section } = mount({ fetch: answering(403) as unknown as typeof fetch, resetChallenge });
+    const { section } = mount({ fetch: answering(400) as unknown as typeof fetch, resetChallenge });
     const form = formOf(section);
     fill(form);
     solveChallenge(form);
 
     await submit(form);
 
-    // Twice, not once: every call spends a token, so the address check resets
-    // the widget on its way out and the message does the same after it.
-    expect(resetChallenge).toHaveBeenCalledTimes(2);
+    // The message spent a token, so the widget is reset on the way out — a
+    // visitor correcting a rejected message must not be refused for a stale one.
+    expect(resetChallenge).toHaveBeenCalledTimes(1);
   });
 
   it("re-enables the button after a refusal", async () => {
@@ -303,7 +300,6 @@ describe("submitting", () => {
 describe("what the visitor is told", () => {
   const cases: Array<[number, string]> = [
     [400, "could not be accepted"],
-    [403, "anti-spam check"],
     [429, "try again in a minute"],
     [503, "cannot be accepted right now"],
   ];
@@ -382,8 +378,11 @@ describe("the fields", () => {
 });
 
 describe("proving the address", () => {
+  // A browser that has never done this before.
+  beforeEach(() => localStorage.clear());
+
   /** The Worker's answer when it has just emailed a code. */
-  const codeSent = () => answering(202, '{"status":"code-sent"}');
+  const codeSent = () => answering(202);
 
   const codeInput = (section: HTMLElement) => control(formOf(section), "code") as HTMLInputElement;
   const codeFieldOf = (section: HTMLElement) =>
@@ -560,6 +559,7 @@ describe("proving the address", () => {
   });
 
   it("records that an address needed no code at all", async () => {
+    await hasVerifiedBefore();
     const { section, track } = mount();
     const form = formOf(section);
     fill(form);
@@ -568,6 +568,42 @@ describe("proving the address", () => {
     await submit(form);
 
     expect(track).toHaveBeenCalledWith("contact_verification_skipped");
+  });
+
+  it("keeps the token the Worker hands back, so the next message needs no code", async () => {
+    const send = answering(202, '{"status":"queued","verificationToken":"aaaa456789abcdefghjkmnpqrstvwxyz"}');
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+    codeInput(section).value = "123456";
+
+    await submit(form);
+
+    expect(await recall("visitor@example.com")).toBe("aaaa456789abcdefghjkmnpqrstvwxyz");
+  });
+
+  it("forgets a token the Worker refuses, and asks for a code instead of leaving the visitor stuck", async () => {
+    await hasVerifiedBefore();
+    // A token retired by a verification somewhere else, or simply aged out.
+    const send = vi.fn(async (url: unknown) =>
+      isVerifyCall(url)
+        ? new Response('{"status":"code-sent"}', { status: 200 })
+        : new Response('{"status":"refused","reason":"unverified"}', { status: 403 }),
+    );
+    const { section, track } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(await recall("visitor@example.com")).toBeNull();
+    expect(track).toHaveBeenCalledWith("contact_form_rejected", { reason: "stale-verification" });
+    // And a code is already on its way, rather than a dead end.
+    expect(send.mock.calls.filter(([url]) => isVerifyCall(url))).toHaveLength(1);
+    expect(statusOf(section).textContent).toContain("six-digit code");
   });
 });
 

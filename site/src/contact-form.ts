@@ -12,6 +12,8 @@
  * tests drive a real form through every outcome without a network.
  */
 
+import { forget, recall, remember } from "./verified-store";
+
 /** Mirrors the Worker's own limits (worker/src/contact/intake.ts). Both sides check. */
 export const LIMITS = {
   name: { min: 1, max: 100 },
@@ -247,8 +249,6 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
 
   /** The address a code was last sent to, so changing it starts again. */
   let awaitingCodeFor: string | null = null;
-  /** An address already proven in this visit: pressing Send twice must not re-verify. */
-  let provenAddress: string | null = null;
   /** The last token handed to the Worker. A token is single-use, so this one is finished. */
   let spentToken: string | null = null;
 
@@ -301,13 +301,13 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   }
 
   /**
-   * Step one: ask the Worker to prove the address, and find out whether it even
-   * needs proving.
+   * Asks the Worker to email a code, and puts the form into the state where one
+   * can be typed.
    *
    * Spends the token it is given, whatever the answer, and says so — a token is
    * single-use and the Worker has now seen this one.
    */
-  async function proveAddress(token: string): Promise<"proven" | "code-sent" | "failed"> {
+  async function requestCode(token: string): Promise<"code-sent" | "failed"> {
     status.textContent = "Checking your email address…";
     status.classList.remove("is-error");
     options.track("contact_verification_requested");
@@ -336,16 +336,6 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
       return "failed";
     }
 
-    const answered = (await response.json().catch(() => null)) as { status?: string } | null;
-
-    if (answered?.status === "verified") {
-      // Nothing was emailed: this address proved itself recently enough.
-      provenAddress = email.value;
-      showCodeField(false);
-      options.track("contact_verification_skipped");
-      return "proven";
-    }
-
     awaitingCodeFor = email.value;
     showCodeField(true);
     code.focus();
@@ -372,7 +362,7 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
       // Deliberately the same path as the first request. A resend is not a
       // special case to the Worker: both codes stay valid, which is what
       // somebody who asked twice and then found the first mail actually needs.
-      await proveAddress(token);
+      await requestCode(token);
     }
 
     resend.disabled = false;
@@ -399,11 +389,10 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
       awaitingCodeFor = null;
       showCodeField(false);
     }
-    if (provenAddress !== null && provenAddress !== email.value) provenAddress = null;
 
     submit.disabled = true;
 
-    let token = await unspentToken();
+    const token = await unspentToken();
     if (token === null) {
       say("challenge");
       options.track("contact_form_rejected", { reason: "challenge-incomplete" });
@@ -411,32 +400,30 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
       return;
     }
 
-    if (provenAddress === null && awaitingCodeFor === null) {
-      const proof = await proveAddress(token);
-      // A code is now on its way and the visitor has something to type, or the
-      // attempt failed and they have been told. Both end this press.
-      if (proof !== "proven") {
+    // What this press offers as proof that the address is readable: the code
+    // just typed, or the token an earlier verification left in this browser.
+    let proof: { code: string } | { verificationToken: string };
+
+    if (awaitingCodeFor !== null) {
+      // Belt and braces: the code field is only required once it is visible, and
+      // reportValidity ran before it was.
+      if (!/^\d{6}$/.test(code.value.trim())) {
+        say("invalid", "Enter the six-digit code from your email.");
         submit.disabled = false;
         return;
       }
-
-      // Verified already, so the message goes now — with a token the Worker has
-      // not seen, because the one above is spent.
-      const next = await unspentToken();
-      if (next === null) {
-        say("challenge");
+      proof = { code: code.value.trim() };
+    } else {
+      const remembered = await recall(email.value);
+      if (remembered === null) {
+        // Never proved here, or the month has run out. Either way it starts with
+        // a code, and this press ends by asking for one.
+        await requestCode(token);
         submit.disabled = false;
         return;
       }
-      token = next;
-    }
-
-    // Belt and braces: the code field is only required once it is visible, and
-    // reportValidity ran before it was.
-    if (awaitingCodeFor !== null && !/^\d{6}$/.test(code.value.trim())) {
-      say("invalid", "Enter the six-digit code from your email.");
-      submit.disabled = false;
-      return;
+      options.track("contact_verification_skipped");
+      proof = { verificationToken: remembered };
     }
 
     status.textContent = "Sending…";
@@ -457,7 +444,7 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     };
     if (company.value.trim() !== "") body.company = company.value;
     if (phone.value.trim() !== "") body.phone = phone.value;
-    if (awaitingCodeFor !== null) body.code = code.value.trim();
+    Object.assign(body, proof);
 
     let response: Response;
     try {
@@ -475,14 +462,32 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     }
 
     const outcome = outcomeOf(response.status);
+    const sentEmail = email.value;
 
     if (outcome === "queued") {
+      // The Worker returns a token only when a code was just redeemed. Keeping
+      // it is what spares this visitor the inbox next time.
+      const answered = (await response.json().catch(() => null)) as { verificationToken?: unknown } | null;
+      if (typeof answered?.verificationToken === "string") {
+        await remember(sentEmail, answered.verificationToken);
+      }
+
       say(outcome);
       options.track("contact_message_queued");
       form.reset();
       showCodeField(false);
       awaitingCodeFor = null;
-      provenAddress = null;
+    } else if (outcome === "challenge" && "verificationToken" in proof) {
+      // The proof this browser was holding is no longer good: retired by a
+      // verification somewhere else, or simply aged out. It is worth nothing
+      // now, so it goes — and rather than leave the visitor to press Send again
+      // and wonder, a code is asked for immediately.
+      await forget(sentEmail);
+      options.track("contact_form_rejected", { reason: "stale-verification" });
+
+      const next = await unspentToken();
+      if (next === null) say("challenge");
+      else await requestCode(next);
     } else if (outcome === "challenge" && awaitingCodeFor !== null) {
       // The Worker answers 403 both for a challenge it did not believe and for a
       // code it did not accept. With a code in the request, the code is what it

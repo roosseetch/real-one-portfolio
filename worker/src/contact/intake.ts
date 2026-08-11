@@ -13,6 +13,7 @@
  * callbacks/contact-checked.ts, which is what actually reaches Telegram.
  */
 import { dispatchContactCheck, newJobToken, type ContactDispatchEnv } from "../publishing/dispatch";
+import { isValidId } from "../ids";
 import { isVerified, recordMessage, redeemCode } from "./codes";
 import { answer, guard } from "./cors";
 import { newSubmission, saveSubmission } from "./store";
@@ -71,8 +72,10 @@ interface Submitted {
   phone: string | null;
   message: string;
   turnstileToken: string;
-  /** The six digits from the mail. Null when the address is verified already and none was sent. */
+  /** The six digits from the mail. Null when the browser is presenting a token instead. */
   code: string | null;
+  /** The token a previous verification handed this browser, kept for thirty days. */
+  verificationToken: string | null;
 }
 
 /**
@@ -135,7 +138,13 @@ function parseSubmitted(raw: string): Submitted | null {
   // spending a read on the file to discover it cannot possibly match.
   if (code !== null && !/^\d{6}$/.test(code)) return null;
 
-  return { name, email, company, phone, message, turnstileToken, code };
+  const verificationToken = optionalText(body.verificationToken);
+  if (verificationToken === false) return null;
+  // The shape this Worker mints, and nothing else. A value of any other shape
+  // could not match a stored token, so it is refused before a file is read.
+  if (verificationToken !== null && !isValidId(verificationToken)) return null;
+
+  return { name, email, company, phone, message, turnstileToken, code, verificationToken };
 }
 
 export async function handleContactSubmission(request: Request, env: ContactIntakeEnv): Promise<Response> {
@@ -193,12 +202,24 @@ export async function handleContactSubmission(request: Request, env: ContactInta
   // After the throttle, because redeeming a code writes to the codes file and a
   // wrong guess is a write too — the cheap refusals have to come first, or
   // guessing would be free.
+  // Two ways to prove the address, and the answer to both is the same word.
+  //
+  // A code, which is what somebody typing for the first time has, and which
+  // mints a token on the way past; or that token, which is what a browser that
+  // has done this before within the month presents instead. `issuedToken` is
+  // non-null only in the first case, and is the one thing this endpoint tells
+  // the browser that it did not already know.
   let proven: boolean;
+  let issuedToken: string | null = null;
   try {
-    if (submitted.code === null) {
-      proven = await isVerified(env.PRIVATE_BUCKET, submitted.email);
+    if (submitted.code !== null) {
+      const redeemed = await redeemCode(env.PRIVATE_BUCKET, submitted.email, submitted.code);
+      proven = redeemed.outcome === "accepted";
+      issuedToken = redeemed.token;
+    } else if (submitted.verificationToken !== null) {
+      proven = await isVerified(env.PRIVATE_BUCKET, submitted.email, submitted.verificationToken);
     } else {
-      proven = (await redeemCode(env.PRIVATE_BUCKET, submitted.email, submitted.code)) === "accepted";
+      proven = false;
     }
   } catch {
     console.error("Could not check a contact verification code");
@@ -206,9 +227,10 @@ export async function handleContactSubmission(request: Request, env: ContactInta
   }
 
   if (!proven) {
-    // One answer for a wrong code, an expired one, and an address that never
-    // asked for one. Which of the three it was tells a guesser how close they
-    // are, and the form has nothing different to say about them anyway.
+    // One answer for a wrong code, an expired one, a token that has been
+    // retired, and an address that never asked for anything. Which of them it
+    // was tells a guesser how close they are, and the form does the same thing
+    // in every case: forget what it was holding and ask for a code.
     return answer(403, allowedOrigin, { status: "refused", reason: "unverified" });
   }
 
@@ -252,5 +274,14 @@ export async function handleContactSubmission(request: Request, env: ContactInta
 
   // Accepted, not delivered. The check runs for a minute or two after this
   // answer, and nothing here knows how it ends.
-  return answer(202, allowedOrigin, { status: "queued" });
+  //
+  // The token rides back only when a code was just redeemed. A browser that
+  // already had one does not need it repeated, and an answer that always
+  // carried it would hand a copy to anything that could make one accepted
+  // request.
+  return answer(
+    202,
+    allowedOrigin,
+    issuedToken === null ? { status: "queued" } : { status: "queued", verificationToken: issuedToken },
+  );
 }
