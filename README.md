@@ -211,6 +211,8 @@ may reference and what each name is for. This is where the values come from.
 | `AMPLITUDE_API_KEY`, `AMPLITUDE_SERVER_URL` | optional; see [Analytics](#analytics) |
 | `TURNSTILE_SITE_KEY` | main stack's `turnstile_site_key` output. Optional, but without it `/contact/` renders a notice instead of a form |
 | `CONTACT_EMAIL_FROM` | the `From:` on the contact form's verification mail, at a domain the email provider has verified — `Contact <no-reply@example.com>`. Optional, but without it no code can be sent and no message gets through |
+| `EMAIL_DKIM_PUBLIC_KEY` | the whole `p=…` string the email provider issues when the domain is onboarded. Terraform writes it to `resend._domainkey.<domain>` |
+| `EMAIL_BOUNCE_HOST` | where the provider collects bounces, `feedback-smtp.<region>.amazonses.com`. Region-specific, so read it off the provider's setup page. With either of these unset, Terraform writes **none** of the sending records — a domain claiming a provider it has no key for is worse than one claiming nothing |
 | `MEDIA_WORKFLOW_FILE` | optional; defaults to `process-media.yml` |
 | `CONTACT_WORKFLOW_FILE` | optional; defaults to `validate-contact.yml` |
 

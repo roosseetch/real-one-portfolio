@@ -103,3 +103,41 @@ variable "r2_location_hint" {
   type        = string
   default     = null
 }
+
+# Records the transactional email provider asks for, so the domain may send.
+#
+# Variables rather than literals because both belong to one deployment: the DKIM
+# key is minted per domain when it is onboarded, and the bounce host names the
+# region that was chosen. Neither is secret — every DKIM public key is readable
+# by anyone who can run dig — but a value that is true only of the first person
+# to deploy this has no business in a tracked file.
+
+variable "email_dkim_public_key" {
+  description = "DKIM public key the email provider issued for this domain, the whole p=... string. Empty leaves the sending records out entirely."
+  type        = string
+  default     = ""
+}
+
+variable "email_bounce_host" {
+  description = "Host that receives bounce reports, for example feedback-smtp.<region>.amazonses.com. Region-specific, so it comes from the provider rather than a default."
+  type        = string
+  default     = ""
+}
+
+variable "email_spf_include" {
+  description = "The include: mechanism the provider's SPF record needs."
+  type        = string
+  default     = "amazonses.com"
+}
+
+variable "email_dkim_selector" {
+  description = "Left-hand label of the DKIM record: <selector>._domainkey.<domain>."
+  type        = string
+  default     = "resend"
+}
+
+variable "email_sending_subdomain" {
+  description = "Subdomain the provider sends and receives bounces on."
+  type        = string
+  default     = "send"
+}

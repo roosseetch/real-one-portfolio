@@ -112,6 +112,16 @@
       "required": false,
       "purpose": "From: address on the contact form's verification mail. Must be at a domain the email provider has verified, or nothing sends. A variable rather than a secret because it is printed on every message that goes out.",
       "whenUnset": "The Worker cannot send a verification code, so /contact/verify answers 503 and the form tells the visitor to try later. It says so once in the Worker's log."
+    },
+    "EMAIL_DKIM_PUBLIC_KEY": {
+      "required": false,
+      "purpose": "DKIM public key the email provider issued for this domain, the whole p=... string. Terraform writes it to <selector>._domainkey.<domain> so a receiving server can check the signature on a verification code. Public by construction — anyone can dig it — but specific to one deployment, which is why it is a variable rather than a literal in dns.",
+      "whenUnset": "Terraform writes none of the sending records. Codes may still send, and will be treated as unauthenticated mail by the receiving server, which usually means the spam folder."
+    },
+    "EMAIL_BOUNCE_HOST": {
+      "required": false,
+      "purpose": "Host the email provider collects bounce reports on, for example feedback-smtp.<region>.amazonses.com. Region-specific, so it is read off the provider's own setup page rather than defaulted.",
+      "whenUnset": "As above: with either half missing, Terraform writes no sending records at all rather than half of them."
     }
   },
   "secrets": {
