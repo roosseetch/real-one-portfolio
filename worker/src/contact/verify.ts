@@ -7,11 +7,12 @@
  * challenge, and a per-address throttle. Without them it would be a service for
  * delivering unwanted mail to anybody, signed by this domain.
  *
- * It answers the same way whether or not the address needed a code, beyond the
- * one bit the form has to know to draw itself. Whether a given address has
- * written to her before is not a stranger's business.
+ * It answers the same way for every address it accepts. Whether a given address
+ * has written to her before is not a stranger's business, and it is not this
+ * endpoint's answer to give: a browser that has verified before holds a token
+ * and never asks here at all.
  */
-import { CODE_TTL_MS, isVerified, issueCode } from "./codes";
+import { CODE_TTL_MS, issueCode } from "./codes";
 import { answer, guard } from "./cors";
 import { sendVerificationCode, type ContactEmailEnv } from "./email";
 import { claimVerificationSlot } from "./throttle";
@@ -94,11 +95,13 @@ export async function handleContactVerify(request: Request, env: ContactVerifyEn
   if (!claimed) return answer(429, allowedOrigin, { status: "refused", reason: "throttled" });
 
   try {
-    if (await isVerified(env.PRIVATE_BUCKET, requested.email)) {
-      // Nothing sent, nothing spent. The form goes straight to its message.
-      return answer(200, allowedOrigin, { status: "verified" });
-    }
-
+    // No shortcut for an address that verified before, deliberately.
+    //
+    // This endpoint used to answer "already verified" by looking the address up,
+    // which meant anybody who knew an address somebody else had verified could
+    // send as them for a month. Whether an address has written before is now the
+    // browser's own business: it holds the token it was given, and presents that
+    // to /contact instead of ever reaching here.
     const issued = await issueCode(env.PRIVATE_BUCKET, requested.email);
     if (issued.status === "too-many") {
       return answer(429, allowedOrigin, { status: "refused", reason: "too-many-codes" });

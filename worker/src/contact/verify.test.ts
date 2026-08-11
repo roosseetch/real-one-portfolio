@@ -158,14 +158,18 @@ describe("sending a code", () => {
     expect(String(mailed[0].text)).toContain(row[1]);
   });
 
-  it("sends nothing at all to an address verified recently enough", async () => {
+  it("sends a code even to an address that verified before, and says nothing about it", async () => {
+    // No shortcut, deliberately. This endpoint used to answer "already
+    // verified", which told any stranger whether an address had written before
+    // and let them send as it for a month. Knowing that is now the browser's
+    // business — it holds a token and never asks here.
     await recordVerification(storage.bucket, "visitor@example.com");
 
     const response = await handleContactVerify(post(VALID), env());
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "verified" });
-    expect(mailsSent()).toEqual([]);
+    expect(await response.json()).toEqual({ status: "code-sent" });
+    expect(mailsSent()).toHaveLength(1);
   });
 
   it("says it is unavailable, rather than that a code was sent, when the mail did not go", async () => {

@@ -72,7 +72,7 @@ describe("issuing", () => {
     const second = await issued(storage, "visitor@example.com", later(60_000));
 
     expect(codes(storage)).toHaveLength(2);
-    expect(await redeemCode(storage.bucket, "visitor@example.com", first, later(120_000))).toBe("accepted");
+    expect((await redeemCode(storage.bucket, "visitor@example.com", first, later(120_000))).outcome).toBe("accepted");
     expect(second).not.toBe("");
   });
 
@@ -141,8 +141,24 @@ describe("redeeming", () => {
     const storage = createFakeBucket();
     const code = await issued(storage, "visitor@example.com");
 
-    expect(await redeemCode(storage.bucket, "visitor@example.com", code, later(1000))).toBe("accepted");
-    expect(verified(storage)).toEqual([["visitor@example.com", later(1000).toISOString()]]);
+    const redeemed = await redeemCode(storage.bucket, "visitor@example.com", code, later(1000));
+
+    expect(redeemed.outcome).toBe("accepted");
+    expect(verified(storage)).toEqual([
+      ["visitor@example.com", later(1000).toISOString(), redeemed.token],
+    ]);
+  });
+
+  it("hands back a token, and only when the code was right", async () => {
+    const storage = createFakeBucket();
+    const code = await issued(storage, "visitor@example.com");
+    const wrong = code === "000000" ? "111111" : "000000";
+
+    const refused = await redeemCode(storage.bucket, "visitor@example.com", wrong, later(1000));
+    const accepted = await redeemCode(storage.bucket, "visitor@example.com", code, later(2000));
+
+    expect(refused.token).toBeNull();
+    expect(accepted.token).toMatch(/^[0-9a-z]{32}$/);
   });
 
   it("spends every code the address held, not just the one typed", async () => {
@@ -160,14 +176,14 @@ describe("redeeming", () => {
     const code = await issued(storage, "visitor@example.com");
     const wrong = code === "000000" ? "111111" : "000000";
 
-    expect(await redeemCode(storage.bucket, "visitor@example.com", wrong, later(1000))).toBe("rejected");
+    expect((await redeemCode(storage.bucket, "visitor@example.com", wrong, later(1000))).outcome).toBe("rejected");
     expect(verified(storage)).toEqual([]);
   });
 
   it("says the same thing about an address that was never sent one", async () => {
     const storage = createFakeBucket();
 
-    expect(await redeemCode(storage.bucket, "stranger@example.com", "123456")).toBe("none");
+    expect((await redeemCode(storage.bucket, "stranger@example.com", "123456")).outcome).toBe("none");
   });
 
   it("dies after three wrong guesses, whatever the fourth says", async () => {
@@ -176,11 +192,11 @@ describe("redeeming", () => {
     const wrong = code === "000000" ? "111111" : "000000";
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
-      expect(await redeemCode(storage.bucket, "visitor@example.com", wrong, later(1000))).toBe("rejected");
+      expect((await redeemCode(storage.bucket, "visitor@example.com", wrong, later(1000))).outcome).toBe("rejected");
     }
 
     // The right code, and too late: the attempts are spent.
-    expect(await redeemCode(storage.bucket, "visitor@example.com", code, later(1000))).toBe("none");
+    expect((await redeemCode(storage.bucket, "visitor@example.com", code, later(1000))).outcome).toBe("none");
   });
 
   it("charges a wrong guess to every live code, so holding several buys no extra tries", async () => {
@@ -191,21 +207,21 @@ describe("redeeming", () => {
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) await redeemCode(storage.bucket, "visitor@example.com", wrong, later(2000));
 
-    expect(await redeemCode(storage.bucket, "visitor@example.com", first, later(2000))).toBe("none");
+    expect((await redeemCode(storage.bucket, "visitor@example.com", first, later(2000))).outcome).toBe("none");
   });
 
   it("refuses a code that has aged out", async () => {
     const storage = createFakeBucket();
     const code = await issued(storage, "visitor@example.com");
 
-    expect(await redeemCode(storage.bucket, "visitor@example.com", code, later(CODE_TTL_MS + 1))).toBe("none");
+    expect((await redeemCode(storage.bucket, "visitor@example.com", code, later(CODE_TTL_MS + 1))).outcome).toBe("none");
   });
 
   it("accepts one a minute before it ages out", async () => {
     const storage = createFakeBucket();
     const code = await issued(storage, "visitor@example.com");
 
-    expect(await redeemCode(storage.bucket, "visitor@example.com", code, later(CODE_TTL_MS - 60_000))).toBe(
+    expect((await redeemCode(storage.bucket, "visitor@example.com", code, later(CODE_TTL_MS - 60_000))).outcome).toBe(
       "accepted",
     );
   });
@@ -214,38 +230,81 @@ describe("redeeming", () => {
     const storage = createFakeBucket();
     const code = await issued(storage, "visitor@example.com");
 
-    expect(await redeemCode(storage.bucket, "someone@example.com", code, later(1000))).toBe("none");
+    expect((await redeemCode(storage.bucket, "someone@example.com", code, later(1000))).outcome).toBe("none");
   });
 });
 
 describe("staying verified", () => {
-  it("is verified inside the window", async () => {
+  it("is verified inside the window, by the browser holding the token", async () => {
     const storage = createFakeBucket();
-    await recordVerification(storage.bucket, "visitor@example.com", START);
+    const token = await recordVerification(storage.bucket, "visitor@example.com", START);
 
-    expect(await isVerified(storage.bucket, "visitor@example.com", later(VERIFIED_TTL_MS - 1000))).toBe(true);
+    expect(await isVerified(storage.bucket, "visitor@example.com", token, later(VERIFIED_TTL_MS - 1000))).toBe(
+      true,
+    );
   });
 
   it("is not verified after it", async () => {
     const storage = createFakeBucket();
-    await recordVerification(storage.bucket, "visitor@example.com", START);
+    const token = await recordVerification(storage.bucket, "visitor@example.com", START);
 
-    expect(await isVerified(storage.bucket, "visitor@example.com", later(VERIFIED_TTL_MS + 1000))).toBe(false);
+    expect(await isVerified(storage.bucket, "visitor@example.com", token, later(VERIFIED_TTL_MS + 1000))).toBe(
+      false,
+    );
   });
 
   it("has never been verified when it is not in the file", async () => {
     const storage = createFakeBucket();
 
-    expect(await isVerified(storage.bucket, "stranger@example.com", START)).toBe(false);
+    expect(await isVerified(storage.bucket, "stranger@example.com", "whatever", START)).toBe(false);
+  });
+
+  it("refuses somebody who knows the address but holds no token", async () => {
+    // The whole point of the token. Without it, "this address verified itself
+    // three weeks ago" would be a fact anybody could trade on.
+    const storage = createFakeBucket();
+    await recordVerification(storage.bucket, "visitor@example.com", START);
+
+    expect(await isVerified(storage.bucket, "visitor@example.com", "", later(1000))).toBe(false);
+    expect(await isVerified(storage.bucket, "visitor@example.com", "not-the-token", later(1000))).toBe(false);
+  });
+
+  it("refuses a token that belongs to a different address", async () => {
+    const storage = createFakeBucket();
+    const mine = await recordVerification(storage.bucket, "visitor@example.com", START);
+    await recordVerification(storage.bucket, "someone@example.com", START);
+
+    expect(await isVerified(storage.bucket, "someone@example.com", mine, later(1000))).toBe(false);
+  });
+
+  it("retires the previous token when the address verifies again", async () => {
+    // Verifying on a second machine signs the first one out, rather than
+    // leaving two live claims on one address.
+    const storage = createFakeBucket();
+    const first = await recordVerification(storage.bucket, "visitor@example.com", START);
+    const second = await recordVerification(storage.bucket, "visitor@example.com", later(60_000));
+
+    expect(await isVerified(storage.bucket, "visitor@example.com", first, later(61_000))).toBe(false);
+    expect(await isVerified(storage.bucket, "visitor@example.com", second, later(61_000))).toBe(true);
+  });
+
+  it("cannot be satisfied by a row written before tokens existed", async () => {
+    // Two columns, as the file looked yesterday. It proves the address was
+    // verified once and nothing about who is asking now.
+    const storage = createFakeBucket();
+    await storage.bucket.put(VERIFIED_KEY, `visitor@example.com,${START.toISOString()}\r\n`);
+
+    expect(await isVerified(storage.bucket, "visitor@example.com", "", later(1000))).toBe(false);
+    expect(await isVerified(storage.bucket, "visitor@example.com", "anything", later(1000))).toBe(false);
   });
 
   it("keeps one line per address rather than a log of how often somebody writes", async () => {
     const storage = createFakeBucket();
 
     await recordVerification(storage.bucket, "visitor@example.com", START);
-    await recordVerification(storage.bucket, "visitor@example.com", later(60_000));
+    const second = await recordVerification(storage.bucket, "visitor@example.com", later(60_000));
 
-    expect(verified(storage)).toEqual([["visitor@example.com", later(60_000).toISOString()]]);
+    expect(verified(storage)).toEqual([["visitor@example.com", later(60_000).toISOString(), second]]);
   });
 });
 

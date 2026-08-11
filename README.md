@@ -511,11 +511,10 @@ Sending a message crosses four systems, and the split is the same one the media
 pipeline uses: the thing that screens content is not the thing that decides what
 reaches her.
 
-0. **The address is proved first.** Pressing Send posts the address and a
-   challenge token to `/contact/verify`, which either answers that the address
-   proved itself inside the last thirty days, or emails a six-digit code and
-   says so. In the second case a code field appears and Send is pressed again.
-   See "Proving the address" below.
+0. **The address is proved first.** A browser that has done this before holds a
+   token and sends it with the message. One that has not posts the address and a
+   challenge token to `/contact/verify`, which emails a six-digit code; a code
+   field appears, and Send is pressed again. See "Proving the address" below.
 1. **The browser** solves a Cloudflare Turnstile challenge and posts the fields
    and the token to the Worker's `/contact`. Name, address and message are
    required; company and telephone are optional, and one left blank is sent as
@@ -567,10 +566,33 @@ finally `contact_message_queued` or `contact_form_rejected` with the reason.
 
 Nothing reaches her from an address nobody can read. `/contact/verify` mails a
 six-digit code, good for thirty minutes and three wrong guesses, and `/contact`
-refuses a message that carries neither a code nor a verification from the last
-thirty days. A code that is resent does not cancel the one before it: somebody
-who asks twice and then finds the first mail should not be punished for our
-latency, so up to five stay live at once and any of them works.
+refuses a message that carries neither a code nor a valid token. A code that is
+resent does not cancel the one before it: somebody who asks twice and then finds
+the first mail should not be punished for our latency, so up to five stay live
+at once and any of them works.
+
+Redeeming a code mints a **verification token**, which the Worker records beside
+the address and the browser keeps in `localStorage` for thirty days
+(`site/src/verified-store.ts`). A returning sender presents it instead of going
+back to their inbox, which is also one fewer round trip: no call to
+`/contact/verify` at all.
+
+The token is what makes "verified" mean something. Before it, the Worker
+answered a bare "has this address verified recently?" — so anybody who knew an
+address somebody else had proved could write as them for a month. The record
+said the address had been proved once, not that whoever was asking now had done
+the proving. The token is issued exactly once, to the browser that redeemed the
+code, and verifying again anywhere retires it — so proving the address on a
+second machine quietly signs the first one out rather than leaving two live
+claims on one address.
+
+Addresses are stored under a SHA-256 of themselves rather than in the open: this
+is somebody's email address in a browser that may be shared, and nothing needs
+to read it back, only to answer "is there a token for this one". A token the
+Worker refuses is deleted and a fresh code requested in the same press, so a
+stale one is a moment's delay rather than a dead end. Every storage failure —
+full, disabled, a private window — ends in the visitor typing a code, which is
+what happens on a first visit anyway.
 
 There is no cron and nothing to sweep. Three CSV files under `contact-records/`
 hold the state — `codes.csv`, `verified.csv` and `messages.csv` — and issuing a
