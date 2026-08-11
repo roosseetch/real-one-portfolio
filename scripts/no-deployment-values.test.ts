@@ -35,6 +35,7 @@ const ALLOWED = new Set([
   "dash.cloudflare.com",
   "developers.cloudflare.com",
   "api2.amplitude.com",
+  "api.resend.com",
   "github.com",
   "api.github.com",
   "docs.github.com",
