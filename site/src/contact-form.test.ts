@@ -12,7 +12,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderContactForm, type ContactFormOptions } from "./contact-form";
+import { isValidPhone, renderContactForm, type ContactFormOptions } from "./contact-form";
 
 const ENDPOINT = "https://worker.test/contact";
 const SITE_KEY = "0x-test-site-key";
@@ -53,10 +53,13 @@ function solveChallenge(form: HTMLFormElement, token = "solved-token") {
   form.append(input);
 }
 
+const control = (form: HTMLFormElement, id: string) =>
+  form.elements.namedItem(id) as HTMLInputElement | HTMLTextAreaElement;
+
 function fill(form: HTMLFormElement, message = "Hello, I would like to get in touch about a project.") {
-  (form.elements.namedItem("name") as HTMLInputElement).value = "A Visitor";
-  (form.elements.namedItem("email") as HTMLInputElement).value = "visitor@example.com";
-  (form.elements.namedItem("message") as HTMLTextAreaElement).value = message;
+  control(form, "name").value = "A Visitor";
+  control(form, "email").value = "visitor@example.com";
+  control(form, "message").value = message;
 }
 
 /** Submits and waits for the handler's own promise chain to settle. */
@@ -112,6 +115,44 @@ describe("submitting", () => {
       message: "Hello, I would like to get in touch about a project.",
       turnstileToken: "solved-token",
     });
+  });
+
+  it("sends the optional fields when they were filled in", async () => {
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    control(form, "company").value = "Acme Research";
+    control(form, "phone").value = "+44 20 7946 0958";
+    solveChallenge(form);
+
+    await submit(form);
+
+    const [, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      company: "Acme Research",
+      phone: "+44 20 7946 0958",
+    });
+  });
+
+  it("leaves an untouched optional field out of the request entirely", async () => {
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    // A field somebody tabbed through and typed a space in is an empty one.
+    control(form, "company").value = "   ";
+    solveChallenge(form);
+
+    await submit(form);
+
+    const [, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(Object.keys(JSON.parse(String(init.body))).sort()).toEqual([
+      "email",
+      "message",
+      "name",
+      "turnstileToken",
+    ]);
   });
 
   it("tells the visitor the message was accepted, and clears the form", async () => {
@@ -210,6 +251,75 @@ describe("what the visitor is told", () => {
 
     expect(statusOf(section).textContent).toContain("check your connection");
   });
+});
+
+describe("the fields", () => {
+  it("marks the two optional ones as optional, and requires the rest", () => {
+    const form = formOf(mount().section);
+
+    expect(control(form, "company").required).toBe(false);
+    expect(control(form, "phone").required).toBe(false);
+    for (const id of ["name", "email", "message"]) {
+      expect(control(form, id).required).toBe(true);
+    }
+    expect(form.querySelectorAll(".field-optional")).toHaveLength(2);
+  });
+
+  it("carries the limits the Worker enforces", () => {
+    const form = formOf(mount().section);
+
+    expect(control(form, "email").minLength).toBe(7);
+    expect(control(form, "email").maxLength).toBe(64);
+    expect(control(form, "company").minLength).toBe(3);
+    expect(control(form, "company").maxLength).toBe(64);
+    expect(control(form, "phone").maxLength).toBe(24);
+    expect(control(form, "message").minLength).toBe(10);
+    expect(control(form, "message").maxLength).toBe(300);
+  });
+
+  it("refuses a telephone number that is not one, before spending a request", async () => {
+    // The real reportValidity, because a custom validity message is the whole
+    // mechanism under test here.
+    HTMLFormElement.prototype.reportValidity = function reportValidity(this: HTMLFormElement) {
+      return this.checkValidity();
+    };
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    control(form, "phone").value = "call me maybe";
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(control(form, "phone").validationMessage).toContain("7 to 15 digits");
+  });
+});
+
+describe("what counts as a telephone number", () => {
+  const accepted = [
+    "+44 20 7946 0958",
+    "(020) 7946 0958",
+    "020-7946-0958",
+    "+1 555 019 9900",
+    "5550199",
+  ];
+  for (const value of accepted) {
+    it(`accepts ${value}`, () => expect(isValidPhone(value)).toBe(true));
+  }
+
+  const refused: Array<[string, string]> = [
+    ["too few digits", "12345"],
+    ["more digits than E.164 allows", "1234567890123456"],
+    ["letters", "call me maybe"],
+    ["an address wearing a plus", "+visitor@example.com"],
+    ["longer than the field allows", `+${"1".repeat(30)}`],
+    ["empty", ""],
+  ];
+  for (const [what, value] of refused) {
+    it(`refuses ${what}`, () => expect(isValidPhone(value)).toBe(false));
+  }
 });
 
 describe("analytics", () => {

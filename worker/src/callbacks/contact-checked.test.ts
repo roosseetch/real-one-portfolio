@@ -180,6 +180,34 @@ describe("delivering", () => {
     expect(sent[0]).toContain("I would like to talk about a project.");
   });
 
+  it("carries the optional fields when the visitor gave them", async () => {
+    const submission = newSubmission(
+      {
+        name: "A Visitor",
+        email: "visitor@example.com",
+        company: "Acme Research",
+        phone: "+44 20 7946 0958",
+        text: "I would like to talk about a project.",
+      },
+      "job-token-0123456789abcdef",
+    );
+    await saveSubmission(storage.bucket, submission);
+
+    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+
+    expect(sent[0]).toContain("Company: Acme Research");
+    expect(sent[0]).toContain("Phone: +44 20 7946 0958");
+  });
+
+  it("leaves no empty line where an optional field was not filled in", async () => {
+    const submission = await waiting();
+
+    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+
+    expect(sent[0]).not.toContain("Company:");
+    expect(sent[0]).not.toContain("Phone:");
+  });
+
   it("carries the job's one-line reason", async () => {
     const submission = await waiting();
 
