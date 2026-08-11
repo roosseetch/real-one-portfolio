@@ -545,6 +545,16 @@ Worker's copy decides anything. Name 1–100, email 7–64, company 3–64, mess
 telephone is checked by shape rather than by country: guessing at national
 formats refuses real numbers, and it is an optional field.
 
+The address and the telephone are the two rules no HTML attribute expresses —
+`type="email"` accepts `name@example`, which the Worker refuses for want of a
+dot in the domain — so the browser is given both as custom validity messages,
+and both are rechecked as the field is typed in rather than only when Send is
+pressed. That last part is not a nicety: `noValidate` is off, so the browser
+validates before it dispatches `submit`, and an error left on a field the
+visitor has since fixed makes the press that would clear it unreachable. A word
+typed into the telephone field used to brick the form until the page was
+reloaded.
+
 The whole round trip is a minute or two, which is why the page never claims
 delivery. A job that fails at any stage reports `undetermined` rather than
 dying quietly, and the message is forwarded carrying a line saying it was never
