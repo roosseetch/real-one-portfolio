@@ -11,14 +11,20 @@
  * private bucket, so a signed callback carrying different words could not put
  * them in front of her.
  */
+import { trackServerEvents, type DeferContext, type ServerAnalyticsEnv } from "../analytics/events";
 import { timingSafeEqual } from "../crypto";
+import { normalizeEmail } from "../contact/codes";
 import { contactRecipient, formatContactMessage, type ContactRecipientEnv } from "../contact/message";
 import { loadSubmission, saveSubmission } from "../contact/store";
 import type { ContactState, ContactSubmission, ContactVerdict } from "../contact/types";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import { readSignedCallback, refuse, type SignedCallbackEnv } from "./signature";
 
-export interface ContactCallbackEnv extends TelegramApiEnv, SignedCallbackEnv, ContactRecipientEnv {
+export interface ContactCallbackEnv
+  extends TelegramApiEnv,
+    SignedCallbackEnv,
+    ContactRecipientEnv,
+    ServerAnalyticsEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
 
@@ -49,7 +55,11 @@ function parseBody(raw: string): CallbackBody | null {
   return { ...body, reason: typeof body.reason === "string" ? body.reason : "" };
 }
 
-export async function handleContactChecked(request: Request, env: ContactCallbackEnv): Promise<Response> {
+export async function handleContactChecked(
+  request: Request,
+  env: ContactCallbackEnv,
+  ctx: DeferContext,
+): Promise<Response> {
   // Timestamp, signature and single-use nonce.
   const signed = await readSignedCallback(request, env);
   if (signed.status !== "verified") return refuse(401);
@@ -85,7 +95,7 @@ export async function handleContactChecked(request: Request, env: ContactCallbac
     // Nothing is sent and nothing is answered to whoever wrote it. The run's
     // own summary records that a message was discarded and why, which is where
     // to look if a real message ever goes missing.
-    return settle(env, checked, "discarded");
+    return settle(env, ctx, checked, "discarded");
   }
 
   const chatId = contactRecipient(env);
@@ -106,7 +116,7 @@ export async function handleContactChecked(request: Request, env: ContactCallbac
     return new Response("Could not deliver the message", { status: 500 });
   }
 
-  return settle(env, checked, "delivered");
+  return settle(env, ctx, checked, "delivered");
 }
 
 /**
@@ -118,6 +128,7 @@ export async function handleContactChecked(request: Request, env: ContactCallbac
  */
 async function settle(
   env: ContactCallbackEnv,
+  ctx: DeferContext,
   submission: ContactSubmission,
   state: ContactState,
 ): Promise<Response> {
@@ -128,5 +139,45 @@ async function settle(
     return new Response("Could not record the outcome", { status: 500 });
   }
 
+  // Only once the outcome is written down. An event for a state that failed to
+  // persist would describe a submission the next re-run is about to settle
+  // again, and count it twice.
+  report(env, ctx, submission, state);
   return Response.json({ status: state });
+}
+
+/**
+ * What the check concluded, against the visit that sent the message.
+ *
+ * This is the end of the funnel and the only place a discarded message appears
+ * at all: it never reaches Telegram, so without this a spam message and a real
+ * one are indistinguishable from the analytics side.
+ *
+ * The model's own reason is deliberately not sent. It is free text written by
+ * something that has just read a stranger's message, so it is not ours to hand
+ * to a third party — it stays in the run summary, where only she reads it.
+ *
+ * The address is named because it was proved at intake, and the device and
+ * session come off the stored submission: this callback carries nothing of the
+ * visitor, so without them the event would land on a device nobody ever used.
+ * Nothing of the runner is sent either — its address and user agent are its
+ * own, and passing them would move the visitor to a datacentre.
+ */
+function report(
+  env: ContactCallbackEnv,
+  ctx: DeferContext,
+  submission: ContactSubmission,
+  state: ContactState,
+): void {
+  trackServerEvents(env, ctx, null, submission.analytics ?? null, [
+    {
+      type: "contact_message_checked",
+      userId: normalizeEmail(submission.message.email),
+      properties: {
+        outcome: state,
+        verdict: submission.verdict?.outcome ?? "undetermined",
+        message_length: submission.message.text.length,
+      },
+    },
+  ]);
 }

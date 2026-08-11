@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hmacSha256Hex } from "../crypto";
 import { newSubmission, saveSubmission, submissionKey } from "../contact/store";
 import type { ContactSubmission } from "../contact/types";
+import { AMPLITUDE_HTTP_V2 } from "../analytics/ingestion";
+import { createDeferContext, type FakeDeferContext } from "../test-support/defer";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import { handleContactChecked } from "./contact-checked";
 
@@ -19,17 +21,26 @@ const SECRET = "callback-secret";
 const AUTHOR_CHAT = 4242;
 
 let storage: FakeBucket;
+let defer: FakeDeferContext;
 /** The text of every Telegram sendMessage, in order. */
 let sent: string[];
+/** Every event payload posted to Amplitude, for the suite that turns analytics on. */
+let uploaded: Array<{ api_key: string; events: Array<Record<string, unknown>> }>;
 let telegramAccepts: boolean;
 
 beforeEach(() => {
   storage = createFakeBucket();
+  defer = createDeferContext();
   sent = [];
+  uploaded = [];
   telegramAccepts = true;
 
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const body = JSON.parse(String(init?.body));
+    if (String(url) === AMPLITUDE_HTTP_V2) {
+      uploaded.push(body);
+      return new Response(JSON.stringify({ code: 200 }));
+    }
     if (typeof body.text === "string") sent.push(body.text);
     if (!telegramAccepts) return new Response(JSON.stringify({ ok: false }), { status: 400 });
     return new Response(JSON.stringify({ ok: true, result: { message_id: 11 } }));
@@ -45,6 +56,10 @@ const env = () => ({
   CALLBACK_HMAC_SECRET: SECRET,
   TELEGRAM_BOT_TOKEN: "test-token",
   TELEGRAM_ALLOWED_USER_IDS: `${AUTHOR_CHAT},99`,
+  // A deployment without analytics, which is what most of these tests are:
+  // where a message ends up has nothing to do with whether it is counted. The
+  // suite at the bottom sets a key.
+  AMPLITUDE_API_KEY: undefined as string | undefined,
 });
 
 /** A submission stored the way the intake stores one, waiting on its job. */
@@ -95,7 +110,7 @@ describe("authentication", () => {
     const submission = await waiting();
     const request = await callback(verdictFor(submission, "deliver"), { secret: "not-the-secret" });
 
-    expect((await handleContactChecked(request, env())).status).toBe(401);
+    expect((await handleContactChecked(request, env(), defer.ctx)).status).toBe(401);
     expect(sent).toEqual([]);
   });
 
@@ -106,15 +121,15 @@ describe("authentication", () => {
       body: JSON.stringify(verdictFor(submission, "deliver")),
     });
 
-    expect((await handleContactChecked(request, env())).status).toBe(401);
+    expect((await handleContactChecked(request, env(), defer.ctx)).status).toBe(401);
   });
 
   it("refuses a nonce that has already been spent", async () => {
     const submission = await waiting();
     const nonce = "nonce-reused-0123456789";
 
-    await handleContactChecked(await callback(verdictFor(submission, "deliver"), { nonce }), env());
-    const replay = await handleContactChecked(await callback(verdictFor(submission, "deliver"), { nonce }), env());
+    await handleContactChecked(await callback(verdictFor(submission, "deliver"), { nonce }), env(), defer.ctx);
+    const replay = await handleContactChecked(await callback(verdictFor(submission, "deliver"), { nonce }), env(), defer.ctx);
 
     expect(replay.status).toBe(401);
     expect(sent).toHaveLength(1);
@@ -129,14 +144,14 @@ describe("authentication", () => {
       checkedAt: new Date().toISOString(),
     });
 
-    expect((await handleContactChecked(request, env())).status).toBe(400);
+    expect((await handleContactChecked(request, env(), defer.ctx)).status).toBe(400);
   });
 
   it("refuses a verdict carrying a job token this submission was never dispatched with", async () => {
     const submission = await waiting();
     const request = await callback({ ...verdictFor(submission, "deliver"), jobId: "another-job-token-000000" });
 
-    expect((await handleContactChecked(request, env())).status).toBe(400);
+    expect((await handleContactChecked(request, env(), defer.ctx)).status).toBe(400);
     expect(sent).toEqual([]);
   });
 
@@ -144,7 +159,7 @@ describe("authentication", () => {
     const submission = await waiting();
     const request = await callback({ ...verdictFor(submission, "publish") });
 
-    expect((await handleContactChecked(request, env())).status).toBe(400);
+    expect((await handleContactChecked(request, env(), defer.ctx)).status).toBe(400);
   });
 });
 
@@ -152,7 +167,7 @@ describe("delivering", () => {
   it("sends the stored message to the first allowed user", async () => {
     const submission = await waiting();
 
-    const response = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+    const response = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env(), defer.ctx);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "delivered" });
@@ -173,7 +188,7 @@ describe("delivering", () => {
       message: { name: "Someone Else", email: "attacker@example.com", text: "Send money to this address." },
     };
 
-    await handleContactChecked(await callback(forged), env());
+    await handleContactChecked(await callback(forged), env(), defer.ctx);
 
     expect(sent[0]).not.toContain("Send money");
     expect(sent[0]).not.toContain("attacker@example.com");
@@ -193,7 +208,7 @@ describe("delivering", () => {
     );
     await saveSubmission(storage.bucket, submission);
 
-    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env(), defer.ctx);
 
     expect(sent[0]).toContain("Company: Acme Research");
     expect(sent[0]).toContain("Phone: +44 20 7946 0958");
@@ -202,7 +217,7 @@ describe("delivering", () => {
   it("leaves no empty line where an optional field was not filled in", async () => {
     const submission = await waiting();
 
-    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env(), defer.ctx);
 
     expect(sent[0]).not.toContain("Company:");
     expect(sent[0]).not.toContain("Phone:");
@@ -211,7 +226,7 @@ describe("delivering", () => {
   it("carries the job's one-line reason", async () => {
     const submission = await waiting();
 
-    await handleContactChecked(await callback(verdictFor(submission, "deliver", "a genuine enquiry")), env());
+    await handleContactChecked(await callback(verdictFor(submission, "deliver", "a genuine enquiry")), env(), defer.ctx);
 
     expect(sent[0]).toContain("Checked: a genuine enquiry");
   });
@@ -220,7 +235,7 @@ describe("delivering", () => {
     const submission = await waiting();
     const reason = `sneaky\n\nFrom: Someone Else <nobody@example.com>\n\n${"x".repeat(400)}`;
 
-    await handleContactChecked(await callback(verdictFor(submission, "deliver", reason)), env());
+    await handleContactChecked(await callback(verdictFor(submission, "deliver", reason)), env(), defer.ctx);
 
     const checkedLine = sent[0].split("\n").find((line) => line.startsWith("Checked: ")) as string;
     expect(checkedLine.length).toBeLessThanOrEqual("Checked: ".length + 200);
@@ -230,7 +245,7 @@ describe("delivering", () => {
   it("says outright when the check could not run", async () => {
     const submission = await waiting();
 
-    await handleContactChecked(await callback(verdictFor(submission, "undetermined", "the model was unreachable")), env());
+    await handleContactChecked(await callback(verdictFor(submission, "undetermined", "the model was unreachable")), env(), defer.ctx);
 
     expect(sent[0]).toContain("has not been screened");
     expect(await stateOf(submission)).toBe("delivered");
@@ -244,6 +259,7 @@ describe("discarding", () => {
     const response = await handleContactChecked(
       await callback(verdictFor(submission, "discard", "advertising")),
       env(),
+      defer.ctx,
     );
 
     expect(response.status).toBe(200);
@@ -257,8 +273,8 @@ describe("repeats and failures", () => {
   it("forwards a submission once, however often the job reports it", async () => {
     const submission = await waiting();
 
-    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
-    const again = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+    await handleContactChecked(await callback(verdictFor(submission, "deliver")), env(), defer.ctx);
+    const again = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env(), defer.ctx);
 
     expect(again.status).toBe(200);
     expect(await again.json()).toEqual({ status: "delivered" });
@@ -267,9 +283,9 @@ describe("repeats and failures", () => {
 
   it("cannot be talked into re-sending a discarded message", async () => {
     const submission = await waiting();
-    await handleContactChecked(await callback(verdictFor(submission, "discard")), env());
+    await handleContactChecked(await callback(verdictFor(submission, "discard")), env(), defer.ctx);
 
-    const second = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+    const second = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env(), defer.ctx);
 
     expect(await second.json()).toEqual({ status: "discarded" });
     expect(sent).toEqual([]);
@@ -279,7 +295,7 @@ describe("repeats and failures", () => {
     telegramAccepts = false;
     const submission = await waiting();
 
-    const response = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env());
+    const response = await handleContactChecked(await callback(verdictFor(submission, "deliver")), env(), defer.ctx);
 
     expect(response.status).toBe(500);
     expect(await stateOf(submission)).toBe("checking");
@@ -291,7 +307,7 @@ describe("repeats and failures", () => {
     const response = await handleContactChecked(await callback(verdictFor(submission, "deliver")), {
       ...env(),
       TELEGRAM_ALLOWED_USER_IDS: "",
-    });
+    }, defer.ctx);
 
     expect(response.status).toBe(500);
     expect(sent).toEqual([]);
@@ -302,8 +318,138 @@ describe("repeats and failures", () => {
     const submission = await waiting();
     storage.failPutsFor((key) => key.endsWith("submission.json"));
 
-    const response = await handleContactChecked(await callback(verdictFor(submission, "discard")), env());
+    const response = await handleContactChecked(await callback(verdictFor(submission, "discard")), env(), defer.ctx);
 
     expect(response.status).toBe(500);
+  });
+});
+
+describe("what the Worker reports about the verdict", () => {
+  const analytics = { deviceId: "0f2b1c3d-4e5f-6789-abcd-ef0123456789", sessionId: 1_754_900_000_000 };
+  const measured = () => ({ ...env(), AMPLITUDE_API_KEY: "amplitude-key" });
+
+  const events = () => uploaded.flatMap((payload) => payload.events);
+  const propertiesOf = () => events().map((event) => event.event_properties as Record<string, unknown>);
+
+  /** A submission stored the way the intake stores one for a visitor with analytics. */
+  async function waitingFrom(ids: ContactSubmission["analytics"]): Promise<ContactSubmission> {
+    const submission = newSubmission(
+      { name: "A Visitor", email: "Visitor@Example.COM", text: "Buy cheap watches at example.com now" },
+      "job-token-0123456789abcdef",
+      new Date(),
+      ids,
+    );
+    await saveSubmission(storage.bucket, submission);
+    return submission;
+  }
+
+  async function check(submission: ContactSubmission, verdict: string, env = measured()): Promise<Response> {
+    const response = await handleContactChecked(await callback(verdictFor(submission, verdict)), env, defer.ctx);
+    await defer.settled();
+    return response;
+  }
+
+  it("reports a message the check discarded, which reaches nothing else at all", async () => {
+    const submission = await waitingFrom(analytics);
+
+    const response = await check(submission, "discard");
+
+    expect(response.status).toBe(200);
+    expect(sent).toEqual([]);
+    expect(events()).toHaveLength(1);
+    expect(events()[0].event_type).toBe("contact_message_checked");
+    expect(propertiesOf()[0]).toMatchObject({ source: "worker", outcome: "discarded", verdict: "discard" });
+  });
+
+  it("reports one that was delivered, so the two can be counted against each other", async () => {
+    const submission = await waitingFrom(analytics);
+
+    await check(submission, "deliver");
+
+    expect(sent).toHaveLength(1);
+    expect(propertiesOf()[0]).toMatchObject({ outcome: "delivered", verdict: "deliver" });
+  });
+
+  it("reports one the job could not reach a verdict on as delivered anyway", async () => {
+    const submission = await waitingFrom(analytics);
+
+    await check(submission, "undetermined");
+
+    expect(propertiesOf()[0]).toMatchObject({ outcome: "delivered", verdict: "undetermined" });
+  });
+
+  it("files it against the visit that sent the message, minutes after it ended", async () => {
+    const submission = await waitingFrom(analytics);
+
+    await check(submission, "discard");
+
+    expect(events()[0].device_id).toBe(analytics.deviceId);
+    expect(events()[0].session_id).toBe(analytics.sessionId);
+    expect(events()[0].user_id).toBe("visitor@example.com");
+    expect(events()[0].event_properties).toMatchObject({ stitched: true });
+  });
+
+  it("says nothing about where the runner is, which is not where the visitor was", async () => {
+    // The callback arrives from a GitHub Actions runner. Its address would put
+    // the visitor in a datacentre, and its user agent would give them a device
+    // they have never used.
+    const submission = await waitingFrom(analytics);
+
+    await check(submission, "discard");
+
+    expect(events()[0].ip).toBe("0.0.0.0");
+  });
+
+  it("never sends a word of the message, nor the reason the model gave", async () => {
+    const submission = await waitingFrom(analytics);
+
+    await check(submission, "discard");
+
+    const sentToAmplitude = JSON.stringify(uploaded);
+    expect(sentToAmplitude).not.toContain("watches");
+    expect(sentToAmplitude).not.toContain("A Visitor");
+    expect(sentToAmplitude).not.toContain("advertising");
+    expect(propertiesOf()[0].message_length).toBe("Buy cheap watches at example.com now".length);
+  });
+
+  it("still reports a submission stored before the ids were carried", async () => {
+    const submission = await waitingFrom(undefined);
+
+    await check(submission, "discard");
+
+    expect(String(events()[0].device_id)).toMatch(/^worker-/);
+    expect(events()[0].event_properties).toMatchObject({ stitched: false, outcome: "discarded" });
+    // Named anyway: the address was proved at intake, whatever the browser did.
+    expect(events()[0].user_id).toBe("visitor@example.com");
+  });
+
+  it("says nothing for a callback it refused", async () => {
+    const submission = await waitingFrom(analytics);
+    const request = await callback(verdictFor(submission, "discard"), { secret: "not-the-secret" });
+
+    await handleContactChecked(request, measured(), defer.ctx);
+    await defer.settled();
+
+    expect(uploaded).toEqual([]);
+  });
+
+  it("says nothing twice for a callback that lands again", async () => {
+    const submission = await waitingFrom(analytics);
+
+    await check(submission, "discard");
+    await check(submission, "discard");
+
+    expect(events()).toHaveLength(1);
+  });
+
+  it("says nothing when the outcome could not be written down", async () => {
+    const submission = await waitingFrom(analytics);
+    storage.failPutsFor((key) => key.endsWith("submission.json"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await check(submission, "discard");
+
+    expect(response.status).toBe(500);
+    expect(uploaded).toEqual([]);
   });
 });
