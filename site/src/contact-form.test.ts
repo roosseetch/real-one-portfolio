@@ -375,6 +375,74 @@ describe("the fields", () => {
     expect(send).not.toHaveBeenCalled();
     expect(control(form, "phone").validationMessage).toContain("7 to 15 digits");
   });
+
+  it("lets go of the telephone the moment it is emptied again", async () => {
+    // The bug this pins bricked the form. `noValidate` is off, so the browser
+    // validates before it dispatches `submit`: a custom error left on the field
+    // meant the press that would have cleared it never reached the handler, and
+    // nothing short of reloading the page could send the form again.
+    const { section } = mount();
+    const form = formOf(section);
+    const phone = control(form, "phone");
+
+    fill(form);
+    phone.value = "telefone";
+    phone.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(phone.validationMessage).toContain("7 to 15 digits");
+
+    phone.value = "";
+    phone.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(phone.validationMessage).toBe("");
+    expect(phone.validity.customError).toBe(false);
+    expect(form.checkValidity()).toBe(true);
+  });
+
+  it("refuses an address the Worker would refuse, rather than spending a request on it", async () => {
+    // type="email" accepts name@example; the Worker wants a dot in the domain,
+    // and answers 400 to what the browser was happy with.
+    HTMLFormElement.prototype.reportValidity = function reportValidity(this: HTMLFormElement) {
+      return this.checkValidity();
+    };
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    const email = control(form, "email");
+
+    fill(form);
+    email.value = "ss.rustem@gmailcom";
+    email.dispatchEvent(new Event("input", { bubbles: true }));
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(email.validationMessage).toContain("name@example.com");
+  });
+
+  it("lets go of the address the moment it is corrected", async () => {
+    const { section } = mount();
+    const email = control(formOf(section), "email");
+
+    email.value = "ss.rustem@gmailcom";
+    email.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(email.validationMessage).not.toBe("");
+
+    email.value = "ss.rustem@gmail.com";
+    email.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(email.validationMessage).toBe("");
+  });
+
+  it("says nothing about an empty address, which is the required attribute's business", () => {
+    const { section } = mount();
+    const email = control(formOf(section), "email");
+
+    email.value = "";
+    email.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(email.validity.customError).toBe(false);
+  });
 });
 
 describe("proving the address", () => {

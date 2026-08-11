@@ -112,6 +112,12 @@ const MESSAGES: Record<Outcome, string> = {
   network: "Your message could not be sent. Please check your connection and try again.",
 };
 
+/**
+ * What is said when the Worker refuses the address itself, which is a different
+ * thing from refusing a message and happens before there is one to refuse.
+ */
+const ADDRESS_REFUSED = "That email address could not be accepted. Please check it and try again.";
+
 function field(
   form: HTMLFormElement,
   id: string,
@@ -259,6 +265,11 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   const send = options.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const verifyEndpoint = `${endpoint}/verify`;
 
+  // The two rules with no HTML attribute behind them, kept current as they are
+  // typed rather than only when Send is pressed. See keepValid.
+  const checkEmail = keepValid(email, emailProblem);
+  const checkPhone = keepValid(phone, phoneProblem);
+
   /** The address a code was last sent to, so changing it starts again. */
   let awaitingCodeFor: string | null = null;
   /** The last token handed to the Worker. A token is single-use, so this one is finished. */
@@ -353,7 +364,10 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
 
     if (!response.ok) {
       const outcome = outcomeOf(response.status);
-      say(outcome);
+      // This step is about the address and nothing else — no message has been
+      // sent yet — so "that message could not be accepted, check the fields"
+      // would send somebody looking at four fields that were fine.
+      say(outcome, outcome === "invalid" ? ADDRESS_REFUSED : undefined);
       options.track("contact_form_rejected", { reason: outcome, status: response.status });
       // Fire and forget: the widget solves again in the background while the
       // visitor reads what went wrong.
@@ -398,11 +412,14 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     event.preventDefault();
     if (submit.disabled) return;
 
-    // A number's shape is the one rule with no HTML attribute behind it, so it
-    // is handed to the browser as a custom message and reported with the rest —
-    // a visitor should not have to find out which of five fields is wrong from a
-    // sentence at the bottom of the form.
-    phone.setCustomValidity(phoneProblem(phone.value));
+    // An address's shape and a number's are the rules with no HTML attribute
+    // behind them, so they are handed to the browser as custom messages and
+    // reported with the rest — a visitor should not have to find out which of
+    // five fields is wrong from a sentence at the bottom of the form. Both are
+    // kept current as they are typed; this covers a value that arrived any
+    // other way.
+    checkEmail();
+    checkPhone();
 
     // The browser's own validation first: it knows the field, and pointing at
     // the field beats a sentence at the bottom of the form.
@@ -544,6 +561,48 @@ function phoneProblem(value: string): string {
   const trimmed = value.trim();
   if (trimmed === "" || isValidPhone(trimmed)) return "";
   return `Enter a telephone number with ${PHONE_DIGITS.min} to ${PHONE_DIGITS.max} digits, or leave it empty.`;
+}
+
+/**
+ * Mirrors the Worker's own rule (worker/src/contact/intake.ts).
+ *
+ * `type="email"` accepts `name@example`, which the Worker refuses for want of a
+ * dot in the domain. Without this the browser waves it through, and the visitor
+ * gets a flat "could not be accepted" back from a round trip that never had a
+ * chance — with nothing saying which of five fields was wrong.
+ */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function emailProblem(value: string): string {
+  const trimmed = value.trim();
+  // Empty is the `required` attribute's business and length is minlength's.
+  // Answering for them here would replace their message with a worse one.
+  if (trimmed === "" || EMAIL_SHAPE.test(trimmed)) return "";
+  return "Enter an email address with a domain, like name@example.com.";
+}
+
+/**
+ * Binds a rule the browser has no attribute for, and keeps it in step with what
+ * is in the field.
+ *
+ * The listener is the point rather than a nicety. `noValidate` is off, so the
+ * browser runs its own validation *before* it dispatches `submit` — which means
+ * a custom error set inside the submit handler and left there outlives the
+ * visitor fixing the field: the press that should clear it never reaches the
+ * handler, and the form cannot be sent at all until the page is reloaded. That
+ * is what happened to somebody who typed a word into the telephone field and
+ * then emptied it. Re-checking as the value changes is what keeps the error from
+ * outliving what it was about.
+ *
+ * Returns the check, because a value put there by anything but typing — a test,
+ * a paste some browsers do not report — still has to be measured before a press
+ * is acted on.
+ */
+function keepValid(control: HTMLInputElement, problem: (value: string) => string): () => void {
+  const check = () => control.setCustomValidity(problem(control.value));
+  control.addEventListener("input", check);
+  control.addEventListener("change", check);
+  return check;
 }
 
 function outcomeOf(status: number): Outcome {
