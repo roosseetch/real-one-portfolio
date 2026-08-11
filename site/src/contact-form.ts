@@ -24,6 +24,20 @@ export const LIMITS = {
 /** How many digits a phone number may hold. Fifteen is E.164's own ceiling. */
 const PHONE_DIGITS = { min: 7, max: 15 } as const;
 
+/** Digits in the code that is emailed. Fixed by the Worker, which mints them. */
+const CODE_LENGTH = 6;
+
+/**
+ * How long to wait for Turnstile to hand over a second token.
+ *
+ * A token is spent by the address check, so sending the message needs another,
+ * and the widget solves in the background. Five seconds is several times what a
+ * managed challenge takes, and short enough that nobody is left watching a
+ * disabled button wondering whether they pressed it.
+ */
+const TOKEN_WAIT_MS = 5_000;
+const TOKEN_POLL_MS = 150;
+
 /**
  * A phone number, checked by shape rather than by country.
  *
@@ -62,9 +76,11 @@ export interface ContactFormOptions {
   fetch?: typeof fetch;
   /** Resets the challenge after a submission, so a second message can be sent. */
   resetChallenge?: () => void;
+  /** How long to wait for the widget to produce a token. Shortened by the tests. */
+  tokenWaitMs?: number;
 }
 
-type Outcome = "queued" | "invalid" | "challenge" | "throttled" | "unavailable" | "network";
+type Outcome = "queued" | "code-sent" | "invalid" | "challenge" | "throttled" | "unavailable" | "network";
 
 /**
  * What the visitor is told, per outcome.
@@ -74,6 +90,7 @@ type Outcome = "queued" | "invalid" | "challenge" | "throttled" | "unavailable" 
  */
 const MESSAGES: Record<Outcome, string> = {
   queued: "Thank you. Your message has been accepted and is on its way.",
+  "code-sent": "Check your email for a six-digit code, type it below, and press Send again.",
   invalid: "That message could not be accepted. Please check the fields and try again.",
   challenge: "The anti-spam check did not pass. Please try the challenge again.",
   throttled: "That is a lot of messages at once. Please try again in a minute.",
@@ -86,16 +103,20 @@ function field(
   id: string,
   label: string,
   control: HTMLInputElement | HTMLTextAreaElement,
-  { required = true }: { required?: boolean } = {},
-): void {
+  { required = true, hidden = false }: { required?: boolean; hidden?: boolean } = {},
+): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = "form-field";
+  wrapper.hidden = hidden;
 
   const labelEl = document.createElement("label");
   labelEl.htmlFor = id;
   labelEl.textContent = label;
 
-  if (!required) {
+  // Only for a field the visitor can see and may skip. A hidden one is not
+  // optional, it is not being asked for yet — and it is required the moment it
+  // appears.
+  if (!required && !hidden) {
     // Said in the label rather than left to the absence of an asterisk, which
     // only means something to somebody who has already noticed the asterisks.
     const hint = document.createElement("span");
@@ -110,6 +131,7 @@ function field(
 
   wrapper.append(labelEl, control);
   form.append(wrapper);
+  return wrapper;
 }
 
 /**
@@ -193,6 +215,24 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   challenge.dataset.sitekey = siteKey;
   form.append(challenge);
 
+  // Hidden until a code has actually been sent. Rendered up front rather than
+  // built on demand so that revealing it cannot fail halfway.
+  const code = document.createElement("input");
+  code.type = "text";
+  code.inputMode = "numeric";
+  code.autocomplete = "one-time-code";
+  code.pattern = "\\d{6}";
+  code.maxLength = CODE_LENGTH;
+
+  const codeField = field(form, "code", "Code from your email", code, { required: false, hidden: true });
+
+  const resend = document.createElement("button");
+  resend.type = "button";
+  resend.className = "link-button";
+  resend.textContent = "Send a new code";
+  resend.hidden = true;
+  codeField.append(resend);
+
   const submit = document.createElement("button");
   submit.type = "submit";
   submit.className = "button primary";
@@ -203,11 +243,141 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   section.append(form);
 
   const send = options.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  const verifyEndpoint = `${endpoint}/verify`;
 
-  function say(outcome: Outcome): void {
-    status.textContent = MESSAGES[outcome];
-    status.classList.toggle("is-error", outcome !== "queued");
+  /** The address a code was last sent to, so changing it starts again. */
+  let awaitingCodeFor: string | null = null;
+  /** An address already proven in this visit: pressing Send twice must not re-verify. */
+  let provenAddress: string | null = null;
+  /** The last token handed to the Worker. A token is single-use, so this one is finished. */
+  let spentToken: string | null = null;
+
+  function say(outcome: Outcome, text = MESSAGES[outcome]): void {
+    status.textContent = text;
+    status.classList.toggle("is-error", outcome !== "queued" && outcome !== "code-sent");
   }
+
+  function showCodeField(show: boolean): void {
+    codeField.hidden = !show;
+    resend.hidden = !show;
+    code.required = show;
+    if (!show) code.value = "";
+  }
+
+  function currentToken(): string | null {
+    const value = new FormData(form).get(TOKEN_FIELD);
+    return typeof value === "string" && value !== "" ? value : null;
+  }
+
+  /**
+   * A token nobody has spent, waiting for the widget when there is not one yet.
+   *
+   * The common case costs nothing: a challenge that solved while the visitor was
+   * typing is read straight out of the form. The waiting is for the two moments
+   * the widget is between tokens — just after a reset, and while an interactive
+   * challenge is still being solved — where refusing immediately would be
+   * telling somebody they failed a check that had not finished.
+   *
+   * If the wait runs out with only a spent token to hand, that is what gets
+   * sent. The Worker gives a clear answer to it and the widget has reset by
+   * then, so a second press works; refusing here would produce the same
+   * sentence and nothing a second press could fix.
+   */
+  async function unspentToken(): Promise<string | null> {
+    const current = currentToken();
+    if (current !== null && current !== spentToken) return current;
+
+    // Only when a spent one is sitting in the form. A widget that is already
+    // mid-solve must not be knocked back to the start of it.
+    if (current !== null) options.resetChallenge?.();
+
+    const deadline = Date.now() + (options.tokenWaitMs ?? TOKEN_WAIT_MS);
+    for (;;) {
+      const value = currentToken();
+      if (value !== null && value !== spentToken) return value;
+      if (Date.now() >= deadline) return value;
+      await new Promise((resolve) => setTimeout(resolve, TOKEN_POLL_MS));
+    }
+  }
+
+  /**
+   * Step one: ask the Worker to prove the address, and find out whether it even
+   * needs proving.
+   *
+   * Spends the token it is given, whatever the answer, and says so — a token is
+   * single-use and the Worker has now seen this one.
+   */
+  async function proveAddress(token: string): Promise<"proven" | "code-sent" | "failed"> {
+    status.textContent = "Checking your email address…";
+    status.classList.remove("is-error");
+    options.track("contact_verification_requested");
+
+    let response: Response;
+    try {
+      spentToken = token;
+      response = await send(verifyEndpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: email.value, turnstileToken: token }),
+      });
+    } catch {
+      say("network");
+      options.track("contact_form_rejected", { reason: "network" });
+      return "failed";
+    }
+
+    if (!response.ok) {
+      const outcome = outcomeOf(response.status);
+      say(outcome);
+      options.track("contact_form_rejected", { reason: outcome, status: response.status });
+      // Fire and forget: the widget solves again in the background while the
+      // visitor reads what went wrong.
+      options.resetChallenge?.();
+      return "failed";
+    }
+
+    const answered = (await response.json().catch(() => null)) as { status?: string } | null;
+
+    if (answered?.status === "verified") {
+      // Nothing was emailed: this address proved itself recently enough.
+      provenAddress = email.value;
+      showCodeField(false);
+      options.track("contact_verification_skipped");
+      return "proven";
+    }
+
+    awaitingCodeFor = email.value;
+    showCodeField(true);
+    code.focus();
+    say("code-sent");
+    options.track("contact_verification_sent");
+    // Not awaited, and deliberately: the code field has to appear now, not in
+    // however long the widget takes. Reading a code out of an inbox buys all
+    // the time a new token needs.
+    options.resetChallenge?.();
+    return "code-sent";
+  }
+
+  resend.addEventListener("click", async () => {
+    if (submit.disabled) return;
+    if (!email.reportValidity()) return;
+
+    submit.disabled = true;
+    resend.disabled = true;
+
+    const token = await unspentToken();
+    if (token === null) {
+      say("challenge");
+    } else {
+      // Deliberately the same path as the first request. A resend is not a
+      // special case to the Worker: both codes stay valid, which is what
+      // somebody who asked twice and then found the first mail actually needs.
+      await proveAddress(token);
+    }
+
+    resend.disabled = false;
+    submit.disabled = false;
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -223,14 +393,52 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     // the field beats a sentence at the bottom of the form.
     if (!form.reportValidity()) return;
 
-    const token = new FormData(form).get(TOKEN_FIELD);
-    if (typeof token !== "string" || token === "") {
+    // Changing the address after a code was sent starts the proof again: the
+    // code in the field belongs to an inbox this is no longer being sent from.
+    if (awaitingCodeFor !== null && awaitingCodeFor !== email.value) {
+      awaitingCodeFor = null;
+      showCodeField(false);
+    }
+    if (provenAddress !== null && provenAddress !== email.value) provenAddress = null;
+
+    submit.disabled = true;
+
+    let token = await unspentToken();
+    if (token === null) {
       say("challenge");
       options.track("contact_form_rejected", { reason: "challenge-incomplete" });
+      submit.disabled = false;
       return;
     }
 
-    submit.disabled = true;
+    if (provenAddress === null && awaitingCodeFor === null) {
+      const proof = await proveAddress(token);
+      // A code is now on its way and the visitor has something to type, or the
+      // attempt failed and they have been told. Both end this press.
+      if (proof !== "proven") {
+        submit.disabled = false;
+        return;
+      }
+
+      // Verified already, so the message goes now — with a token the Worker has
+      // not seen, because the one above is spent.
+      const next = await unspentToken();
+      if (next === null) {
+        say("challenge");
+        submit.disabled = false;
+        return;
+      }
+      token = next;
+    }
+
+    // Belt and braces: the code field is only required once it is visible, and
+    // reportValidity ran before it was.
+    if (awaitingCodeFor !== null && !/^\d{6}$/.test(code.value.trim())) {
+      say("invalid", "Enter the six-digit code from your email.");
+      submit.disabled = false;
+      return;
+    }
+
     status.textContent = "Sending…";
     status.classList.remove("is-error");
 
@@ -249,9 +457,11 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     };
     if (company.value.trim() !== "") body.company = company.value;
     if (phone.value.trim() !== "") body.phone = phone.value;
+    if (awaitingCodeFor !== null) body.code = code.value.trim();
 
     let response: Response;
     try {
+      spentToken = token;
       response = await send(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -265,12 +475,23 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     }
 
     const outcome = outcomeOf(response.status);
-    say(outcome);
 
     if (outcome === "queued") {
+      say(outcome);
       options.track("contact_message_queued");
       form.reset();
+      showCodeField(false);
+      awaitingCodeFor = null;
+      provenAddress = null;
+    } else if (outcome === "challenge" && awaitingCodeFor !== null) {
+      // The Worker answers 403 both for a challenge it did not believe and for a
+      // code it did not accept. With a code in the request, the code is what it
+      // was about — and saying "anti-spam check" there would send somebody to
+      // fix the one thing that was fine.
+      say("invalid", "That code is not right, or it has expired. Check your email, or ask for a new one.");
+      options.track("contact_form_rejected", { reason: "code" });
     } else {
+      say(outcome);
       options.track("contact_form_rejected", { reason: outcome, status: response.status });
     }
 

@@ -15,11 +15,34 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidPhone, renderContactForm, type ContactFormOptions } from "./contact-form";
 
 const ENDPOINT = "https://worker.test/contact";
+const VERIFY = `${ENDPOINT}/verify`;
 const SITE_KEY = "0x-test-site-key";
 
-/** What the Worker answers, for a test that only cares about the status. */
-const answering = (status: number) =>
-  vi.fn(async () => new Response(status === 202 ? '{"status":"queued"}' : "", { status }));
+const isVerifyCall = (url: unknown) => String(url) === VERIFY;
+
+/**
+ * What the Worker answers.
+ *
+ * Two endpoints now: the address check, then the message. Unless a test says
+ * otherwise the address is already verified, so the flow runs straight through
+ * and a test about what the Worker says to a *message* does not have to set up
+ * a code first.
+ */
+const answering = (status: number, verify = '{"status":"verified"}') =>
+  vi.fn(async (url: unknown, _init?: RequestInit) =>
+    isVerifyCall(url)
+      ? new Response(verify, { status: 200 })
+      : new Response(status === 202 ? '{"status":"queued"}' : "", { status }),
+  );
+
+/** The message POST, whichever call it turned out to be. */
+function messageCall(send: ReturnType<typeof answering>): [string, RequestInit] {
+  const call = send.mock.calls.find(([url]) => !isVerifyCall(url));
+  if (call === undefined) throw new Error("the message was never posted");
+  return call as unknown as [string, RequestInit];
+}
+
+const bodyOf = (call: [string, RequestInit]) => JSON.parse(String(call[1].body));
 
 function mount(options: Partial<ContactFormOptions> = {}) {
   document.body.innerHTML = "";
@@ -29,12 +52,28 @@ function mount(options: Partial<ContactFormOptions> = {}) {
   const track = vi.fn();
   const send = options.fetch ?? answering(202);
 
+  // Standing in for the widget rather than for a spy on it: a real reset
+  // produces a *new* token, and the form waits for one before its second call.
+  // A reset that left the old token in place would hang the form here and
+  // nowhere else, which is the opposite of what the tests should model.
+  let tokens = 0;
+  const observed = options.resetChallenge;
+  const resetChallenge = () => {
+    observed?.();
+    const input = section.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]');
+    if (input !== null) input.value = `solved-token-${++tokens}`;
+  };
+
   renderContactForm(section, {
     endpoint: ENDPOINT,
     siteKey: SITE_KEY,
     track,
-    fetch: send as unknown as typeof fetch,
+    // The real wait is five seconds, for a widget that is mid-solve. Nothing
+    // here is ever mid-solve: a token is either in the form or it is not.
+    tokenWaitMs: 50,
     ...options,
+    fetch: send as unknown as typeof fetch,
+    resetChallenge,
   });
 
   return { section, track, send };
@@ -62,10 +101,24 @@ function fill(form: HTMLFormElement, message = "Hello, I would like to get in to
   control(form, "message").value = message;
 }
 
-/** Submits and waits for the handler's own promise chain to settle. */
+/** What the form says while it is still working, and nothing has been decided. */
+const IN_FLIGHT = ["Checking your email address…", "Sending…"];
+
+/**
+ * Submits and waits for the handler's own promise chain to settle.
+ *
+ * Both conditions are needed. The status alone would let a press through while
+ * the form was between its two calls, and the button alone is momentarily
+ * enabled before the handler has disabled it.
+ */
 async function submit(form: HTMLFormElement) {
+  const section = form.parentElement as HTMLElement;
   form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(statusOf(form.parentElement as HTMLElement).textContent).not.toBe("Sending…"));
+
+  await vi.waitFor(() => {
+    expect(IN_FLIGHT).not.toContain(statusOf(section).textContent);
+    expect(submitOf(section).disabled).toBe(false);
+  });
 }
 
 beforeEach(() => {
@@ -106,15 +159,46 @@ describe("submitting", () => {
 
     await submit(form);
 
-    expect(send).toHaveBeenCalledOnce();
-    const [url, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = messageCall(send);
     expect(url).toBe(ENDPOINT);
     expect(JSON.parse(String(init.body))).toEqual({
       name: "A Visitor",
       email: "visitor@example.com",
       message: "Hello, I would like to get in touch about a project.",
+      // The second token: the first was spent proving the address.
+      turnstileToken: "solved-token-1",
+    });
+  });
+
+  it("proves the address before it posts the message, and not the other way round", async () => {
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(send.mock.calls.map(([url]) => String(url))).toEqual([VERIFY, ENDPOINT]);
+    expect(bodyOf(send.mock.calls[0] as unknown as [string, RequestInit])).toEqual({
+      email: "visitor@example.com",
       turnstileToken: "solved-token",
     });
+  });
+
+  it("never sends the same challenge token twice", async () => {
+    const send = answering(202);
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    const tokens = send.mock.calls.map(
+      ([, init]) => JSON.parse(String((init as RequestInit).body)).turnstileToken,
+    );
+    expect(new Set(tokens).size).toBe(tokens.length);
   });
 
   it("sends the optional fields when they were filled in", async () => {
@@ -128,8 +212,7 @@ describe("submitting", () => {
 
     await submit(form);
 
-    const [, init] = send.mock.calls[0] as unknown as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    expect(bodyOf(messageCall(send))).toMatchObject({
       company: "Acme Research",
       phone: "+44 20 7946 0958",
     });
@@ -146,8 +229,7 @@ describe("submitting", () => {
 
     await submit(form);
 
-    const [, init] = send.mock.calls[0] as unknown as [string, RequestInit];
-    expect(Object.keys(JSON.parse(String(init.body))).sort()).toEqual([
+    expect(Object.keys(bodyOf(messageCall(send))).sort()).toEqual([
       "email",
       "message",
       "name",
@@ -201,7 +283,9 @@ describe("submitting", () => {
 
     await submit(form);
 
-    expect(resetChallenge).toHaveBeenCalledOnce();
+    // Twice, not once: every call spends a token, so the address check resets
+    // the widget on its way out and the message does the same after it.
+    expect(resetChallenge).toHaveBeenCalledTimes(2);
   });
 
   it("re-enables the button after a refusal", async () => {
@@ -294,6 +378,196 @@ describe("the fields", () => {
 
     expect(send).not.toHaveBeenCalled();
     expect(control(form, "phone").validationMessage).toContain("7 to 15 digits");
+  });
+});
+
+describe("proving the address", () => {
+  /** The Worker's answer when it has just emailed a code. */
+  const codeSent = () => answering(202, '{"status":"code-sent"}');
+
+  const codeInput = (section: HTMLElement) => control(formOf(section), "code") as HTMLInputElement;
+  const codeFieldOf = (section: HTMLElement) =>
+    codeInput(section).closest(".form-field") as HTMLElement;
+  const resendOf = (section: HTMLElement) => section.querySelector(".link-button") as HTMLButtonElement;
+
+  it("hides the code field until a code has actually been sent", () => {
+    const { section } = mount();
+
+    expect(codeFieldOf(section).hidden).toBe(true);
+    expect(resendOf(section).hidden).toBe(true);
+    expect(codeInput(section).required).toBe(false);
+  });
+
+  it("asks for the code, and posts no message, when one was emailed", async () => {
+    const send = codeSent();
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(send.mock.calls.map(([url]) => String(url))).toEqual([VERIFY]);
+    expect(codeFieldOf(section).hidden).toBe(false);
+    expect(codeInput(section).required).toBe(true);
+    expect(statusOf(section).textContent).toContain("six-digit code");
+    expect(statusOf(section).classList.contains("is-error")).toBe(false);
+  });
+
+  it("sends the message with the code on the second press", async () => {
+    const send = codeSent();
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+
+    codeInput(section).value = "123456";
+    await submit(form);
+
+    expect(bodyOf(messageCall(send))).toMatchObject({ code: "123456" });
+    expect(statusOf(section).textContent).toContain("accepted");
+  });
+
+  it("does not ask the Worker again once the address is proven", async () => {
+    const send = codeSent();
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+    codeInput(section).value = "123456";
+
+    await submit(form);
+
+    expect(send.mock.calls.filter(([url]) => isVerifyCall(url))).toHaveLength(1);
+  });
+
+  it("refuses to send with a code of the wrong shape, without spending a request", async () => {
+    const send = codeSent();
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+    codeInput(section).value = "12345";
+
+    await submit(form);
+
+    expect(send.mock.calls.filter(([url]) => !isVerifyCall(url))).toEqual([]);
+    expect(statusOf(section).textContent).toContain("six-digit code");
+    expect(statusOf(section).classList.contains("is-error")).toBe(true);
+  });
+
+  it("blames the code rather than the challenge when the Worker refuses one", async () => {
+    // The Worker answers 403 for both, and with a code in the request it is the
+    // code that was refused — sending somebody to redo the challenge would have
+    // them fix the one thing that was fine.
+    const send = vi.fn(async (url: unknown) =>
+      isVerifyCall(url)
+        ? new Response('{"status":"code-sent"}', { status: 200 })
+        : new Response('{"status":"refused","reason":"unverified"}', { status: 403 }),
+    );
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+    codeInput(section).value = "123456";
+
+    await submit(form);
+
+    expect(statusOf(section).textContent).toContain("not right, or it has expired");
+    expect(statusOf(section).textContent).not.toContain("anti-spam");
+  });
+
+  it("starts again when the address is changed after a code was sent", async () => {
+    const send = codeSent();
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+    codeInput(section).value = "123456";
+
+    control(form, "email").value = "someone-else@example.com";
+    await submit(form);
+
+    // A second code request, for the new address, and the old code discarded.
+    expect(send.mock.calls.filter(([url]) => isVerifyCall(url))).toHaveLength(2);
+    expect(bodyOf(send.mock.calls[1] as unknown as [string, RequestInit]).email).toBe(
+      "someone-else@example.com",
+    );
+    expect(codeInput(section).value).toBe("");
+  });
+
+  it("asks for another code without touching the message, and keeps the field showing", async () => {
+    const send = codeSent();
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+
+    resendOf(section).click();
+    await vi.waitFor(() => expect(send.mock.calls).toHaveLength(2));
+
+    expect(send.mock.calls.every(([url]) => isVerifyCall(url))).toBe(true);
+    expect(codeFieldOf(section).hidden).toBe(false);
+  });
+
+  it("clears the code field once the message has gone", async () => {
+    const send = codeSent();
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+    await submit(form);
+    codeInput(section).value = "123456";
+
+    await submit(form);
+
+    expect(codeFieldOf(section).hidden).toBe(true);
+    expect(codeInput(section).value).toBe("");
+  });
+
+  it("says a code cannot be asked for again so soon, rather than asking for one to be typed", async () => {
+    const send = vi.fn(async () => new Response('{"status":"refused","reason":"too-many-codes"}', { status: 429 }));
+    const { section } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(statusOf(section).textContent).toContain("try again in a minute");
+    expect(codeFieldOf(section).hidden).toBe(true);
+  });
+
+  it("records the verification steps for analytics, with no address in them", async () => {
+    const send = codeSent();
+    const { section, track } = mount({ fetch: send as unknown as typeof fetch });
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(track).toHaveBeenCalledWith("contact_verification_requested");
+    expect(track).toHaveBeenCalledWith("contact_verification_sent");
+    const properties = track.mock.calls.flatMap((call) => Object.values(call[1] ?? {}));
+    expect(properties).not.toContain("visitor@example.com");
+  });
+
+  it("records that an address needed no code at all", async () => {
+    const { section, track } = mount();
+    const form = formOf(section);
+    fill(form);
+    solveChallenge(form);
+
+    await submit(form);
+
+    expect(track).toHaveBeenCalledWith("contact_verification_skipped");
   });
 });
 

@@ -210,6 +210,9 @@ may reference and what each name is for. This is where the values come from.
 | `PAGES_CUSTOM_DOMAIN` | the site hostname, once step 9 has configured it |
 | `AMPLITUDE_API_KEY`, `AMPLITUDE_SERVER_URL` | optional; see [Analytics](#analytics) |
 | `TURNSTILE_SITE_KEY` | main stack's `turnstile_site_key` output. Optional, but without it `/contact/` renders a notice instead of a form |
+| `CONTACT_EMAIL_FROM` | the `From:` on the contact form's verification mail, at a domain the email provider has verified — `Contact <no-reply@example.com>`. Optional, but without it no code can be sent and no message gets through |
+| `EMAIL_DKIM_PUBLIC_KEY` | the whole `p=…` string the email provider issues when the domain is onboarded. Terraform writes it to `resend._domainkey.<domain>` |
+| `EMAIL_BOUNCE_HOST` | where the provider collects bounces, `feedback-smtp.<region>.amazonses.com`. Region-specific, so read it off the provider's setup page. With either of these unset, Terraform writes **none** of the sending records — a domain claiming a provider it has no key for is worse than one claiming nothing |
 | `MEDIA_WORKFLOW_FILE` | optional; defaults to `process-media.yml` |
 | `CONTACT_WORKFLOW_FILE` | optional; defaults to `validate-contact.yml` |
 
@@ -228,6 +231,7 @@ may reference and what each name is for. This is where the values come from.
 | `CALLBACK_HMAC_SECRET` | `openssl rand -hex 32`. Shared with the media and contact workflows, and the only reason the Worker believes a callback |
 | `TURNSTILE_SECRET_KEY` | main stack's `turnstile_secret_key` output. The Worker verifies every contact submission's token against it |
 | `WORKERS_AI_API_TOKEN` | a Cloudflare API token with **Account → Workers AI → Read** and nothing else. It runs the model that screens a contact message, and is deliberately not `CLOUDFLARE_API_TOKEN`, which can rewrite the buckets and the DNS |
+| `RESEND_API_KEY` | a Resend API key with **sending access only**. It mails the contact form's verification codes. Resend also needs the sending domain verified, which means its DKIM and SPF records in the zone — add them to `infrastructure/main/dns.tf` rather than by hand, so the next deployment has them too |
 
 Each R2 API token yields an S3 pair directly: Cloudflare shows the access key id
 and the secret once, at creation. Scope each one to the buckets named above and
@@ -507,6 +511,11 @@ Sending a message crosses four systems, and the split is the same one the media
 pipeline uses: the thing that screens content is not the thing that decides what
 reaches her.
 
+0. **The address is proved first.** Pressing Send posts the address and a
+   challenge token to `/contact/verify`, which either answers that the address
+   proved itself inside the last thirty days, or emails a six-digit code and
+   says so. In the second case a code field appears and Send is pressed again.
+   See "Proving the address" below.
 1. **The browser** solves a Cloudflare Turnstile challenge and posts the fields
    and the token to the Worker's `/contact`. Name, address and message are
    required; company and telephone are optional, and one left blank is sent as
@@ -549,9 +558,43 @@ or `WORKER_BASE_URL` the page renders a notice instead of a form, and the Pages
 workflow warns. Without `TURNSTILE_SECRET_KEY` the Worker refuses every
 submission and says so once in its log.
 
-Amplitude records `contact_page_viewed`, `contact_form_submitted` (with the
-message's length, never its text), and then `contact_message_queued` or
-`contact_form_rejected` with the reason.
+Amplitude records `contact_page_viewed`, `contact_verification_requested` and
+one of `contact_verification_sent` / `contact_verification_skipped`, then
+`contact_form_submitted` (with the message's length, never its text), and
+finally `contact_message_queued` or `contact_form_rejected` with the reason.
+
+### Proving the address
+
+Nothing reaches her from an address nobody can read. `/contact/verify` mails a
+six-digit code, good for thirty minutes and three wrong guesses, and `/contact`
+refuses a message that carries neither a code nor a verification from the last
+thirty days. A code that is resent does not cancel the one before it: somebody
+who asks twice and then finds the first mail should not be punished for our
+latency, so up to five stay live at once and any of them works.
+
+There is no cron and nothing to sweep. Three CSV files under `contact-records/`
+hold the state — `codes.csv`, `verified.csv` and `messages.csv` — and issuing a
+code walks `codes.csv` from its oldest line down, dropping what has aged out and
+stopping at the first line that has not. The file is trimmed by the traffic that
+would otherwise grow it, and a form nobody uses costs nothing to keep tidy.
+
+They are read-modify-written whole, against R2's conditional writes: the write
+carries the etag the read saw, R2 refuses it if the object moved on, and the
+caller retries with the newer file. Fields are quoted to RFC 4180, so a message
+containing commas, quotation marks and newlines is a record rather than a way to
+choose how many columns a row appears to have.
+
+`contact-records/` deliberately sits outside the `contact/` prefix the bucket's
+lifecycle rule expires. **`messages.csv` therefore keeps every visitor's name,
+address, telephone number and words indefinitely** — that is what it is for, and
+it is a file to prune deliberately rather than one that tidies itself.
+
+Sending the mail needs a provider: a Worker cannot put mail on the wire by
+itself, and Cloudflare's own send binding only delivers to addresses the account
+has already verified, which is backwards for proving a stranger owns theirs.
+This uses Resend, through `RESEND_API_KEY` and the `CONTACT_EMAIL_FROM` address.
+Without either, `/contact/verify` answers 503, the form says messages cannot be
+accepted right now, and the Worker's log says which of the two is missing.
 
 ## Backups and export
 

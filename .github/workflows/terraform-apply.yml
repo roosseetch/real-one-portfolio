@@ -57,6 +57,10 @@ jobs:
       TF_VAR_github_pages_owner: ${{ vars.PAGES_OWNER || '' }}
       TF_VAR_worker_enabled: ${{ vars.WORKER_ENABLED || 'false' }}
       TF_VAR_worker_name: ${{ vars.WORKER_NAME }}
+      # The provider-issued records that let the domain send the contact
+      # form's verification codes. Unset leaves all three records out.
+      TF_VAR_email_dkim_public_key: ${{ vars.EMAIL_DKIM_PUBLIC_KEY || '' }}
+      TF_VAR_email_bounce_host: ${{ vars.EMAIL_BOUNCE_HOST || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1

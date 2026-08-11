@@ -10,7 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
+import { issueCode, recordVerification } from "./codes";
+import { parseCsv } from "./csv";
 import { handleContactSubmission } from "./intake";
+import { MESSAGES_KEY } from "./records";
 
 const SITE = "https://site.example";
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -21,11 +24,17 @@ let outbound: string[];
 let challengePasses: boolean;
 let dispatchStatus: number;
 
-beforeEach(() => {
+beforeEach(async () => {
   storage = createFakeBucket();
   outbound = [];
   challengePasses = true;
   dispatchStatus = 204;
+
+  // The address every fixture submission uses, already proven. Verification is
+  // a step of its own with its own suite (verify.test.ts); what these tests are
+  // about is what happens to a message once it is past that gate. The tests
+  // below that care about the gate itself set up their own state.
+  await recordVerification(storage.bucket, "visitor@example.com");
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
     const target = String(url);
@@ -291,6 +300,97 @@ describe("accepting", () => {
 
     expect(response.status).toBe(503);
     expect(dispatched()).toEqual([]);
+  });
+});
+
+describe("proving the address", () => {
+  /** A submission from an address nobody has verified. */
+  const stranger = { ...VALID, email: "stranger@example.com" };
+
+  it("refuses a message from an address that has proved nothing", async () => {
+    const response = await handleContactSubmission(post(stranger), env());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ status: "refused", reason: "unverified" });
+    expect(submissions()).toEqual([]);
+    expect(dispatched()).toEqual([]);
+  });
+
+  it("accepts one carrying the code that was mailed", async () => {
+    const issued = await issueCode(storage.bucket, stranger.email);
+    if (issued.status !== "issued") throw new Error("expected a code");
+
+    const response = await handleContactSubmission(post({ ...stranger, code: issued.code }), env());
+
+    expect(response.status).toBe(202);
+  });
+
+  it("refuses one carrying a code that was never sent", async () => {
+    await issueCode(storage.bucket, stranger.email);
+
+    const response = await handleContactSubmission(post({ ...stranger, code: "000000" }), env());
+
+    expect(response.status).toBe(403);
+    expect(submissions()).toEqual([]);
+  });
+
+  it("refuses a code of the wrong shape without reading the file", async () => {
+    const response = await handleContactSubmission(post({ ...stranger, code: "12345" }), env());
+
+    expect(response.status).toBe(400);
+  });
+
+  it("lets a recently verified address through with no code at all", async () => {
+    const response = await handleContactSubmission(post(VALID), env());
+
+    expect(response.status).toBe(202);
+  });
+
+  it("says nothing about which of the three ways it was wrong", async () => {
+    const never = await handleContactSubmission(post(stranger), env());
+    const wrong = await handleContactSubmission(
+      post({ ...stranger, code: "000000" }, { address: "198.51.100.9" }),
+      env(),
+    );
+
+    expect(await never.json()).toEqual(await wrong.json());
+  });
+});
+
+describe("the message record", () => {
+  it("appends every field of the form, and when it was sent", async () => {
+    await handleContactSubmission(
+      post({ ...VALID, company: "Acme Research", phone: "+44 20 7946 0958" }),
+      env(),
+    );
+
+    const [row] = parseCsv(storage.objects.get(MESSAGES_KEY) ?? "");
+    expect(row.slice(0, 5)).toEqual([
+      "A Visitor",
+      "visitor@example.com",
+      "Acme Research",
+      "+44 20 7946 0958",
+      "Hello, I would like to talk about a project.",
+    ]);
+    expect(Date.parse(row[5])).not.toBeNaN();
+  });
+
+  it("records nothing for a message it refused", async () => {
+    challengePasses = false;
+
+    await handleContactSubmission(post(VALID), env());
+
+    expect(storage.objects.get(MESSAGES_KEY)).toBeUndefined();
+  });
+
+  it("still accepts the message when the record cannot be written", async () => {
+    // The visitor's message is stored and dispatched by this point. Telling
+    // them it failed would only have them send it again.
+    storage.failPutsFor((key) => key === MESSAGES_KEY);
+
+    const response = await handleContactSubmission(post(VALID), env());
+
+    expect(response.status).toBe(202);
   });
 });
 

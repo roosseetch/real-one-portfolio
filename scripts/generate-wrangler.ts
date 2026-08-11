@@ -22,6 +22,17 @@ const DEFAULTS: Record<string, string> = {
   CONTACT_WORKFLOW_FILE: "validate-contact.yml",
 };
 
+/**
+ * Placeholders that may legitimately be empty.
+ *
+ * Every other one names something the Worker cannot run without, and an empty
+ * value there means a deployment wired to nothing — which is why this script
+ * refuses rather than guesses. These two configure a feature that turns itself
+ * off when it is unset: no analytics key, no relay; no From: address, no
+ * verification mail, and the endpoint says so instead of pretending.
+ */
+const OPTIONAL = new Set(["AMPLITUDE_API_KEY", "CONTACT_EMAIL_FROM"]);
+
 const template = readFileSync(templatePath, "utf8");
 const placeholders = [...new Set([...template.matchAll(/__([A-Z0-9_]+)__/g)].map((m) => m[1]))];
 
@@ -31,6 +42,10 @@ const values = new Map<string, string>();
 for (const name of placeholders) {
   const value = process.env[name] ?? DEFAULTS[name];
   if (!value) {
+    if (OPTIONAL.has(name)) {
+      values.set(name, "");
+      continue;
+    }
     missing.push(name);
     continue;
   }
