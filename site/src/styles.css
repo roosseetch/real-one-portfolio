@@ -458,6 +458,12 @@ main {
   font-weight: 500;
 }
 
+/* Part of the label, so it is read out with it, but not part of its emphasis. */
+.field-optional {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .form-field input,
 .form-field textarea {
   font: inherit;

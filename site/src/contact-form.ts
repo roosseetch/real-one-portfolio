@@ -15,9 +15,31 @@
 /** Mirrors the Worker's own limits (worker/src/contact/intake.ts). Both sides check. */
 export const LIMITS = {
   name: { min: 1, max: 100 },
-  email: { max: 254 },
-  message: { min: 10, max: 2000 },
+  email: { min: 7, max: 64 },
+  company: { min: 3, max: 64 },
+  phone: { max: 24 },
+  message: { min: 10, max: 300 },
 } as const;
+
+/** How many digits a phone number may hold. Fifteen is E.164's own ceiling. */
+const PHONE_DIGITS = { min: 7, max: 15 } as const;
+
+/**
+ * A phone number, checked by shape rather than by country.
+ *
+ * Deliberately forgiving about how it is written — `+44 20 7946 0958`,
+ * `(020) 7946 0958` and `020-7946-0958` are all the same number to a person —
+ * and strict only about there being a plausible count of digits in it. Guessing
+ * at national formats would reject real numbers, and this field is optional:
+ * refusing a message over it would cost more than it could ever save.
+ */
+export function isValidPhone(value: string): boolean {
+  if (value.length > LIMITS.phone.max) return false;
+  if (!/^\+?[\d\s().-]+$/.test(value)) return false;
+
+  const digits = value.replace(/\D/g, "").length;
+  return digits >= PHONE_DIGITS.min && digits <= PHONE_DIGITS.max;
+}
 
 /**
  * The hidden input Turnstile writes its token into. Fixed by Turnstile, not by
@@ -64,6 +86,7 @@ function field(
   id: string,
   label: string,
   control: HTMLInputElement | HTMLTextAreaElement,
+  { required = true }: { required?: boolean } = {},
 ): void {
   const wrapper = document.createElement("div");
   wrapper.className = "form-field";
@@ -72,9 +95,18 @@ function field(
   labelEl.htmlFor = id;
   labelEl.textContent = label;
 
+  if (!required) {
+    // Said in the label rather than left to the absence of an asterisk, which
+    // only means something to somebody who has already noticed the asterisks.
+    const hint = document.createElement("span");
+    hint.className = "field-optional";
+    hint.textContent = " (optional)";
+    labelEl.append(hint);
+  }
+
   control.id = id;
   control.name = id;
-  control.required = true;
+  control.required = required;
 
   wrapper.append(labelEl, control);
   form.append(wrapper);
@@ -125,7 +157,23 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   const email = document.createElement("input");
   email.type = "email";
   email.autocomplete = "email";
+  email.minLength = LIMITS.email.min;
   email.maxLength = LIMITS.email.max;
+
+  const company = document.createElement("input");
+  company.type = "text";
+  company.autocomplete = "organization";
+  // minLength is not a floor on an empty optional field: the browser applies it
+  // only to a value somebody actually typed, which is exactly the rule wanted
+  // here. The Worker checks it again for the case where nobody typed anything
+  // in a browser at all.
+  company.minLength = LIMITS.company.min;
+  company.maxLength = LIMITS.company.max;
+
+  const phone = document.createElement("input");
+  phone.type = "tel";
+  phone.autocomplete = "tel";
+  phone.maxLength = LIMITS.phone.max;
 
   const message = document.createElement("textarea");
   message.rows = 6;
@@ -134,6 +182,8 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
 
   field(form, "name", "Your name", name);
   field(form, "email", "Your email", email);
+  field(form, "company", "Your company", company, { required: false });
+  field(form, "phone", "Your telephone", phone, { required: false });
   field(form, "message", "Your message", message);
 
   // Turnstile finds this by class once its script loads, renders the challenge
@@ -163,6 +213,12 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     event.preventDefault();
     if (submit.disabled) return;
 
+    // A number's shape is the one rule with no HTML attribute behind it, so it
+    // is handed to the browser as a custom message and reported with the rest —
+    // a visitor should not have to find out which of five fields is wrong from a
+    // sentence at the bottom of the form.
+    phone.setCustomValidity(phoneProblem(phone.value));
+
     // The browser's own validation first: it knows the field, and pointing at
     // the field beats a sentence at the bottom of the form.
     if (!form.reportValidity()) return;
@@ -182,17 +238,24 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     // stranger wrote to her is not something to hand to a third party.
     options.track("contact_form_submitted", { message_length: message.value.length });
 
+    // The optional fields are sent only when they were filled in, so an empty
+    // one arrives as an absent key rather than as an empty string the Worker
+    // would have to interpret.
+    const body: Record<string, string> = {
+      name: name.value,
+      email: email.value,
+      message: message.value,
+      turnstileToken: token,
+    };
+    if (company.value.trim() !== "") body.company = company.value;
+    if (phone.value.trim() !== "") body.phone = phone.value;
+
     let response: Response;
     try {
       response = await send(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          name: name.value,
-          email: email.value,
-          message: message.value,
-          turnstileToken: token,
-        }),
+        body: JSON.stringify(body),
       });
     } catch {
       say("network");
@@ -217,6 +280,13 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
     options.resetChallenge?.();
     submit.disabled = false;
   });
+}
+
+/** Empty is fine — the field is optional — and so is anything isValidPhone accepts. */
+function phoneProblem(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "" || isValidPhone(trimmed)) return "";
+  return `Enter a telephone number with ${PHONE_DIGITS.min} to ${PHONE_DIGITS.max} digits, or leave it empty.`;
 }
 
 function outcomeOf(status: number): Outcome {

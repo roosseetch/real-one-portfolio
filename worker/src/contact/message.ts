@@ -55,7 +55,7 @@ function readableReason(reason: string): string {
  * than what the check made of it.
  */
 export function formatContactMessage(submission: ContactSubmission): string {
-  const { name, email, text } = submission.message;
+  const { name, email, company, phone, text } = submission.message;
   const verdict = submission.verdict;
 
   const lines = [
@@ -63,6 +63,11 @@ export function formatContactMessage(submission: ContactSubmission): string {
     "",
     `From: ${name} <${email}>`,
   ];
+
+  // Only when the visitor gave them. An empty "Company:" line would say nothing
+  // and still take up a line in a chat message read on a phone.
+  if (company) lines.push(`Company: ${company}`);
+  if (phone) lines.push(`Phone: ${phone}`);
 
   if (verdict?.outcome === "undetermined") {
     // Said plainly rather than left out. A message that reached her without

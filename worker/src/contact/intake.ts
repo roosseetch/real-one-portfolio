@@ -20,10 +20,17 @@ import { MAX_TOKEN_LENGTH, verifyTurnstile, type TurnstileEnv } from "./turnstil
 /** Mirrors the form's own limits (site/src/contact-form.ts). Both sides check; only this one counts. */
 const LIMITS = {
   name: { min: 1, max: 100 },
-  // The longest address RFC 5321 allows.
-  email: { max: 254 },
-  message: { min: 10, max: 2000 },
+  // Well under RFC 5321's 254, which is deliberate: a shorter ceiling was asked
+  // for, and an address longer than this is rare enough that refusing it costs
+  // less than the field would.
+  email: { min: 7, max: 64 },
+  company: { min: 3, max: 64 },
+  phone: { max: 24 },
+  message: { min: 10, max: 300 },
 } as const;
+
+/** How many digits a phone number may hold. Fifteen is E.164's own ceiling. */
+const PHONE_DIGITS = { min: 7, max: 15 } as const;
 
 /**
  * Comfortably past a full-length message plus a token, and far short of what it
@@ -34,6 +41,21 @@ const MAX_BODY_BYTES = 16 * 1024;
 /** Pragmatic rather than RFC-complete: one @, something either side, a dot in the domain. */
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * A phone number by shape rather than by country: any of `+44 20 7946 0958`,
+ * `(020) 7946 0958` or `020-7946-0958`, so long as the digits in it come to a
+ * plausible count. Guessing at national formats would refuse real numbers, and
+ * this field is optional — refusing a whole message over it would cost more
+ * than it could save.
+ */
+function isValidPhone(value: string): boolean {
+  if (value.length > LIMITS.phone.max) return false;
+  if (!/^\+?[\d\s().-]+$/.test(value)) return false;
+
+  const digits = value.replace(/\D/g, "").length;
+  return digits >= PHONE_DIGITS.min && digits <= PHONE_DIGITS.max;
+}
+
 export interface ContactIntakeEnv extends TurnstileEnv, ContactDispatchEnv {
   PRIVATE_BUCKET: R2Bucket;
   SITE_BASE_URL: string;
@@ -42,6 +64,9 @@ export interface ContactIntakeEnv extends TurnstileEnv, ContactDispatchEnv {
 interface Submitted {
   name: string;
   email: string;
+  /** Null for a field the visitor left blank, which both of these are allowed to be. */
+  company: string | null;
+  phone: string | null;
   message: string;
   turnstileToken: string;
 }
@@ -74,9 +99,26 @@ function answer(status: number, origin: string | null, body?: Record<string, str
 }
 
 /**
- * Reads the four fields, or returns null.
+ * An optional field, in the three states it can arrive in: absent or blank
+ * (null), present and usable (the trimmed string), or present and not a string
+ * at all (false, which refuses the submission).
  *
- * Every string is trimmed before it is measured, so a message of two thousand
+ * A blank one is not an error. Somebody who tabs through a field and types a
+ * space has left it empty, and telling them otherwise would be pedantry about a
+ * field they were invited to skip.
+ */
+function optionalText(value: unknown): string | null | false {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return false;
+
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * Reads the fields, or returns null.
+ *
+ * Every string is trimmed before it is measured, so a message of three hundred
  * spaces is the empty message it actually is.
  */
 function parseSubmitted(raw: string): Submitted | null {
@@ -99,12 +141,18 @@ function parseSubmitted(raw: string): Submitted | null {
 
   if (name === null || email === null || message === null || turnstileToken === null) return null;
 
+  const company = optionalText(body.company);
+  const phone = optionalText(body.phone);
+  if (company === false || phone === false) return null;
+
   if (name.length < LIMITS.name.min || name.length > LIMITS.name.max) return null;
-  if (email.length > LIMITS.email.max || !EMAIL.test(email)) return null;
+  if (email.length < LIMITS.email.min || email.length > LIMITS.email.max || !EMAIL.test(email)) return null;
+  if (company !== null && (company.length < LIMITS.company.min || company.length > LIMITS.company.max)) return null;
+  if (phone !== null && !isValidPhone(phone)) return null;
   if (message.length < LIMITS.message.min || message.length > LIMITS.message.max) return null;
   if (turnstileToken.length === 0 || turnstileToken.length > MAX_TOKEN_LENGTH) return null;
 
-  return { name, email, message, turnstileToken };
+  return { name, email, company, phone, message, turnstileToken };
 }
 
 export async function handleContactSubmission(request: Request, env: ContactIntakeEnv): Promise<Response> {
@@ -163,7 +211,15 @@ export async function handleContactSubmission(request: Request, env: ContactInta
 
   const jobToken = newJobToken();
   const submission = newSubmission(
-    { name: submitted.name, email: submitted.email, text: submitted.message },
+    {
+      name: submitted.name,
+      email: submitted.email,
+      // Omitted rather than stored empty, so what is written down is what the
+      // visitor actually chose to say.
+      ...(submitted.company === null ? {} : { company: submitted.company }),
+      ...(submitted.phone === null ? {} : { phone: submitted.phone }),
+      text: submitted.message,
+    },
     jobToken,
   );
 

@@ -507,8 +507,10 @@ Sending a message crosses four systems, and the split is the same one the media
 pipeline uses: the thing that screens content is not the thing that decides what
 reaches her.
 
-1. **The browser** solves a Cloudflare Turnstile challenge and posts the three
-   fields and the token to the Worker's `/contact`.
+1. **The browser** solves a Cloudflare Turnstile challenge and posts the fields
+   and the token to the Worker's `/contact`. Name, address and message are
+   required; company and telephone are optional, and one left blank is sent as
+   an absent key rather than an empty string.
 2. **The Worker** accepts only its own site's origin, checks the field lengths,
    allows one submission per address per minute, and asks Cloudflare to verify
    the token. It then writes the message to `contact/<id>/submission.json` in
@@ -527,6 +529,13 @@ reaches her.
    or, on a `discard` verdict, sends nothing at all. The words that arrive are
    the stored ones; a signed callback carrying different text could not put them
    in front of her.
+
+The limits live in two places on purpose — `site/src/contact-form.ts` for the
+browser and `worker/src/contact/intake.ts` for the Worker — and only the
+Worker's copy decides anything. Name 1–100, email 7–64, company 3–64, message
+10–300, and a telephone number of 7 to 15 digits in any punctuation. The
+telephone is checked by shape rather than by country: guessing at national
+formats refuses real numbers, and it is an optional field.
 
 The whole round trip is a minute or two, which is why the page never claims
 delivery. A job that fails at any stage reports `undetermined` rather than

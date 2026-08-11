@@ -8,7 +8,13 @@
  * bucket, which the job reads with credentials that can only read.
  */
 
-export const CONTACT_SCHEMA_VERSION = 1;
+/**
+ * 2 added the optional company and telephone fields. Readers stayed compatible
+ * with 1 rather than migrating: both fields are optional, an object written
+ * before them simply has neither, and nothing stored here outlives the
+ * lifecycle rule on the `contact/` prefix by more than a few days anyway.
+ */
+export const CONTACT_SCHEMA_VERSION = 2;
 
 /**
  * `checking` is the only state a submission is created in, and the only one it
@@ -34,10 +40,19 @@ export interface ContactSubmission {
   receivedAt: string;
   /** Proves a callback belongs to the job this submission was dispatched to. */
   jobToken: string;
-  /** Exactly what the visitor typed, unmodified. Only ever read back to be checked and forwarded. */
+  /**
+   * Exactly what the visitor typed, unmodified. Only ever read back to be
+   * checked and forwarded.
+   *
+   * `company` and `phone` are absent rather than empty when they were left
+   * blank, which is the difference between "chose not to say" and "said
+   * nothing", and saves every reader from testing for both.
+   */
   message: {
     name: string;
     email: string;
+    company?: string;
+    phone?: string;
     text: string;
   };
   /** Filled in by the callback. Null while the job is still running. */

@@ -127,10 +127,19 @@ describe("the fields", () => {
     ["an address with no @", { ...VALID, email: "visitor.example.com" }],
     ["an address with no dot in the domain", { ...VALID, email: "visitor@example" }],
     ["a message under the minimum", { ...VALID, message: "too short" }],
-    ["a message over the maximum", { ...VALID, message: "m".repeat(2001) }],
+    ["a message over the maximum", { ...VALID, message: "m".repeat(301) }],
     ["a missing token", { ...VALID, turnstileToken: "" }],
     ["an absurd token", { ...VALID, turnstileToken: "t".repeat(4096) }],
     ["a message that is only whitespace", { ...VALID, message: " ".repeat(50) }],
+    ["an address under the minimum", { ...VALID, email: "a@b.co" }],
+    ["an address over the maximum", { ...VALID, email: `${"v".repeat(60)}@example.com` }],
+    ["a company under the minimum", { ...VALID, company: "Ax" }],
+    ["a company over the maximum", { ...VALID, company: "c".repeat(65) }],
+    ["a company that is not a string", { ...VALID, company: 42 }],
+    ["a telephone number with too few digits", { ...VALID, phone: "12345" }],
+    ["a telephone number with letters in it", { ...VALID, phone: "call me maybe" }],
+    ["a telephone number longer than the field", { ...VALID, phone: `+${"1".repeat(30)}` }],
+    ["a telephone number that is not a string", { ...VALID, phone: ["+44 20 7946 0958"] }],
   ];
 
   for (const [what, body] of refused) {
@@ -155,6 +164,43 @@ describe("the fields", () => {
     expect(stored.state).toBe("checking");
     expect(stored.verdict).toBeNull();
   });
+
+  it("accepts a submission with neither optional field", async () => {
+    const response = await handleContactSubmission(post(VALID), env());
+
+    expect(response.status).toBe(202);
+    const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
+    expect(stored.message.company).toBeUndefined();
+    expect(stored.message.phone).toBeUndefined();
+  });
+
+  it("stores the optional fields when they were given", async () => {
+    await handleContactSubmission(
+      post({ ...VALID, company: "  Acme Research  ", phone: " +44 20 7946 0958 " }),
+      env(),
+    );
+
+    const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
+    expect(stored.message.company).toBe("Acme Research");
+    expect(stored.message.phone).toBe("+44 20 7946 0958");
+  });
+
+  it("treats a blank optional field as one that was left out", async () => {
+    await handleContactSubmission(post({ ...VALID, company: "   ", phone: "" }), env());
+
+    const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
+    expect("company" in stored.message).toBe(false);
+    expect("phone" in stored.message).toBe(false);
+  });
+
+  const shapes = ["(020) 7946 0958", "020-7946-0958", "+1 555 019 9900", "5550199"];
+  for (const phone of shapes) {
+    it(`accepts a telephone number written as ${phone}`, async () => {
+      const response = await handleContactSubmission(post({ ...VALID, phone }), env());
+
+      expect(response.status).toBe(202);
+    });
+  }
 });
 
 describe("the challenge", () => {
