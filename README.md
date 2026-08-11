@@ -942,7 +942,7 @@ able to write into the analytics project for free. It is also why field
 validation is unreported — those refusals are decided before the challenge is
 checked, and reordering that would spend a `siteverify` request on malformed
 junk. What does get through is bounded by the throttle the endpoints already
-have: one code request and one submission per address per minute.
+have: one code request and one submission per network address per minute.
 
 The browser hands over its Amplitude device and session ids with each request,
 so a Worker event lands inside the visit rather than beside it. The SDK holds
