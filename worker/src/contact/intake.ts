@@ -337,6 +337,10 @@ export async function handleContactSubmission(
       text: submitted.message,
     },
     jobToken,
+    new Date(),
+    // Carried on the object so the verdict, which comes back on a callback with
+    // nothing of this visitor in it, can still be recorded against this visit.
+    submitted.identity ?? undefined,
   );
 
   try {

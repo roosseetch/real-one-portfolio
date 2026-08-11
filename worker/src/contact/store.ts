@@ -64,6 +64,7 @@ export function newSubmission(
   message: ContactSubmission["message"],
   jobToken: string,
   now: Date = new Date(),
+  analytics?: ContactSubmission["analytics"],
 ): ContactSubmission {
   return {
     schemaVersion: CONTACT_SCHEMA_VERSION,
@@ -75,6 +76,9 @@ export function newSubmission(
     receivedAt: now.toISOString(),
     jobToken,
     message,
+    // Omitted rather than stored null, so an object carries the ids or says
+    // nothing about them — the same rule the optional message fields follow.
+    ...(analytics === undefined ? {} : { analytics }),
     verdict: null,
   };
 }

@@ -55,6 +55,12 @@ export interface ServerEvent {
 const DEVICE_ID = /^[A-Za-z0-9._-]{1,64}$/;
 
 /**
+ * The address sent for an event no visitor made. It is unroutable, so a reverse
+ * lookup answers with nothing at all rather than with somewhere plausible.
+ */
+const UNKNOWN_LOCATION = "0.0.0.0";
+
+/**
  * Reads the optional `analytics` object off a request body.
  *
  * Anything unusable reads as absent rather than refusing the request. This is a
@@ -87,7 +93,15 @@ export function parseClientIdentity(value: unknown): ClientIdentity | null {
 export function trackServerEvents(
   env: ServerAnalyticsEnv,
   ctx: DeferContext,
-  request: Request,
+  /**
+   * The visitor's own request, when the event is something they just did.
+   *
+   * Null when it is not: the contact check's verdict arrives on a callback from
+   * a GitHub Actions runner, whose address and user agent describe the runner.
+   * Sending those would move the visitor to a datacentre and give them a
+   * device they have never used.
+   */
+  request: Request | null,
   identity: ClientIdentity | null,
   events: ServerEvent[],
 ): void {
@@ -105,7 +119,12 @@ export function trackServerEvents(
   // connection, which here is a Cloudflare one. Its HTTP V2 API reads a
   // per-event `ip`, so the visitor's address goes there — the same lesson
   // proxy.ts records for relayed events.
-  const ip = request.headers.get("CF-Connecting-IP");
+  //
+  // With no visitor request behind the event, an address that cannot resolve to
+  // anywhere is sent instead. Leaving it out would let Amplitude fall back to
+  // whichever machine opened the connection, and no location is truthful where
+  // a wrong one is not.
+  const ip = request === null ? UNKNOWN_LOCATION : request.headers.get("CF-Connecting-IP");
   const sessionId = identity?.sessionId ?? null;
   const time = Date.now();
 
@@ -129,7 +148,7 @@ export function trackServerEvents(
   // would carry. Cookies, Origin and the Cloudflare headers are deliberately not
   // forwarded, as in the relay.
   const headers = new Headers({ "content-type": "application/json" });
-  const userAgent = request.headers.get("user-agent");
+  const userAgent = request?.headers.get("user-agent");
   if (userAgent) headers.set("user-agent", userAgent);
 
   ctx.waitUntil(send(headers, payload));

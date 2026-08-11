@@ -9,12 +9,14 @@
  */
 
 /**
- * 2 added the optional company and telephone fields. Readers stayed compatible
- * with 1 rather than migrating: both fields are optional, an object written
- * before them simply has neither, and nothing stored here outlives the
- * lifecycle rule on the `contact/` prefix by more than a few days anyway.
+ * 2 added the optional company and telephone fields. 3 added `analytics`, which
+ * is how the verdict finds its way back to the visit that sent the message.
+ * Readers stayed compatible with every earlier version rather than migrating:
+ * each addition is optional, an object written before it simply has none, and
+ * nothing stored here outlives the lifecycle rule on the `contact/` prefix by
+ * more than a few days anyway.
  */
-export const CONTACT_SCHEMA_VERSION = 2;
+export const CONTACT_SCHEMA_VERSION = 3;
 
 /**
  * `checking` is the only state a submission is created in, and the only one it
@@ -54,6 +56,20 @@ export interface ContactSubmission {
     company?: string;
     phone?: string;
     text: string;
+  };
+  /**
+   * The Amplitude device and session the message was sent from, when the page
+   * had them.
+   *
+   * Kept only so the verdict — which arrives a minute or two later, on a
+   * server-to-server callback with nothing of the visitor in it — can be
+   * recorded against the visit that sent the message rather than against a
+   * device the Worker invented. Absent for a deployment without analytics, and
+   * for a browser that offered none.
+   */
+  analytics?: {
+    deviceId: string;
+    sessionId: number | null;
   };
   /** Filled in by the callback. Null while the job is still running. */
   verdict: {

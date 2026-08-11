@@ -67,7 +67,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   }
 
   if (request.method === "POST" && pathname === "/callbacks/contact-checked") {
-    return handleContactChecked(request, env);
+    return handleContactChecked(request, env, ctx);
   }
 
   if ((request.method === "POST" || request.method === "OPTIONS") && pathname === "/analytics") {

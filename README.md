@@ -945,6 +945,23 @@ would not take, a workflow that would not start. That is the point of having a
 second account of it: the browser reports what the visitor saw, and this reports
 what actually happened.
 
+`contact_message_checked` closes the funnel a minute or two later, when the
+screening job reports back: `outcome` is `delivered` or `discarded`, alongside
+the `verdict` the check reached. A discarded message reaches nothing else at
+all — that is the point of discarding it — so without this a spam message and a
+real one are indistinguishable from the analytics side. **The model's own reason
+is deliberately not sent.** It is free text written by something that has just
+read a stranger's message, and it stays in the run summary where only she reads
+it.
+
+That callback comes from a GitHub Actions runner and carries nothing of the
+visitor, so the device and session ids are read back off the stored submission —
+which is what `schemaVersion` 3 added, and the only thing they are kept for.
+Nothing of the runner is sent: its address would move the visitor to a
+datacentre and its user agent would give them a device they never used, so the
+event carries `0.0.0.0`, an address that resolves to nowhere rather than to
+somewhere wrong.
+
 **The challenge is the gate.** Nothing before Turnstile has passed reports
 anything: a wrong origin, an oversized body, a malformed address, a failed
 challenge. Those are what unattended traffic looks like, and a bot must not be

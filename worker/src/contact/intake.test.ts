@@ -694,6 +694,20 @@ describe("what the Worker reports for itself", () => {
     expect(uploaded).toEqual([]);
   });
 
+  it("keeps the visit's ids on the stored submission, so the verdict can find its way back", async () => {
+    await submit({ ...valid(), analytics });
+
+    const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
+    expect(stored.analytics).toEqual(analytics);
+  });
+
+  it("stores no ids at all when the page offered none", async () => {
+    await submit(valid());
+
+    const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
+    expect(stored).not.toHaveProperty("analytics");
+  });
+
   it("takes an unusable identity as none, rather than refusing the message over it", async () => {
     const response = await submit({ ...valid(), analytics: { deviceId: "!".repeat(200) } });
 
