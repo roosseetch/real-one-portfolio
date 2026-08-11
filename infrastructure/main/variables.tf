@@ -141,3 +141,20 @@ variable "email_sending_subdomain" {
   type        = string
   default     = "send"
 }
+
+variable "email_dmarc_policy" {
+  description = "What a receiving server should do with mail that fails DMARC: none, quarantine or reject. `none` is monitoring only, and is what a domain that has just started sending should publish."
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "quarantine", "reject"], var.email_dmarc_policy)
+    error_message = "email_dmarc_policy must be none, quarantine or reject."
+  }
+}
+
+variable "email_dmarc_reports_to" {
+  description = "Optional address for aggregate DMARC reports. Empty publishes the policy without asking for any."
+  type        = string
+  default     = ""
+}

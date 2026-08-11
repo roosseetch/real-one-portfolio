@@ -52,6 +52,30 @@ resource "cloudflare_dns_record" "email_spf" {
   comment = "Transactional email: SPF"
 }
 
+# DMARC, which is what ties the other two together.
+#
+# SPF and DKIM each say something narrow; DMARC is the record that tells a
+# receiving server what to conclude when they disagree, and — since Gmail and
+# Yahoo tightened their sender rules in 2024 — its absence is itself a reason to
+# treat mail as suspicious. A verification code that lands in a spam folder is
+# the worst failure this form has, because the visitor sees a form that appears
+# to work and never learns why nothing arrived. This site's first code went to
+# spam for exactly this reason.
+#
+# `p=none` is monitoring only: it asks nobody to reject anything, which is the
+# right setting for a domain that has just started sending and has no
+# reputation. Tightening it later is a variable, not a code change.
+resource "cloudflare_dns_record" "email_dmarc" {
+  count = local.email_sending_enabled ? 1 : 0
+
+  zone_id = var.cloudflare_zone_id
+  name    = "_dmarc.${var.root_domain}"
+  type    = "TXT"
+  content = "\"v=DMARC1; p=${var.email_dmarc_policy};${var.email_dmarc_reports_to == "" ? "" : " rua=mailto:${var.email_dmarc_reports_to};"}\""
+  ttl     = local.email_record_ttl
+  comment = "Transactional email: DMARC"
+}
+
 resource "cloudflare_dns_record" "email_dkim" {
   count = local.email_sending_enabled ? 1 : 0
 
