@@ -453,6 +453,14 @@ main {
   gap: 0.35rem;
 }
 
+/* Without this the rule above wins and a hidden field is shown anyway: the
+   browser's own `[hidden] { display: none }` lives in the user-agent
+   stylesheet, which any author rule outranks. Found in a browser, because the
+   DOM tests read the attribute and the attribute was always right. */
+.form-field[hidden] {
+  display: none;
+}
+
 .form-field label {
   font-size: 0.9rem;
   font-weight: 500;
