@@ -6,7 +6,8 @@
  * site origin keeps this from becoming a generic relay.
  */
 
-const AMPLITUDE_HTTP_V2 = "https://api2.amplitude.com/2/httpapi";
+import { AMPLITUDE_HTTP_V2 } from "./ingestion";
+
 const MAX_BODY_BYTES = 128 * 1024;
 
 export interface AnalyticsProxyEnv {

@@ -9,6 +9,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AMPLITUDE_HTTP_V2 } from "../analytics/ingestion";
+import { createDeferContext, type FakeDeferContext } from "../test-support/defer";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import { issueCode, recordVerification } from "./codes";
 import { parseCsv } from "./csv";
@@ -19,8 +21,12 @@ const SITE = "https://site.example";
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 let storage: FakeBucket;
+/** Stands in for the router's deferred context, which is where analytics is sent from. */
+let defer: FakeDeferContext;
 /** Every outbound request, so a test can assert what was never called at all. */
 let outbound: string[];
+/** Every event payload posted to Amplitude, for the suite that turns analytics on. */
+let uploaded: Array<{ api_key: string; events: Array<Record<string, unknown>> }>;
 let challengePasses: boolean;
 let dispatchStatus: number;
 /** The token the fixture address's verification handed out. */
@@ -28,7 +34,9 @@ let verifiedToken: string;
 
 beforeEach(async () => {
   storage = createFakeBucket();
+  defer = createDeferContext();
   outbound = [];
+  uploaded = [];
   challengePasses = true;
   dispatchStatus = 204;
 
@@ -39,12 +47,16 @@ beforeEach(async () => {
   // set up their own state.
   verifiedToken = await recordVerification(storage.bucket, "visitor@example.com");
 
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
     const target = String(url);
     outbound.push(target);
 
     if (target === SITEVERIFY) {
       return new Response(JSON.stringify({ success: challengePasses }));
+    }
+    if (target === AMPLITUDE_HTTP_V2) {
+      uploaded.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ code: 200 }));
     }
     // The workflow dispatch. 204 is GitHub's success.
     return new Response(null, { status: dispatchStatus });
@@ -62,6 +74,10 @@ const env = () => ({
   GITHUB_REPOSITORY: "owner/repo",
   CONTACT_WORKFLOW_FILE: "validate-contact.yml",
   GITHUB_DISPATCH_TOKEN: "dispatch-token",
+  // A deployment without analytics, which is what most of these tests are:
+  // whether a message is accepted has nothing to do with whether it is counted.
+  // The suite at the bottom sets a key.
+  AMPLITUDE_API_KEY: undefined as string | undefined,
 });
 
 /**
@@ -95,14 +111,14 @@ const dispatched = () => outbound.filter((url) => url.includes("/actions/workflo
 describe("what reaches the handler at all", () => {
   it("answers a preflight for the site's own origin", async () => {
     const request = new Request(`${SITE}/contact`, { method: "OPTIONS", headers: { Origin: SITE } });
-    const response = await handleContactSubmission(request, env());
+    const response = await handleContactSubmission(request, env(), defer.ctx);
 
     expect(response.status).toBe(204);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe(SITE);
   });
 
   it("refuses another origin, and tells it nothing", async () => {
-    const response = await handleContactSubmission(post(valid(), { origin: "https://elsewhere.example" }), env());
+    const response = await handleContactSubmission(post(valid(), { origin: "https://elsewhere.example" }), env(), defer.ctx);
 
     expect(response.status).toBe(403);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
@@ -112,7 +128,7 @@ describe("what reaches the handler at all", () => {
   it("refuses a method that is neither POST nor a preflight", async () => {
     const request = new Request(`${SITE}/contact`, { method: "GET", headers: { Origin: SITE } });
 
-    expect((await handleContactSubmission(request, env())).status).toBe(405);
+    expect((await handleContactSubmission(request, env(), defer.ctx)).status).toBe(405);
   });
 
   it("refuses a body larger than the ceiling before reading it", async () => {
@@ -122,7 +138,7 @@ describe("what reaches the handler at all", () => {
       body: JSON.stringify(valid()),
     });
 
-    expect((await handleContactSubmission(request, env())).status).toBe(413);
+    expect((await handleContactSubmission(request, env(), defer.ctx)).status).toBe(413);
     expect(outbound).toEqual([]);
   });
 
@@ -130,6 +146,7 @@ describe("what reaches the handler at all", () => {
     const response = await handleContactSubmission(
       post({ ...valid(), message: "x".repeat(20 * 1024) }),
       env(),
+      defer.ctx,
     );
 
     expect(response.status).toBe(413);
@@ -163,7 +180,7 @@ describe("the fields", () => {
 
   for (const [what, body] of refused) {
     it(`refuses ${what}, without asking Turnstile`, async () => {
-      const response = await handleContactSubmission(post(body), env());
+      const response = await handleContactSubmission(post(body), env(), defer.ctx);
 
       expect(response.status).toBe(400);
       expect(outbound).toEqual([]);
@@ -172,7 +189,7 @@ describe("the fields", () => {
   }
 
   it("stores what the visitor typed, trimmed and unmodified", async () => {
-    await handleContactSubmission(post({ ...valid(), name: "  A Visitor  " }), env());
+    await handleContactSubmission(post({ ...valid(), name: "  A Visitor  " }), env(), defer.ctx);
 
     const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
     expect(stored.message).toEqual({
@@ -185,7 +202,7 @@ describe("the fields", () => {
   });
 
   it("accepts a submission with neither optional field", async () => {
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(202);
     const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
@@ -197,6 +214,7 @@ describe("the fields", () => {
     await handleContactSubmission(
       post({ ...valid(), company: "  Acme Research  ", phone: " +44 20 7946 0958 " }),
       env(),
+      defer.ctx,
     );
 
     const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
@@ -205,7 +223,7 @@ describe("the fields", () => {
   });
 
   it("treats a blank optional field as one that was left out", async () => {
-    await handleContactSubmission(post({ ...valid(), company: "   ", phone: "" }), env());
+    await handleContactSubmission(post({ ...valid(), company: "   ", phone: "" }), env(), defer.ctx);
 
     const stored = JSON.parse(storage.objects.get(submissions()[0]) as string);
     expect("company" in stored.message).toBe(false);
@@ -215,7 +233,7 @@ describe("the fields", () => {
   const shapes = ["(020) 7946 0958", "020-7946-0958", "+1 555 019 9900", "5550199"];
   for (const phone of shapes) {
     it(`accepts a telephone number written as ${phone}`, async () => {
-      const response = await handleContactSubmission(post({ ...valid(), phone }), env());
+      const response = await handleContactSubmission(post({ ...valid(), phone }), env(), defer.ctx);
 
       expect(response.status).toBe(202);
     });
@@ -226,7 +244,7 @@ describe("the challenge", () => {
   it("refuses a token Cloudflare does not recognise", async () => {
     challengePasses = false;
 
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ status: "refused", reason: "challenge" });
@@ -238,7 +256,7 @@ describe("the challenge", () => {
     const response = await handleContactSubmission(post(valid()), {
       ...env(),
       TURNSTILE_SECRET_KEY: undefined,
-    });
+    }, defer.ctx);
 
     expect(response.status).toBe(503);
     expect(outbound).toEqual([]);
@@ -247,14 +265,14 @@ describe("the challenge", () => {
   it("does not call a failed challenge a robot when Cloudflare is unreachable", async () => {
     vi.mocked(globalThis.fetch).mockRejectedValueOnce(new Error("network"));
 
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(503);
     expect(submissions()).toEqual([]);
   });
 
   it("passes the visitor's address to Turnstile", async () => {
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     const [, init] = vi.mocked(globalThis.fetch).mock.calls[0];
     expect((init?.body as FormData).get("remoteip")).toBe("203.0.113.7");
@@ -263,7 +281,7 @@ describe("the challenge", () => {
 
 describe("accepting", () => {
   it("stores the submission, dispatches the check, and says only that it is queued", async () => {
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ status: "queued" });
@@ -275,7 +293,7 @@ describe("accepting", () => {
   });
 
   it("sends the job nothing but an id and a token", async () => {
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     const call = vi.mocked(globalThis.fetch).mock.calls.find(([url]) => String(url).includes("/dispatches"));
     const body = JSON.parse(String(call?.[1]?.body));
@@ -285,7 +303,7 @@ describe("accepting", () => {
   });
 
   it("binds the dispatched token to the stored submission", async () => {
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     const call = vi.mocked(globalThis.fetch).mock.calls.find(([url]) => String(url).includes("/dispatches"));
     const { inputs } = JSON.parse(String(call?.[1]?.body));
@@ -298,7 +316,7 @@ describe("accepting", () => {
   it("tells the visitor it failed when GitHub refuses the dispatch", async () => {
     dispatchStatus = 422;
 
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(502);
   });
@@ -306,7 +324,7 @@ describe("accepting", () => {
   it("stores nothing it cannot store", async () => {
     storage.failPutsFor((key) => key.endsWith("submission.json"));
 
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(503);
     expect(dispatched()).toEqual([]);
@@ -318,7 +336,7 @@ describe("proving the address", () => {
   const stranger = () => ({ ...valid(), email: "stranger@example.com", verificationToken: undefined });
 
   it("refuses a message from an address that has proved nothing", async () => {
-    const response = await handleContactSubmission(post(stranger()), env());
+    const response = await handleContactSubmission(post(stranger()), env(), defer.ctx);
 
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ status: "refused", reason: "unverified" });
@@ -330,7 +348,7 @@ describe("proving the address", () => {
     const issued = await issueCode(storage.bucket, "stranger@example.com");
     if (issued.status !== "issued") throw new Error("expected a code");
 
-    const response = await handleContactSubmission(post({ ...stranger(), code: issued.code }), env());
+    const response = await handleContactSubmission(post({ ...stranger(), code: issued.code }), env(), defer.ctx);
 
     expect(response.status).toBe(202);
   });
@@ -338,20 +356,20 @@ describe("proving the address", () => {
   it("refuses one carrying a code that was never sent", async () => {
     await issueCode(storage.bucket, "stranger@example.com");
 
-    const response = await handleContactSubmission(post({ ...stranger(), code: "000000" }), env());
+    const response = await handleContactSubmission(post({ ...stranger(), code: "000000" }), env(), defer.ctx);
 
     expect(response.status).toBe(403);
     expect(submissions()).toEqual([]);
   });
 
   it("refuses a code of the wrong shape without reading the file", async () => {
-    const response = await handleContactSubmission(post({ ...stranger(), code: "12345" }), env());
+    const response = await handleContactSubmission(post({ ...stranger(), code: "12345" }), env(), defer.ctx);
 
     expect(response.status).toBe(400);
   });
 
   it("lets a browser holding the token through with no code at all", async () => {
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(202);
   });
@@ -363,6 +381,7 @@ describe("proving the address", () => {
     const response = await handleContactSubmission(
       post({ ...valid(), verificationToken: undefined }),
       env(),
+      defer.ctx,
     );
 
     expect(response.status).toBe(403);
@@ -374,6 +393,7 @@ describe("proving the address", () => {
     const response = await handleContactSubmission(
       post({ ...valid(), verificationToken: "0123456789abcdefghjkmnpqrstvwxyz" }),
       env(),
+      defer.ctx,
     );
 
     expect(response.status).toBe(403);
@@ -383,6 +403,7 @@ describe("proving the address", () => {
     const response = await handleContactSubmission(
       post({ ...valid(), verificationToken: "../../etc/passwd" }),
       env(),
+      defer.ctx,
     );
 
     expect(response.status).toBe(400);
@@ -392,7 +413,7 @@ describe("proving the address", () => {
     const issued = await issueCode(storage.bucket, "stranger@example.com");
     if (issued.status !== "issued") throw new Error("expected a code");
 
-    const response = await handleContactSubmission(post({ ...stranger(), code: issued.code }), env());
+    const response = await handleContactSubmission(post({ ...stranger(), code: issued.code }), env(), defer.ctx);
     const answered = (await response.json()) as { status: string; verificationToken?: string };
 
     expect(answered.status).toBe("queued");
@@ -405,21 +426,23 @@ describe("proving the address", () => {
         { address: "198.51.100.22" },
       ),
       env(),
+      defer.ctx,
     );
     expect(next.status).toBe(202);
   });
 
   it("does not repeat the token to a browser that already had it", async () => {
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(await response.json()).toEqual({ status: "queued" });
   });
 
   it("says nothing about which of the three ways it was wrong", async () => {
-    const never = await handleContactSubmission(post(stranger()), env());
+    const never = await handleContactSubmission(post(stranger()), env(), defer.ctx);
     const wrong = await handleContactSubmission(
       post({ ...stranger(), code: "000000" }, { address: "198.51.100.9" }),
       env(),
+      defer.ctx,
     );
 
     expect(await never.json()).toEqual(await wrong.json());
@@ -431,6 +454,7 @@ describe("the message record", () => {
     await handleContactSubmission(
       post({ ...valid(), company: "Acme Research", phone: "+44 20 7946 0958" }),
       env(),
+      defer.ctx,
     );
 
     const [row] = parseCsv(storage.objects.get(MESSAGES_KEY) ?? "");
@@ -447,7 +471,7 @@ describe("the message record", () => {
   it("records nothing for a message it refused", async () => {
     challengePasses = false;
 
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(storage.objects.get(MESSAGES_KEY)).toBeUndefined();
   });
@@ -457,7 +481,7 @@ describe("the message record", () => {
     // them it failed would only have them send it again.
     storage.failPutsFor((key) => key === MESSAGES_KEY);
 
-    const response = await handleContactSubmission(post(valid()), env());
+    const response = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(response.status).toBe(202);
   });
@@ -465,9 +489,9 @@ describe("the message record", () => {
 
 describe("throttling", () => {
   it("accepts one submission per address per minute", async () => {
-    expect((await handleContactSubmission(post(valid()), env())).status).toBe(202);
+    expect((await handleContactSubmission(post(valid()), env(), defer.ctx)).status).toBe(202);
 
-    const second = await handleContactSubmission(post(valid()), env());
+    const second = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(second.status).toBe(429);
     expect(await second.json()).toEqual({ status: "refused", reason: "throttled" });
@@ -475,28 +499,28 @@ describe("throttling", () => {
   });
 
   it("refuses before spending an Actions run, which is what it is there to bound", async () => {
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
     outbound = [];
 
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(dispatched()).toEqual([]);
   });
 
   it("never charges a slot to a challenge that failed, so a retry is not refused", async () => {
     challengePasses = false;
-    expect((await handleContactSubmission(post(valid()), env())).status).toBe(403);
+    expect((await handleContactSubmission(post(valid()), env(), defer.ctx)).status).toBe(403);
 
     challengePasses = true;
-    const retry = await handleContactSubmission(post(valid()), env());
+    const retry = await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     expect(retry.status).toBe(202);
   });
 
   it("counts addresses separately", async () => {
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
 
-    const other = await handleContactSubmission(post(valid(), { address: "198.51.100.4" }), env());
+    const other = await handleContactSubmission(post(valid(), { address: "198.51.100.4" }), env(), defer.ctx);
 
     expect(other.status).toBe(202);
   });
@@ -508,13 +532,173 @@ describe("throttling", () => {
       body: JSON.stringify(valid()),
     });
 
-    expect((await handleContactSubmission(request, env())).status).toBe(202);
+    expect((await handleContactSubmission(request, env(), defer.ctx)).status).toBe(202);
   });
 
   it("never stores the address it throttled on", async () => {
-    await handleContactSubmission(post(valid()), env());
+    await handleContactSubmission(post(valid()), env(), defer.ctx);
 
     const everything = [...storage.objects.keys()].join(" ") + [...storage.objects.keys()].map((key) => storage.objects.get(key)).join(" ");
     expect(everything).not.toContain("203.0.113.7");
+  });
+});
+
+describe("what the Worker reports for itself", () => {
+  const analytics = { deviceId: "0f2b1c3d-4e5f-6789-abcd-ef0123456789", sessionId: 1_754_900_000_000 };
+  const measured = () => ({ ...env(), AMPLITUDE_API_KEY: "amplitude-key" });
+
+  const events = () => uploaded.flatMap((payload) => payload.events);
+  const named = (type: string) => events().filter((event) => event.event_type === type);
+  const propertiesOf = (type: string) => named(type).map((event) => event.event_properties as Record<string, unknown>);
+
+  async function submit(body: unknown, env = measured()): Promise<Response> {
+    const response = await handleContactSubmission(post(body), env, defer.ctx);
+    // The upload is deferred, so it has not happened when the answer is returned.
+    await defer.settled();
+    return response;
+  }
+
+  /** A code this address can actually redeem, as verify.ts would have left it. */
+  async function liveCode(email = "visitor@example.com"): Promise<string> {
+    const issued = await issueCode(storage.bucket, email);
+    return issued.status === "issued" ? issued.code : "";
+  }
+
+  it("reports the accepted message and the proof behind it, in one upload", async () => {
+    const response = await submit({ ...valid(), analytics });
+
+    expect(response.status).toBe(202);
+    expect(uploaded).toHaveLength(1);
+    expect(events().map((event) => event.event_type)).toEqual([
+      "contact_address_checked",
+      "contact_message_submitted",
+    ]);
+    expect(events()[0].device_id).toBe(analytics.deviceId);
+    expect(events()[0].session_id).toBe(analytics.sessionId);
+  });
+
+  it("names the visitor once the address is proved, however they typed it", async () => {
+    const code = await liveCode();
+
+    await submit({ ...valid(), email: "Visitor@Example.COM", verificationToken: undefined, code, analytics });
+
+    expect(events().map((event) => event.user_id)).toEqual(["visitor@example.com", "visitor@example.com"]);
+  });
+
+  it("reports a code that was wrong, and names nobody for it", async () => {
+    await liveCode();
+
+    const response = await submit({ ...valid(), verificationToken: undefined, code: "000000", analytics });
+
+    expect(response.status).toBe(403);
+    expect(propertiesOf("contact_address_checked")).toEqual([
+      expect.objectContaining({ proof: "code", outcome: "rejected" }),
+    ]);
+    expect(propertiesOf("contact_message_submitted")).toEqual([
+      expect.objectContaining({ proof: "code", outcome: "unverified" }),
+    ]);
+    expect(events().every((event) => !("user_id" in event))).toBe(true);
+  });
+
+  it("tells a code that has aged out apart from one that was mistyped", async () => {
+    // Nothing was ever issued for this address, which is the same state a code
+    // that expired leaves behind. The visitor is told neither; only she is.
+    await submit({ ...valid(), verificationToken: undefined, code: "123456", analytics });
+
+    expect(propertiesOf("contact_address_checked")).toEqual([
+      expect.objectContaining({ proof: "code", outcome: "expired" }),
+    ]);
+  });
+
+  it("reports a browser presenting a token that is no longer good", async () => {
+    const response = await submit({ ...valid(), verificationToken: "a".repeat(32), analytics });
+
+    expect(response.status).toBe(403);
+    expect(propertiesOf("contact_address_checked")).toEqual([
+      expect.objectContaining({ proof: "token", outcome: "stale" }),
+    ]);
+  });
+
+  it("reports a submission offering no proof at all", async () => {
+    await submit({ ...valid(), verificationToken: undefined, analytics });
+
+    expect(propertiesOf("contact_address_checked")).toEqual([
+      expect.objectContaining({ proof: "none", outcome: "missing" }),
+    ]);
+  });
+
+  it("reports a sender who is writing too often, before any proof was looked at", async () => {
+    await submit({ ...valid(), analytics });
+    await submit({ ...valid(), analytics });
+
+    expect(named("contact_address_checked")).toHaveLength(1);
+    expect(propertiesOf("contact_message_submitted").at(-1)).toMatchObject({ outcome: "throttled" });
+    expect(events().at(-1)).not.toHaveProperty("user_id");
+  });
+
+  it("reports a workflow that would not start, which is not the visitor's fault", async () => {
+    dispatchStatus = 403;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await submit({ ...valid(), analytics });
+
+    expect(response.status).toBe(502);
+    expect(propertiesOf("contact_message_submitted")).toEqual([
+      expect.objectContaining({ outcome: "dispatch-failed" }),
+    ]);
+    // Proved, and still named: the address was verified whatever became of the
+    // message afterwards.
+    expect(named("contact_message_submitted")[0].user_id).toBe("visitor@example.com");
+  });
+
+  it("reports storage that would not take the message", async () => {
+    // The submission object itself, not the throttle slot beside it: both end in
+    // "storage-failed", and only one of them is the message being lost.
+    storage.failPutsFor((key) => key.endsWith("submission.json"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await submit({ ...valid(), analytics });
+
+    expect(response.status).toBe(503);
+    expect(propertiesOf("contact_message_submitted")).toEqual([
+      expect.objectContaining({ outcome: "storage-failed" }),
+    ]);
+  });
+
+  it("carries the message's shape and never a word of it", async () => {
+    const message = "Hello, I would like to talk about a project.";
+
+    await submit({ ...valid(), message, company: "Acme Research", phone: "+44 20 7946 0958", analytics });
+
+    expect(propertiesOf("contact_message_submitted")).toEqual([
+      expect.objectContaining({ message_length: message.length, has_company: true, has_phone: true }),
+    ]);
+    const sent = JSON.stringify(uploaded);
+    expect(sent).not.toContain("project");
+    expect(sent).not.toContain("A Visitor");
+    expect(sent).not.toContain("7946");
+    expect(sent).not.toContain("Acme");
+  });
+
+  it("says nothing about a challenge that did not pass", async () => {
+    challengePasses = false;
+
+    await submit({ ...valid(), analytics });
+
+    expect(uploaded).toEqual([]);
+  });
+
+  it("says nothing about a submission it would not even read", async () => {
+    await submit({ ...valid(), message: "too short", analytics });
+
+    expect(uploaded).toEqual([]);
+  });
+
+  it("takes an unusable identity as none, rather than refusing the message over it", async () => {
+    const response = await submit({ ...valid(), analytics: { deviceId: "!".repeat(200) } });
+
+    expect(response.status).toBe(202);
+    expect(String(events()[0].device_id)).toMatch(/^worker-/);
+    expect(events()[0].event_properties).toMatchObject({ stitched: false });
   });
 });

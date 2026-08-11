@@ -12,9 +12,17 @@
  * It accepts, stores and hands off; the checking job answers back through
  * callbacks/contact-checked.ts, which is what actually reaches Telegram.
  */
+import {
+  parseClientIdentity,
+  trackServerEvents,
+  type ClientIdentity,
+  type DeferContext,
+  type ServerAnalyticsEnv,
+  type ServerEvent,
+} from "../analytics/events";
 import { dispatchContactCheck, newJobToken, type ContactDispatchEnv } from "../publishing/dispatch";
 import { isValidId } from "../ids";
-import { isVerified, recordMessage, redeemCode } from "./codes";
+import { isVerified, normalizeEmail, recordMessage, redeemCode } from "./codes";
 import { answer, guard } from "./cors";
 import { newSubmission, saveSubmission } from "./store";
 import { claimSubmissionSlot } from "./throttle";
@@ -59,10 +67,22 @@ function isValidPhone(value: string): boolean {
   return digits >= PHONE_DIGITS.min && digits <= PHONE_DIGITS.max;
 }
 
-export interface ContactIntakeEnv extends TurnstileEnv, ContactDispatchEnv {
+export interface ContactIntakeEnv extends TurnstileEnv, ContactDispatchEnv, ServerAnalyticsEnv {
   PRIVATE_BUCKET: R2Bucket;
   SITE_BASE_URL: string;
 }
+
+/**
+ * What became of a submission, once the challenge had been passed. As in
+ * verify.ts, nothing refused before the challenge is reported: those refusals
+ * are what a bot's traffic looks like, and they are decided before anything has
+ * established there is a person here at all.
+ */
+type Outcome = "accepted" | "throttled" | "unverified" | "storage-failed" | "dispatch-failed";
+
+/** Which proof the browser offered, and how it went. */
+type Proof = "code" | "token" | "none";
+type Checked = "accepted" | "rejected" | "expired" | "stale" | "missing" | "storage-failed";
 
 interface Submitted {
   name: string;
@@ -76,6 +96,8 @@ interface Submitted {
   code: string | null;
   /** The token a previous verification handed this browser, kept for thirty days. */
   verificationToken: string | null;
+  /** The page's Amplitude device and session, when it has them. Never required. */
+  identity: ClientIdentity | null;
 }
 
 /**
@@ -144,10 +166,24 @@ function parseSubmitted(raw: string): Submitted | null {
   // could not match a stored token, so it is refused before a file is read.
   if (verificationToken !== null && !isValidId(verificationToken)) return null;
 
-  return { name, email, company, phone, message, turnstileToken, code, verificationToken };
+  return {
+    name,
+    email,
+    company,
+    phone,
+    message,
+    turnstileToken,
+    code,
+    verificationToken,
+    identity: parseClientIdentity(body.analytics),
+  };
 }
 
-export async function handleContactSubmission(request: Request, env: ContactIntakeEnv): Promise<Response> {
+export async function handleContactSubmission(
+  request: Request,
+  env: ContactIntakeEnv,
+  ctx: DeferContext,
+): Promise<Response> {
   // Origin, preflight and method, shared with /contact/verify so the two cannot
   // drift apart about who is allowed to talk to them.
   const allowedOrigin = guard(request, env);
@@ -178,6 +214,55 @@ export async function handleContactSubmission(request: Request, env: ContactInta
     return answer(503, allowedOrigin, { status: "unavailable" });
   }
 
+  /** What this press is offering as proof, whatever the proof turns out to be worth. */
+  const proof: Proof = submitted.code !== null ? "code" : submitted.verificationToken !== null ? "token" : "none";
+
+  /**
+   * The address as the record files key it, so one person is one Amplitude user
+   * however they typed it. Attached only to the events where the address has
+   * actually been proved — an address somebody merely typed, or one whose code
+   * was refused, is a claim rather than an identity.
+   */
+  const userId = normalizeEmail(submitted.email);
+
+  let proven = false;
+  const checks: ServerEvent[] = [];
+
+  /** What the address check found. Nothing is recorded when it never ran. */
+  const checked = (outcome: Checked): void => {
+    checks.push({
+      type: "contact_address_checked",
+      ...(outcome === "accepted" ? { userId } : {}),
+      properties: { proof, outcome },
+    });
+  };
+
+  /**
+   * Every answer from here down, reported as it is returned — one place rather
+   * than one call beside each `return`, so a branch added later cannot become
+   * the one outcome nothing ever recorded.
+   *
+   * Length and presence, never the words: what a stranger wrote to her is not
+   * something to hand to a third party.
+   */
+  const finish = (status: number, body: Record<string, string>, outcome: Outcome): Response => {
+    trackServerEvents(env, ctx, request, submitted.identity, [
+      ...checks,
+      {
+        type: "contact_message_submitted",
+        ...(proven ? { userId } : {}),
+        properties: {
+          proof,
+          outcome,
+          message_length: submitted.message.length,
+          has_company: submitted.company !== null,
+          has_phone: submitted.phone !== null,
+        },
+      },
+    ]);
+    return answer(status, allowedOrigin, body);
+  };
+
   // After the challenge rather than before it, deliberately. What the throttle
   // bounds is the expensive part — an object written and an Actions run spent —
   // and none of that happens without a solved challenge anyway. Claiming first
@@ -191,9 +276,9 @@ export async function handleContactSubmission(request: Request, env: ContactInta
     // Storage is about to be needed for the submission itself, so there is no
     // point pretending this one can go further.
     console.error("Could not claim a contact submission slot");
-    return answer(503, allowedOrigin, { status: "unavailable" });
+    return finish(503, { status: "unavailable" }, "storage-failed");
   }
-  if (!claimed) return answer(429, allowedOrigin, { status: "refused", reason: "throttled" });
+  if (!claimed) return finish(429, { status: "refused", reason: "throttled" }, "throttled");
 
   // Proof that whoever typed this address can read what is sent to it. Either
   // the code that was mailed a moment ago, or a verification recent enough that
@@ -209,29 +294,35 @@ export async function handleContactSubmission(request: Request, env: ContactInta
   // has done this before within the month presents instead. `issuedToken` is
   // non-null only in the first case, and is the one thing this endpoint tells
   // the browser that it did not already know.
-  let proven: boolean;
   let issuedToken: string | null = null;
   try {
     if (submitted.code !== null) {
       const redeemed = await redeemCode(env.PRIVATE_BUCKET, submitted.email, submitted.code);
       proven = redeemed.outcome === "accepted";
       issuedToken = redeemed.token;
+      // "rejected" is a code that did not match; "none" is an address holding no
+      // live code at all. The visitor is told neither, but the difference between
+      // a typo and a code that aged out is the whole of what a funnel wants here.
+      checked(redeemed.outcome === "none" ? "expired" : redeemed.outcome);
     } else if (submitted.verificationToken !== null) {
       proven = await isVerified(env.PRIVATE_BUCKET, submitted.email, submitted.verificationToken);
+      checked(proven ? "accepted" : "stale");
     } else {
-      proven = false;
+      checked("missing");
     }
   } catch {
     console.error("Could not check a contact verification code");
-    return answer(503, allowedOrigin, { status: "unavailable" });
+    checked("storage-failed");
+    return finish(503, { status: "unavailable" }, "storage-failed");
   }
 
   if (!proven) {
     // One answer for a wrong code, an expired one, a token that has been
     // retired, and an address that never asked for anything. Which of them it
     // was tells a guesser how close they are, and the form does the same thing
-    // in every case: forget what it was holding and ask for a code.
-    return answer(403, allowedOrigin, { status: "refused", reason: "unverified" });
+    // in every case: forget what it was holding and ask for a code. Which it was
+    // is on contact_address_checked, where only she can read it.
+    return finish(403, { status: "refused", reason: "unverified" }, "unverified");
   }
 
   const jobToken = newJobToken();
@@ -252,7 +343,7 @@ export async function handleContactSubmission(request: Request, env: ContactInta
     await saveSubmission(env.PRIVATE_BUCKET, submission);
   } catch {
     console.error("Could not store a contact submission");
-    return answer(503, allowedOrigin, { status: "unavailable" });
+    return finish(503, { status: "unavailable" }, "storage-failed");
   }
 
   // Stored first, dispatched second. A job that started before the object
@@ -260,7 +351,7 @@ export async function handleContactSubmission(request: Request, env: ContactInta
   // for is only an object that expires.
   const dispatched = await dispatchContactCheck(env, submission.submissionId, jobToken);
   if (!dispatched) {
-    return answer(502, allowedOrigin, { status: "unavailable" });
+    return finish(502, { status: "unavailable" }, "dispatch-failed");
   }
 
   // The permanent record, written only for a message that was actually accepted.
@@ -279,9 +370,9 @@ export async function handleContactSubmission(request: Request, env: ContactInta
   // already had one does not need it repeated, and an answer that always
   // carried it would hand a copy to anything that could make one accepted
   // request.
-  return answer(
+  return finish(
     202,
-    allowedOrigin,
     issuedToken === null ? { status: "queued" } : { status: "queued", verificationToken: issuedToken },
+    "accepted",
   );
 }

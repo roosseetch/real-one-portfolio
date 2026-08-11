@@ -20,8 +20,8 @@
   "variables": {
     "AMPLITUDE_API_KEY": {
       "required": false,
-      "purpose": "Amplitude browser ingestion key, inlined into the site bundle and used by the Worker to scope its analytics relay. Public by construction, which is why it is a variable and not a secret.",
-      "whenUnset": "The site ships with no analytics at all — the init call is eliminated as dead code and the SDK never reaches the bundle. The Pages workflow warns, because the outcome is otherwise indistinguishable from working analytics."
+      "purpose": "Amplitude browser ingestion key, inlined into the site bundle, used by the Worker to scope its analytics relay, and used again to send the Worker's own account of the contact funnel. Public by construction, which is why it is a variable and not a secret.",
+      "whenUnset": "The site ships with no analytics at all — the init call is eliminated as dead code and the SDK never reaches the bundle — and the Worker sends none of its own either. The Pages workflow warns, because the outcome is otherwise indistinguishable from working analytics."
     },
     "AMPLITUDE_SERVER_URL": {
       "required": false,
