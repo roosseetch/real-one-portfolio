@@ -17,7 +17,6 @@
     "fallback inline, so an empty value is always a decision rather than an",
     "accident."
   ],
-
   "variables": {
     "AMPLITUDE_API_KEY": {
       "required": false,
@@ -108,9 +107,13 @@
     "WORKER_NAME": {
       "required": true,
       "purpose": "Wrangler service name of the Worker. generate-wrangler.ts refuses to build a configuration without it, and Terraform's custom domain routes to it by name."
+    },
+    "CONTACT_EMAIL_FROM": {
+      "required": false,
+      "purpose": "From: address on the contact form's verification mail. Must be at a domain the email provider has verified, or nothing sends. A variable rather than a secret because it is printed on every message that goes out.",
+      "whenUnset": "The Worker cannot send a verification code, so /contact/verify answers 503 and the form tells the visitor to try later. It says so once in the Worker's log."
     }
   },
-
   "secrets": {
     "CALLBACK_HMAC_SECRET": {
       "required": true,
@@ -179,6 +182,10 @@
     "WORKER_DISPATCH_TOKEN": {
       "required": true,
       "purpose": "Becomes the Worker's GITHUB_DISPATCH_TOKEN, which dispatches the media workflow. The names differ because GitHub reserves the GITHUB_ prefix and will not store a secret using it."
+    },
+    "RESEND_API_KEY": {
+      "required": true,
+      "purpose": "Sends the contact form's six-digit verification codes through Resend. Sending access only: it can post a message and read nothing about the account."
     }
   }
 }

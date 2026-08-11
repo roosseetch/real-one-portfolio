@@ -3,6 +3,7 @@ import { handleMediaFailed } from "./callbacks/media-failed";
 import { handleMediaProcessed } from "./callbacks/media-processed";
 import { handleAnalyticsProxy } from "./analytics/proxy";
 import { handleContactSubmission } from "./contact/intake";
+import { handleContactVerify } from "./contact/verify";
 import { sweepStrandedDrafts } from "./drafts/sweep";
 import {
   beginRequest,
@@ -34,6 +35,8 @@ export interface Env {
   MEDIA_WORKFLOW_FILE: string;
   CONTACT_WORKFLOW_FILE: string;
   AMPLITUDE_API_KEY: string;
+  /** From: on the contact form's verification mail. Printed on every one, so a var rather than a secret. */
+  CONTACT_EMAIL_FROM: string;
 
   // Secrets, set with `wrangler secret put` and never in any config file.
   TELEGRAM_BOT_TOKEN: string;
@@ -42,6 +45,7 @@ export interface Env {
   GITHUB_DISPATCH_TOKEN: string;
   CALLBACK_HMAC_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
+  RESEND_API_KEY: string;
 }
 
 // Once per isolate, before any request can log anything.
@@ -75,6 +79,12 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // wrong method both need a CORS answer rather than the blanket 404 below.
   if (pathname === "/contact") {
     return handleContactSubmission(request, env);
+  }
+
+  // Every method again, and for the same reason: this one is called from the
+  // page before the message is sent, to prove the address is readable.
+  if (pathname === "/contact/verify") {
+    return handleContactVerify(request, env);
   }
 
   // Anything else is not part of the contract. Say nothing useful about what

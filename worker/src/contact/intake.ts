@@ -13,6 +13,8 @@
  * callbacks/contact-checked.ts, which is what actually reaches Telegram.
  */
 import { dispatchContactCheck, newJobToken, type ContactDispatchEnv } from "../publishing/dispatch";
+import { isVerified, recordMessage, redeemCode } from "./codes";
+import { answer, guard } from "./cors";
 import { newSubmission, saveSubmission } from "./store";
 import { claimSubmissionSlot } from "./throttle";
 import { MAX_TOKEN_LENGTH, verifyTurnstile, type TurnstileEnv } from "./turnstile";
@@ -69,33 +71,8 @@ interface Submitted {
   phone: string | null;
   message: string;
   turnstileToken: string;
-}
-
-function siteOrigin(env: ContactIntakeEnv): string | null {
-  try {
-    return new URL(env.SITE_BASE_URL).origin;
-  } catch {
-    return null;
-  }
-}
-
-function corsHeaders(origin: string): Headers {
-  return new Headers({
-    "Access-Control-Allow-Headers": "content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Max-Age": "86400",
-    Vary: "Origin",
-  });
-}
-
-function answer(status: number, origin: string | null, body?: Record<string, string>): Response {
-  const headers = origin === null ? new Headers() : corsHeaders(origin);
-  // Fetch forbids a body on 204, including an empty string.
-  if (status === 204) return new Response(null, { status, headers });
-
-  headers.set("content-type", "application/json");
-  return new Response(JSON.stringify(body ?? { status: "refused" }), { status, headers });
+  /** The six digits from the mail. Null when the address is verified already and none was sent. */
+  code: string | null;
 }
 
 /**
@@ -152,20 +129,20 @@ function parseSubmitted(raw: string): Submitted | null {
   if (message.length < LIMITS.message.min || message.length > LIMITS.message.max) return null;
   if (turnstileToken.length === 0 || turnstileToken.length > MAX_TOKEN_LENGTH) return null;
 
-  return { name, email, company, phone, message, turnstileToken };
+  const code = optionalText(body.code);
+  if (code === false) return null;
+  // Six digits or nothing. A code of the wrong shape is refused here rather than
+  // spending a read on the file to discover it cannot possibly match.
+  if (code !== null && !/^\d{6}$/.test(code)) return null;
+
+  return { name, email, company, phone, message, turnstileToken, code };
 }
 
 export async function handleContactSubmission(request: Request, env: ContactIntakeEnv): Promise<Response> {
-  const allowedOrigin = siteOrigin(env);
-  const presentedOrigin = request.headers.get("Origin");
-
-  // Without a site origin there is nothing to allow, and answering anyway would
-  // make this a form anybody could put on their own page.
-  if (allowedOrigin === null) return answer(503, null);
-  if (presentedOrigin !== allowedOrigin) return answer(403, null);
-
-  if (request.method === "OPTIONS") return answer(204, allowedOrigin);
-  if (request.method !== "POST") return answer(405, allowedOrigin);
+  // Origin, preflight and method, shared with /contact/verify so the two cannot
+  // drift apart about who is allowed to talk to them.
+  const allowedOrigin = guard(request, env);
+  if (allowedOrigin instanceof Response) return allowedOrigin;
 
   const declaredLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
@@ -209,6 +186,32 @@ export async function handleContactSubmission(request: Request, env: ContactInta
   }
   if (!claimed) return answer(429, allowedOrigin, { status: "refused", reason: "throttled" });
 
+  // Proof that whoever typed this address can read what is sent to it. Either
+  // the code that was mailed a moment ago, or a verification recent enough that
+  // no code was sent at all.
+  //
+  // After the throttle, because redeeming a code writes to the codes file and a
+  // wrong guess is a write too — the cheap refusals have to come first, or
+  // guessing would be free.
+  let proven: boolean;
+  try {
+    if (submitted.code === null) {
+      proven = await isVerified(env.PRIVATE_BUCKET, submitted.email);
+    } else {
+      proven = (await redeemCode(env.PRIVATE_BUCKET, submitted.email, submitted.code)) === "accepted";
+    }
+  } catch {
+    console.error("Could not check a contact verification code");
+    return answer(503, allowedOrigin, { status: "unavailable" });
+  }
+
+  if (!proven) {
+    // One answer for a wrong code, an expired one, and an address that never
+    // asked for one. Which of the three it was tells a guesser how close they
+    // are, and the form has nothing different to say about them anyway.
+    return answer(403, allowedOrigin, { status: "refused", reason: "unverified" });
+  }
+
   const jobToken = newJobToken();
   const submission = newSubmission(
     {
@@ -236,6 +239,15 @@ export async function handleContactSubmission(request: Request, env: ContactInta
   const dispatched = await dispatchContactCheck(env, submission.submissionId, jobToken);
   if (!dispatched) {
     return answer(502, allowedOrigin, { status: "unavailable" });
+  }
+
+  // The permanent record, written only for a message that was actually accepted.
+  // Its failure is not the visitor's problem: their message is stored and
+  // dispatched, and telling them it failed would have them send it again.
+  try {
+    await recordMessage(env.PRIVATE_BUCKET, submission.message);
+  } catch {
+    console.error("Could not append to the contact message record");
   }
 
   // Accepted, not delivered. The check runs for a minute or two after this

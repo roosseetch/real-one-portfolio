@@ -15,10 +15,25 @@ import { sha256Hex } from "../crypto";
 
 const WINDOW_MS = 60 * 1000;
 
-function slotKey(digest: string, window: number): string {
+function slotKey(kind: string, digest: string, window: number): string {
   // Under contact/, so the bucket's own rule on that prefix sweeps these up. A
   // slot is meaningless a minute after it was taken.
-  return `contact/throttle/${digest.slice(0, 32)}-${window}.json`;
+  return `contact/throttle/${kind}/${digest.slice(0, 32)}-${window}.json`;
+}
+
+async function claim(bucket: R2Bucket, kind: string, address: string | null, now: Date): Promise<boolean> {
+  if (!address) return true;
+
+  const digest = await sha256Hex(address);
+  const window = Math.floor(now.getTime() / WINDOW_MS);
+
+  const written = await bucket.put(
+    slotKey(kind, digest, window),
+    JSON.stringify({ at: now.toISOString() }),
+    { onlyIf: { etagDoesNotMatch: "*" }, httpMetadata: { contentType: "application/json" } },
+  );
+
+  return written !== null;
 }
 
 /**
@@ -33,15 +48,21 @@ export async function claimSubmissionSlot(
   address: string | null,
   now: Date = new Date(),
 ): Promise<boolean> {
-  if (!address) return true;
+  return claim(bucket, "submit", address, now);
+}
 
-  const digest = await sha256Hex(address);
-  const window = Math.floor(now.getTime() / WINDOW_MS);
-
-  const written = await bucket.put(slotKey(digest, window), JSON.stringify({ at: now.toISOString() }), {
-    onlyIf: { etagDoesNotMatch: "*" },
-    httpMetadata: { contentType: "application/json" },
-  });
-
-  return written !== null;
+/**
+ * The same rule for asking to be sent a code, counted separately.
+ *
+ * Separately because the two cost different things and a visitor does both in
+ * the same minute as a matter of course: asking for a code and then sending the
+ * message it unlocked must not look like two submissions. What this one bounds
+ * is mail sent to somebody who may not have asked for any.
+ */
+export async function claimVerificationSlot(
+  bucket: R2Bucket,
+  address: string | null,
+  now: Date = new Date(),
+): Promise<boolean> {
+  return claim(bucket, "verify", address, now);
 }

@@ -70,6 +70,10 @@ jobs:
       # Public browser ingestion key, used to scope the fallback relay to this
       # project. It is the same variable embedded in the Pages bundle.
       AMPLITUDE_API_KEY: ${{ vars.AMPLITUDE_API_KEY || '' }}
+      # From: on the contact form's verification mail. Printed on every one that
+      # goes out, so there is nothing secret about it — but it has to be an
+      # address at a domain the email provider has verified, or nothing sends.
+      CONTACT_EMAIL_FROM: ${{ vars.CONTACT_EMAIL_FROM || '' }}
       # Already qualified as owner/repo, so the Worker never has to be told
       # which repository it belongs to.
       GITHUB_REPOSITORY: ${{ github.repository }}
@@ -119,6 +123,9 @@ jobs:
           # is its public counterpart and is a repository variable, because Vite
           # inlines it into the bundle every visitor downloads.
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          # Sends the contact form's verification codes. Without it the form
+          # cannot verify an address, and says so rather than sending anyway.
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: |
           jq -n \
             --arg botToken "$TELEGRAM_BOT_TOKEN" \
@@ -127,12 +134,14 @@ jobs:
             --arg dispatchToken "$GITHUB_DISPATCH_TOKEN" \
             --arg callbackSecret "$CALLBACK_HMAC_SECRET" \
             --arg turnstileSecret "$TURNSTILE_SECRET_KEY" \
+            --arg resendKey "$RESEND_API_KEY" \
             '{
               TELEGRAM_BOT_TOKEN: $botToken,
               TELEGRAM_WEBHOOK_SECRET: $webhookSecret,
               TELEGRAM_ALLOWED_USER_IDS: $allowedUserIds,
               GITHUB_DISPATCH_TOKEN: $dispatchToken,
               CALLBACK_HMAC_SECRET: $callbackSecret,
-              TURNSTILE_SECRET_KEY: $turnstileSecret
+              TURNSTILE_SECRET_KEY: $turnstileSecret,
+              RESEND_API_KEY: $resendKey
             }' \
             | npx wrangler secret bulk --config wrangler.generated.json
