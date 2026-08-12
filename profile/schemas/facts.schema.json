@@ -15,6 +15,18 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "links": {
+      "description": "Public profiles elsewhere. Optional: a deployment with none simply renders none.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "linkedin": {
+          "description": "The handle in linkedin.com/in/<handle>, never the URL. A URL here would be an absolute URL and a domain in profile content, which is exactly what validate-profile.ts refuses; the address is built in site/src/sections.ts, where linkedin.com is a third-party service the code calls rather than a deployment value. The character class is what makes it safe to paste into an href.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9-]{1,100}$"
+        }
+      }
+    },
     "experience": {
       "type": "array",
       "items": {

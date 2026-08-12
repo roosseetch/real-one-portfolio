@@ -47,6 +47,11 @@ const ALLOWED = new Set([
   "learn.microsoft.com",
   "json-schema.org",
   "registry.npmjs.org",
+  // Not a host this addresses at all: `http://www.w3.org/2000/svg` is the XML
+  // namespace `createElementNS` requires, and the string is the identifier
+  // rather than an address — nothing fetches it, and it is the same constant in
+  // every document that has ever contained an inline SVG.
+  "www.w3.org",
 ]);
 
 /**
