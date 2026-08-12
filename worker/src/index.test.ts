@@ -267,6 +267,25 @@ describe("routing", () => {
 
     expect((await worker.fetch(new Request(url), testEnv(), ctx())).status).toBe(404);
   });
+
+  /**
+   * The LinkedIn redirect target. It is the one route a browser reaches without
+   * a secret or a signature, so what matters here is that it is reachable at all
+   * and that it gives a stranger nothing: a page, and no side effect, because
+   * every side effect hangs off a single-use state the Worker minted.
+   */
+  it("routes the LinkedIn callback and answers a stranger with a page and nothing else", async () => {
+    const url = "https://worker.example/linkedin/callback";
+    const response = await worker.fetch(new Request(url), testEnv(), ctx());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+
+    // GET only: it is a redirect target, not an endpoint.
+    const posted = await worker.fetch(new Request(url, { method: "POST" }), testEnv(), ctx());
+    expect(posted.status).toBe(404);
+  });
 });
 
 /**

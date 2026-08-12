@@ -27,11 +27,13 @@ const DEFAULTS: Record<string, string> = {
  *
  * Every other one names something the Worker cannot run without, and an empty
  * value there means a deployment wired to nothing — which is why this script
- * refuses rather than guesses. These two configure a feature that turns itself
- * off when it is unset: no analytics key, no relay; no From: address, no
- * verification mail, and the endpoint says so instead of pretending.
+ * refuses rather than guesses. These configure features that turn themselves
+ * off when unset: no analytics key, no relay; no From: address, no verification
+ * mail, and the endpoint says so instead of pretending; no LinkedIn client id,
+ * and the Repost button says LinkedIn is not set up rather than sending the
+ * author to a login that cannot succeed.
  */
-const OPTIONAL = new Set(["AMPLITUDE_API_KEY", "CONTACT_EMAIL_FROM"]);
+const OPTIONAL = new Set(["AMPLITUDE_API_KEY", "CONTACT_EMAIL_FROM", "LINKEDIN_CLIENT_ID"]);
 
 const template = readFileSync(templatePath, "utf8");
 const placeholders = [...new Set([...template.matchAll(/__([A-Z0-9_]+)__/g)].map((m) => m[1]))];

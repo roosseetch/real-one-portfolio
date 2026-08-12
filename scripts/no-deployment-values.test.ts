@@ -36,6 +36,10 @@ const ALLOWED = new Set([
   "developers.cloudflare.com",
   "api2.amplitude.com",
   "api.resend.com",
+  // The repost path: www for the OAuth endpoints and the feed URLs a post
+  // lands at, api for /rest/posts and /v2/userinfo.
+  "www.linkedin.com",
+  "api.linkedin.com",
   "github.com",
   "api.github.com",
   "docs.github.com",

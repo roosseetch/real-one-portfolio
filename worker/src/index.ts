@@ -5,6 +5,8 @@ import { handleAnalyticsProxy } from "./analytics/proxy";
 import { handleContactSubmission } from "./contact/intake";
 import { handleContactVerify } from "./contact/verify";
 import { sweepStrandedDrafts } from "./drafts/sweep";
+import { handleLinkedInConnect } from "./linkedin/connect";
+import { CALLBACK_PATH } from "./linkedin/oauth";
 import {
   beginRequest,
   beginScheduled,
@@ -37,6 +39,10 @@ export interface Env {
   AMPLITUDE_API_KEY: string;
   /** From: on the contact form's verification mail. Printed on every one, so a var rather than a secret. */
   CONTACT_EMAIL_FROM: string;
+  /** This Worker's own origin, used to build the LinkedIn redirect URI. */
+  WORKER_BASE_URL: string;
+  /** Public half of the LinkedIn app: it appears in every authorize URL the author is sent. */
+  LINKEDIN_CLIENT_ID: string;
 
   // Secrets, set with `wrangler secret put` and never in any config file.
   TELEGRAM_BOT_TOKEN: string;
@@ -46,6 +52,8 @@ export interface Env {
   CALLBACK_HMAC_SECRET: string;
   TURNSTILE_SECRET_KEY: string;
   RESEND_API_KEY: string;
+  /** Secret half of the LinkedIn app, used only to exchange and refresh tokens. */
+  LINKEDIN_CLIENT_SECRET: string;
 }
 
 // Once per isolate, before any request can log anything.
@@ -72,6 +80,13 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
 
   if ((request.method === "POST" || request.method === "OPTIONS") && pathname === "/analytics") {
     return handleAnalyticsProxy(request, env);
+  }
+
+  // Where LinkedIn sends the browser after a login. GET only: it is a redirect
+  // target, and everything it is allowed to do hangs off a single-use state the
+  // Worker minted, not off the method.
+  if (request.method === "GET" && pathname === CALLBACK_PATH) {
+    return handleLinkedInConnect(request, env);
   }
 
   // The one route a stranger is meant to reach. Every method reaches the

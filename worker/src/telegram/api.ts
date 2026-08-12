@@ -27,6 +27,27 @@ export interface InlineKeyboardMarkup {
   inline_keyboard: InlineKeyboardButton[][];
 }
 
+export interface KeyboardButton {
+  text: string;
+}
+
+/**
+ * The keyboard that replaces the author's own, under the message box, rather
+ * than one attached to a message.
+ *
+ * Its buttons carry no callback data: pressing one sends its label as an
+ * ordinary message. That is the whole reason the labels are constants in
+ * menu.ts — the intake has to recognise them coming back.
+ */
+export interface ReplyKeyboardMarkup {
+  keyboard: KeyboardButton[][];
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+  input_field_placeholder?: string;
+}
+
+export type ReplyMarkup = InlineKeyboardMarkup | ReplyKeyboardMarkup;
+
 interface TelegramResult<T> {
   ok: boolean;
   description?: string;
@@ -70,7 +91,7 @@ export async function sendMessage(
   env: TelegramApiEnv,
   chatId: number,
   text: string,
-  replyMarkup?: InlineKeyboardMarkup,
+  replyMarkup?: ReplyMarkup,
 ): Promise<number | null> {
   const result = await call<{ message_id: number }>(env, "sendMessage", {
     chat_id: chatId,

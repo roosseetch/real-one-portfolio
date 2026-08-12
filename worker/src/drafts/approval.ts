@@ -9,6 +9,7 @@
  */
 import { editRecord, regenerateRecord } from "../ai/generate";
 import { toPublicRecord } from "../content/records";
+import { activityUrl } from "../content/urls";
 import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
 import { resendsAsPhoto } from "../media/formats";
@@ -360,7 +361,9 @@ async function publishTextRecord(env: ApprovalEnv, draft: Draft): Promise<MediaP
   const result = await publishRecord(env, toPublicRecord(draft.record));
   if (result.status !== "published") return { status: "failed" };
 
-  const url = `${env.SITE_BASE_URL.replace(/\/$/, "")}/#activity`;
+  // The record's own page, not the feed anchor: every activity has had one since
+  // #43, and a link to the feed makes the author hunt for what they just posted.
+  const url = activityUrl(env.SITE_BASE_URL, result.record);
   const published: Draft = {
     ...transition(draft, "published"),
     preview: null,

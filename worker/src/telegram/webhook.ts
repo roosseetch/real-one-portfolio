@@ -9,6 +9,7 @@
 import { timingSafeEqual } from "../crypto";
 import { handlePreviewCallback, type ApprovalEnv } from "../drafts/approval";
 import { intakeUpdate, type IntakeEnv } from "../drafts/intake";
+import { handleRepostCallback, isRepostCallback, type RepostEnv } from "../linkedin/repost";
 import type { TelegramUpdate } from "./types";
 
 /** Telegram echoes the secret given to setWebhook back on every delivery. */
@@ -27,7 +28,7 @@ export interface TelegramEnv {
 }
 
 /** What the route needs on top of the gate: somewhere to put the draft, and a way to reply. */
-export interface WebhookEnv extends TelegramEnv, IntakeEnv, ApprovalEnv {}
+export interface WebhookEnv extends TelegramEnv, IntakeEnv, ApprovalEnv, RepostEnv {}
 
 export type WebhookAuthorization =
   | { status: "authorized"; update: TelegramUpdate; senderId: number }
@@ -165,7 +166,14 @@ export async function handleTelegramWebhook(
   const callbackQuery = authorization.update.callback_query;
   if (callbackQuery) {
     try {
-      await handlePreviewCallback(callbackQuery, env);
+      // Routed on the prefix rather than parsed first. The draft parser would
+      // reject a repost button anyway, but it answers "Not available yet.",
+      // which would be a lie about a button that works.
+      if (isRepostCallback(callbackQuery.data)) {
+        await handleRepostCallback(callbackQuery, env);
+      } else {
+        await handlePreviewCallback(callbackQuery, env);
+      }
     } catch (error) {
       console.error(`Could not handle a button press: ${(error as Error).message}`);
       return new Response("Storage unavailable", { status: 503 });

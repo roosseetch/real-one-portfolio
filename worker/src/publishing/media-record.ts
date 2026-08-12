@@ -8,6 +8,7 @@
  * — the only difference is how long the draft waited.
  */
 import { toPublicRecord, type PublicMedia } from "../content/records";
+import { activityUrl } from "../content/urls";
 import { transition } from "../drafts/state";
 import { saveDraft } from "../drafts/store";
 import type { Draft, ProcessedMedia } from "../drafts/types";
@@ -57,7 +58,9 @@ export async function publishProcessedMedia(
     return { status: "failed" };
   }
 
-  const url = `${env.SITE_BASE_URL.replace(/\/$/, "")}/#activity`;
+  // The record's own page, not the feed anchor: every activity has had one since
+  // #43, and a link to the feed makes the author hunt for what they just posted.
+  const url = activityUrl(env.SITE_BASE_URL, result.record);
   const retired: Draft = {
     ...transition(draft, "published"),
     preview: null,
