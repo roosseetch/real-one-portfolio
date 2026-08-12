@@ -14,12 +14,18 @@ import type { ComposedPost } from "./compose";
 const POSTS_URL = "https://api.linkedin.com/rest/posts";
 
 /**
- * LinkedIn versions its API by month and supports each one for about a year.
- * Pinned rather than computed from the clock: a version that rolls forward on
+ * LinkedIn versions its API by month, `YYYYMM`, and supports each version for a
+ * minimum of one year before sunsetting it — after which requests naming it
+ * fail outright rather than degrading.
+ *
+ * Pinned rather than computed from the clock: a version that rolled forward on
  * its own would change the request contract on a date nobody chose, in a
- * codebase where nothing else moves without a deploy. Bump it deliberately.
+ * codebase where nothing else moves without a deploy. The cost is that this has
+ * to be bumped deliberately, roughly once a year, against the supported list at
+ * https://learn.microsoft.com/en-us/linkedin/marketing/versioning — 202607 is
+ * the newest documented as of August 2026, so it is good into mid-2027.
  */
-const API_VERSION = "202505";
+const API_VERSION = "202607";
 
 export type PostResult =
   | { status: "posted"; url: string }

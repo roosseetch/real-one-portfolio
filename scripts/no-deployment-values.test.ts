@@ -43,6 +43,8 @@ const ALLOWED = new Set([
   "github.com",
   "api.github.com",
   "docs.github.com",
+  // Where LinkedIn's API reference lives, cited by the version pin in post.ts.
+  "learn.microsoft.com",
   "json-schema.org",
   "registry.npmjs.org",
 ]);

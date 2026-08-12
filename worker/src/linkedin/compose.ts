@@ -9,15 +9,26 @@
 import type { PublicRecord } from "../content/records";
 import { activityUrl } from "../content/urls";
 
-/** LinkedIn rejects a commentary past this outright. */
+/**
+ * LinkedIn's own limit on a member post. The API documents the refusal
+ * (`FIELD_LENGTH_TOO_LONG`) without publishing the number, so this is the
+ * product's published limit and the ceiling is applied to the raw commentary —
+ * the conservative reading, since escapes and hashtag templates make the raw
+ * string longer than what renders.
+ */
 const MAX_COMMENTARY = 3000;
 
 /**
- * Characters LinkedIn's "little text" fields reserve.
+ * The characters LinkedIn's "little text" grammar reserves, exactly as its
+ * `Text` production lists them:
  *
- * An unescaped one does not degrade the post, it fails it: the API answers 422
- * and nothing is published. A parenthesis in a summary is enough, which makes
- * this the single likeliest way for a repost to break.
+ *   \| \{ \} \@ \[ \] \( \) \< \> \# \\ \* \_ \~
+ *
+ * The specification is explicit that all of them "need to be escaped with a
+ * backslash, even if those characters are not used in one of the supported
+ * elements or templates" -- so this is not a judgement about which ones look
+ * risky. An unescaped one does not degrade the post, it fails it, and a
+ * parenthesis in a summary is enough.
  *
  * The backslash is first in the class so it is escaped before it can be used to
  * escape something else.
@@ -37,17 +48,27 @@ function escapeLittleText(text: string): string {
  * else.
  */
 function unescapeLittleText(text: string): string {
-  return text.replace(/\\([\\|{}@[\]()<>#*_~])/g, "$1");
+  return text
+    .replace(/\{hashtag\|\\#\|([^}]*)\}/g, "#$1")
+    .replace(/\\([\\|{}@[\]()<>#*_~])/g, "$1");
 }
 
 /**
- * A tag as a hashtag: LinkedIn breaks one at the first space or punctuation, so
- * "Study start-up" has to become "#Studystartup" rather than "#Study" followed
- * by loose words.
+ * A tag as a hashtag LinkedIn will actually linkify.
+ *
+ * The grammar's HashtagTemplate, not a bare `#tag`: every reserved character in
+ * a little-text field has to be escaped, and an escaped `\#Jogging` renders as
+ * literal text nobody can follow -- which defeats the point of putting tags on
+ * the post. `{hashtag|\#|Jogging}` is how the format spells one that works, and
+ * its braces and pipes are syntax rather than text, so this is built after the
+ * prose is escaped and never passed through the escaper.
+ *
+ * LinkedIn breaks a hashtag at the first space or punctuation, so "Study
+ * start-up" has to become one word.
  */
 function hashtag(tag: string): string {
   const word = tag.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9]/g, "");
-  return word === "" ? "" : `#${word}`;
+  return word === "" ? "" : `{hashtag|\\#|${word}}`;
 }
 
 /**
@@ -69,8 +90,15 @@ function cut(escaped: string, limit: number): string {
   const lastSpace = kept.lastIndexOf(" ");
   if (lastSpace > kept.length * 0.6) kept = kept.slice(0, lastSpace);
 
+  // A cut inside a hashtag template leaves `{hashtag|\#|Jog`, which is neither a
+  // template nor plain text. Tags come last, so they are the first thing a long
+  // post loses — this is the ordinary case, not a corner one.
+  const lastOpen = kept.lastIndexOf("{");
+  if (lastOpen !== -1 && kept.indexOf("}", lastOpen) === -1) kept = kept.slice(0, lastOpen);
+
   // An odd run of trailing backslashes means the cut landed inside an escape
   // pair, and a dangling backslash is itself a malformed little-text field.
+  // Runs after the template repair, which can expose one.
   const trailing = /\\*$/.exec(kept)?.[0].length ?? 0;
   if (trailing % 2 === 1) kept = kept.slice(0, -1);
 
@@ -103,12 +131,18 @@ export interface ComposedPost {
 export function composePost(siteBaseUrl: string, record: PublicRecord): ComposedPost {
   const url = activityUrl(siteBaseUrl, record);
 
-  const tags = record.tags.map(hashtag).filter((tag) => tag !== "");
-  const prose = [record.title, record.summary ?? "", record.body ?? "", tags.join(" ")]
+  const sections = [record.title, record.summary ?? "", record.body ?? ""]
     .map((part) => part.trim())
     .filter((part) => part !== "")
-    .map(escapeLittleText)
-    .join("\n\n");
+    .map(escapeLittleText);
+
+  // Appended after the escaping rather than inside it: a hashtag template's
+  // braces and pipes are grammar, and escaping them would put the literal text
+  // "{hashtag|#|Jogging}" on the post.
+  const tags = record.tags.map(hashtag).filter((tag) => tag !== "");
+  if (tags.length > 0) sections.push(tags.join(" "));
+
+  const prose = sections.join("\n\n");
 
   // The URL is not escaped and does not need to be: it is built from the
   // configured site origin and a slug of [a-z0-9-], so it cannot contain a

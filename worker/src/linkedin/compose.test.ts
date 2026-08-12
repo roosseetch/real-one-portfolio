@@ -35,6 +35,23 @@ describe("composePost", () => {
     expect(post.preview).toContain("#Studystartup #PMP");
   });
 
+  /**
+   * Every reserved character in a little-text field has to be escaped, and an
+   * escaped `\#Jogging` renders as literal text nobody can follow. The grammar's
+   * HashtagTemplate is how the format spells one that works.
+   */
+  it("sends tags as hashtag templates, not as escaped hash signs", () => {
+    const post = composePost(SITE, record({ tags: ["Jogging", "PMP"] }));
+
+    expect(post.commentary).toContain("{hashtag|\\#|Jogging} {hashtag|\\#|PMP}");
+    expect(post.commentary).not.toContain("\\#Jogging");
+  });
+
+  it("leaves the template's own braces and pipes unescaped, or they would be text", () => {
+    const post = composePost(SITE, record({ tags: ["Jogging"] }));
+    expect(post.commentary).not.toContain("\\{hashtag");
+  });
+
   it("skips a tag with nothing hashtaggable in it rather than emitting a bare #", () => {
     const post = composePost(SITE, record({ tags: ["—", "PMP"] }));
     expect(post.preview).toContain("#PMP");
@@ -103,6 +120,22 @@ describe("composePost", () => {
       const prose = post.commentary.slice(0, post.commentary.indexOf("…"));
       const trailing = /\\*$/.exec(prose)?.[0].length ?? 0;
       expect(trailing % 2).toBe(0);
+    });
+
+    /**
+     * Tags come last, so they are the first thing a long post loses. A cut
+     * inside one leaves `{hashtag|\#|Jog`, which is neither a template nor
+     * plain text — this is the ordinary case, not a corner one.
+     */
+    it("drops a hashtag template whole rather than cutting into one", () => {
+      const post = composePost(
+        SITE,
+        record({ body: "word ".repeat(1200), tags: ["Jogging", "Running"] }),
+      );
+
+      const opens = (post.commentary.match(/\{hashtag\|/g) ?? []).length;
+      const closes = (post.commentary.match(/\}/g) ?? []).length;
+      expect(opens).toBe(closes);
     });
 
     it("cuts at a word boundary rather than mid-word", () => {

@@ -41,7 +41,12 @@ describe("publishPost", () => {
     expect(result).toEqual({ status: "posted", url: "https://www.linkedin.com/feed/update/urn%3Ali%3Ashare%3A7123/" });
     expect(calls[0].url).toBe("https://api.linkedin.com/rest/posts");
     expect(calls[0].headers.authorization).toBe("Bearer tok");
+    // YYYYMM, and not one LinkedIn has sunset — a version past its support
+    // window is refused outright rather than degrading, so a stale pin here
+    // breaks every repost at once. 202508 is the oldest still supported as of
+    // August 2026; raise this floor when the pin is next bumped.
     expect(calls[0].headers["linkedin-version"]).toMatch(/^\d{6}$/);
+    expect(Number(calls[0].headers["linkedin-version"])).toBeGreaterThanOrEqual(202508);
     expect(calls[0].headers["x-restli-protocol-version"]).toBe("2.0.0");
     expect(calls[0].body.author).toBe("urn:li:person:abc");
     expect(calls[0].body.commentary).toBe(POST.commentary);
