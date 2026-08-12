@@ -484,6 +484,23 @@ main {
   margin-bottom: 0;
 }
 
+/* The rest of a note whose text a listing card cut. At the foot of the card,
+   where the section's own "See all activities" sits at the foot of the list, and
+   underlined from the start: unlike the title above it, this link is only worth
+   anything if it is seen. */
+.activity-read-more {
+  display: inline-block;
+  margin-top: 0.75rem;
+  color: var(--text);
+  text-decoration-color: var(--muted);
+  text-underline-offset: 0.2em;
+}
+
+.activity-read-more:hover,
+.activity-read-more:focus-visible {
+  text-decoration-color: currentcolor;
+}
+
 .activity-tag {
   background: color-mix(in srgb, var(--accent) 30%, var(--surface));
   border-radius: 999px;

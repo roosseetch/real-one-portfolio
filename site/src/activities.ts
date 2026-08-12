@@ -46,13 +46,22 @@ function backLink(): HTMLAnchorElement {
   return link;
 }
 
-/** Every record, newest first, each title a link to its own page. */
+/**
+ * Every record, newest first, each title a link to its own page.
+ *
+ * The text is cut to an excerpt here. A list is for finding the activity you
+ * want, and one note long enough to fill the screen pushes every record under it
+ * off the bottom of it; the whole text is a click away, on the page the excerpt
+ * links to.
+ */
 function renderList(section: HTMLElement, list: HTMLElement, records: ActivityRecord[]) {
   let ascending = false;
 
   const paint = () => {
     list.replaceChildren(
-      ...sortRecords(records, ascending).map((record) => renderRecord(record, { href: activityHref(record) })),
+      ...sortRecords(records, ascending).map((record) =>
+        renderRecord(record, { href: activityHref(record), excerpt: true }),
+      ),
     );
   };
 
