@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { BOT_COMMANDS, COMMANDS, parseCommand } from "./commands";
-import { MAIN_KEYBOARD, NEW_ACTIVITY_LABEL, RAW_LABEL, REPOST_LABEL, menuAction } from "./menu";
+import {
+  ADD_MEDIA_LABEL,
+  MAIN_KEYBOARD,
+  NEW_ACTIVITY_LABEL,
+  RAW_LABEL,
+  REMOVE_MEDIA_LABEL,
+  REPOST_LABEL,
+  menuAction,
+} from "./menu";
 
 describe("parseCommand", () => {
   it("recognises the bot's own commands", () => {
@@ -9,6 +17,8 @@ describe("parseCommand", () => {
     expect(parseCommand("/new")).toBe("new");
     expect(parseCommand("/raw")).toBe("raw");
     expect(parseCommand("/repost")).toBe("repost");
+    expect(parseCommand("/addmedia")).toBe("addmedia");
+    expect(parseCommand("/removemedia")).toBe("removemedia");
   });
 
   it("ignores the arguments after one", () => {
@@ -52,14 +62,18 @@ describe("menuAction", () => {
    * A reply keyboard sends its label as an ordinary message, so these strings
    * are the only thing that tells a button press from a note.
    */
-  it("recognises a press of either standing button", () => {
+  it("recognises a press of any standing button", () => {
     expect(menuAction(NEW_ACTIVITY_LABEL)).toBe("new");
     expect(menuAction(REPOST_LABEL)).toBe("repost");
+    expect(menuAction(ADD_MEDIA_LABEL)).toBe("addmedia");
+    expect(menuAction(REMOVE_MEDIA_LABEL)).toBe("removemedia");
   });
 
   it("treats a button and its command as the same action", () => {
     expect(menuAction("/new")).toBe(menuAction(NEW_ACTIVITY_LABEL));
     expect(menuAction("/repost")).toBe(menuAction(REPOST_LABEL));
+    expect(menuAction("/addmedia")).toBe(menuAction(ADD_MEDIA_LABEL));
+    expect(menuAction("/removemedia")).toBe(menuAction(REMOVE_MEDIA_LABEL));
   });
 
   it("leaves a note that merely mentions a button alone", () => {
@@ -77,6 +91,8 @@ describe("MAIN_KEYBOARD", () => {
       NEW_ACTIVITY_LABEL,
       RAW_LABEL,
       REPOST_LABEL,
+      ADD_MEDIA_LABEL,
+      REMOVE_MEDIA_LABEL,
     ]);
   });
 

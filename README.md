@@ -29,6 +29,7 @@ scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 
 - [Deploying a new instance](#deploying-a-new-instance) — from an empty account to a live site
 - [Publishing: the draft lifecycle](#publishing-the-draft-lifecycle) — what happens between a Telegram message and a record
+- [Changing the media on a published activity](#changing-the-media-on-a-published-activity) — adding and removing photos without editing a chunk
 - [Reposting to LinkedIn](#reposting-to-linkedin) — sharing something already published, and the token that expires
 - [The contact form](#the-contact-form) — what happens between a stranger writing and a message arriving
 - [Backups and export](#backups-and-export) — what has a second copy and what does not
@@ -504,7 +505,7 @@ gh workflow run deploy-pages.yml --ref main
 
 ## The standing buttons
 
-The chat has three standing buttons under the message box, and the same three
+The chat has five standing buttons under the message box, and the same five
 actions in Telegram's `/` menu:
 
 | | |
@@ -512,6 +513,8 @@ actions in Telegram's `/` menu:
 | **📝 New site activity** · `/new` | Prompts for the note, photo or video. The flow above is unchanged — this is the affordance it never had. |
 | **✍️ Publish as written** · `/raw` | Takes the next note exactly as typed, with no model involved. |
 | **🔗 Repost to LinkedIn** · `/repost` | Offers the five most recent published activities, newest first and labelled as the default. |
+| **📎 Add media** · `/addmedia` | Takes the next photos or videos and adds them to an activity that is already on the site. |
+| **🗑 Remove media** · `/removemedia` | Shows an activity's photos and videos one by one, each with its own Remove button. |
 
 `scripts/set-telegram-webhook.ts` registers the commands alongside the webhook,
 from the one list in `worker/src/telegram/commands.ts`, so the `/` menu cannot
@@ -545,6 +548,55 @@ Blank lines survive to the page. The site used to render a body as one `<p>`,
 where HTML collapses newlines, so a note published as written arrived as one
 unbroken block; `renderRecord` now splits on blank lines and the stylesheet
 keeps single ones with `white-space: pre-line`.
+
+## Changing the media on a published activity
+
+Everything else here creates. This is the one pair of flows that reaches back
+into something already live — and the constraint they run into is the one the
+whole content layer is built on: **a chunk is immutable**. So neither of them
+edits anything. The chunk holding the record is republished under a new id with
+the record replaced, and the manifest entry is repointed at it, which is exactly
+what publishing already does when it appends to a chunk that is not full. The
+superseded chunk is left in place, unreferenced, so every URL a browser has
+cached stays valid for as long as it is cached. `worker/src/publishing/amend.ts`
+is the whole of it, and the manifest is written last for the reason publication
+writes it last: a chunk nothing points at is invisible, a manifest pointing at a
+chunk that does not exist is a broken site.
+
+**Adding.** Press **📎 Add media**, send the photos or videos, and *then* pick
+the activity — five most recent as buttons, or **Other** and a pasted link. That
+order is the author's rather than the system's: somebody with a picture in front
+of them is thinking "that belongs with the run I posted".
+
+What happens after the confirmation is not a second pipeline. It is the same
+draft, the same private originals, the same sanitisation in a GitHub Actions
+runner and the same signed callback the publishing path uses — the workflow reads
+a draft's `originals` and its `activityId` and knows nothing else about it, which
+is why an amendment can be built on a draft at all. Only the last step differs,
+and `draft.attachment` is what tells the two apart when it arrives. A video the
+transcode changed visibly still comes back for a final look first.
+
+**Removing.** Press **🗑 Remove media**, pick the activity, and every item is
+sent as its own picture with its own **Remove this one** button under it —
+Telegram allows no buttons on an album, and a numbered list beside pictures
+scrolling past above it is how the wrong one gets deleted. A press asks once
+more, naming the item and saying that the file cannot be put back, and only then:
+the record stops naming the item, and afterwards its derivatives are deleted
+from the media bucket. That order matters. While the record still names the item
+the files have to exist; reversed, a live page would point at a picture that was
+already gone.
+
+Which files those are is read back out of the item's own URL. The pipeline names
+every derivative `{mediaId}-{width}.webp`, `{mediaId}-poster-{width}.webp` or
+`{mediaId}-{width}.mp4` under `media/activity-{activityId}/`, and the media id is
+Crockford base32 — no hyphen can appear in it — so the id plus a hyphen is a
+prefix that matches one item's whole set and nothing else's. Both ids are checked
+against `isValidId` before either reaches an object prefix.
+
+Pressing a spent button is harmless in both directions: an amendment that changes
+nothing writes nothing, so a repeated **Remove** answers "that item is not on the
+activity any more" and a callback delivered twice does not put the same picture
+on the page twice.
 
 ## Reposting to LinkedIn
 

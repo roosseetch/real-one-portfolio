@@ -14,6 +14,7 @@ import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
 import { resendsAsPhoto } from "../media/formats";
 import { deletePublishedMedia } from "../media/published";
+import { attachProcessedMedia } from "../publishing/attach-record";
 import { dispatchMediaProcessing, newJobToken, type DispatchEnv } from "../publishing/dispatch";
 import {
   publishProcessedMedia,
@@ -58,6 +59,9 @@ const EDIT_PROMPT = "What should change? Send it as a message, and the whole ent
 /** Spec §23, quoted rather than paraphrased. */
 const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 const PUBLISH_FAILED_MESSAGE = "Publication failed. The draft is still here — try again in a moment.";
+/** The same sentence for an amendment, which publishes nothing and so cannot say it did not. */
+const ATTACH_FAILED_MESSAGE =
+  "The activity could not be changed. Nothing was added to it — try again in a moment.";
 /** Said when a retry stopped at the same place. The buttons are still live, so this is the whole reply. */
 const RETRY_FAILED_MESSAGE = "That did not work either. The draft is still here — Retry when you want to try again.";
 const PROCESSING_MESSAGE = "Processing the media. This takes a couple of minutes; the link follows when it is done.";
@@ -424,10 +428,17 @@ export async function handlePreviewCallback(
  * immutable, so a duplicate could not simply be edited out afterwards.
  */
 async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
-  if (draft.record === null) return;
+  // An attachment has no record of its own to publish: the words belong to an
+  // activity that already exists, and this press only ever confirms a video the
+  // transcode changed. Checked before the record test below, which would
+  // otherwise return silently and leave the button doing nothing.
+  const attaching = (draft.attachment ?? null) !== null;
+
+  if (!attaching && draft.record === null) return;
 
   if (draft.published !== null) {
-    await sendMessage(env, draft.source.chatId, `Already published. ${draft.published.url}`);
+    const already = attaching ? "Already added." : "Already published.";
+    await sendMessage(env, draft.source.chatId, `${already} ${draft.published.url}`);
     return;
   }
 
@@ -436,10 +447,16 @@ async function publishDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
   // pipeline produced rather than asking for the work a second time.
   const processed = draft.processed ?? null;
   if (processed !== null) {
-    const result = await publishProcessedMedia(env, draft, processed.media);
+    const result = attaching
+      ? await attachProcessedMedia(env, draft, processed.media)
+      : await publishProcessedMedia(env, draft, processed.media);
 
-    if (result.status !== "published") {
-      await sendMessage(env, draft.source.chatId, PUBLISH_FAILED_MESSAGE);
+    if (result.status === "failed") {
+      await sendMessage(
+        env,
+        draft.source.chatId,
+        attaching ? ATTACH_FAILED_MESSAGE : PUBLISH_FAILED_MESSAGE,
+      );
       return;
     }
 
@@ -523,8 +540,11 @@ async function publishTextRecord(env: ApprovalEnv, draft: Draft): Promise<MediaP
  * ones.
  */
 async function retryDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
+  const attaching = (draft.attachment ?? null) !== null;
+
   if (draft.published !== null) {
-    await sendMessage(env, draft.source.chatId, `Already published. ${draft.published.url}`);
+    const already = attaching ? "Already added." : "Already published.";
+    await sendMessage(env, draft.source.chatId, `${already} ${draft.published.url}`);
     return;
   }
 
@@ -559,11 +579,13 @@ async function retryDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
   }
 
   const result =
-    processed !== null
-      ? await publishProcessedMedia(env, resuming, processed.media)
-      : await publishTextRecord(env, resuming);
+    processed === null
+      ? await publishTextRecord(env, resuming)
+      : attaching
+        ? await attachProcessedMedia(env, resuming, processed.media)
+        : await publishProcessedMedia(env, resuming, processed.media);
 
-  if (result.status !== "published") {
+  if (result.status === "failed") {
     // Back to `failed` with a fresh pair of buttons, rather than stranded in
     // `processing` with nothing running and nothing to press.
     await failDraft(env, resuming, "publish");
@@ -641,8 +663,13 @@ async function replaceRecord(env: ApprovalEnv, draft: Draft, record: DraftRecord
  * job running is recoverable — the failure flows retry it — whereas a job
  * running against a draft that still says `awaiting_approval` would publish
  * behind the author's back.
+ *
+ * Exported because the add-media flow ends here too. The workflow reads the
+ * draft's originals and its activity id and knows nothing else about it, so a
+ * draft that will amend an activity rather than create one dispatches through
+ * exactly this — which is the point of building that flow on a draft at all.
  */
-async function startMediaProcessing(env: ApprovalEnv, draft: Draft): Promise<void> {
+export async function startMediaProcessing(env: ApprovalEnv, draft: Draft): Promise<void> {
   const jobToken = newJobToken();
   const processing: Draft = {
     ...transition(draft, "processing"),
@@ -678,7 +705,17 @@ async function startMediaProcessing(env: ApprovalEnv, draft: Draft): Promise<voi
   await sendMessage(env, draft.source.chatId, PROCESSING_MESSAGE);
 }
 
-async function cancelDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
+/**
+ * `message` is what the author is told it means. The default is the publishing
+ * path's, and the add-media flow passes its own: "nothing was published" would
+ * be true of a cancelled attachment and would also be beside the point, since
+ * publishing was never what it was going to do.
+ */
+export async function cancelDraft(
+  env: ApprovalEnv,
+  draft: Draft,
+  message: string = CANCELLED_MESSAGE,
+): Promise<void> {
   const cancelled: Draft = {
     ...transition(draft, "cancelled"),
     // Dropping the preview retires its buttons even if the message edit below
@@ -703,7 +740,7 @@ async function cancelDraft(env: ApprovalEnv, draft: Draft): Promise<void> {
   if (draft.preview !== null) {
     await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
   }
-  await sendMessage(env, draft.source.chatId, CANCELLED_MESSAGE);
+  await sendMessage(env, draft.source.chatId, message);
 
   // The draft itself is left for the bucket's lifecycle rule to remove, which
   // is what makes a cancellation recoverable for seven days.

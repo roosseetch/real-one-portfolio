@@ -9,7 +9,7 @@
  * answers it, instead of two lists that drift the first time one changes.
  */
 
-export const COMMANDS = ["start", "new", "raw", "repost"] as const;
+export const COMMANDS = ["start", "new", "raw", "repost", "addmedia", "removemedia"] as const;
 
 export type Command = (typeof COMMANDS)[number];
 
@@ -19,6 +19,8 @@ export const BOT_COMMANDS: Array<{ command: Command; description: string }> = [
   { command: "new", description: "Start a new site activity" },
   { command: "raw", description: "Publish a note exactly as you write it" },
   { command: "repost", description: "Repost an activity to LinkedIn" },
+  { command: "addmedia", description: "Add photos or videos to a published activity" },
+  { command: "removemedia", description: "Remove a photo or video from a published activity" },
 ];
 
 /**

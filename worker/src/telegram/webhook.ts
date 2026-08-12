@@ -10,6 +10,8 @@ import { timingSafeEqual } from "../crypto";
 import { handlePreviewCallback, type ApprovalEnv } from "../drafts/approval";
 import { intakeUpdate, type IntakeEnv } from "../drafts/intake";
 import { handleRepostCallback, isRepostCallback, type RepostEnv } from "../linkedin/repost";
+import { handleAttachCallback, isAttachCallback, type AttachMediaEnv } from "../media/attach";
+import { handleDetachCallback, isDetachCallback, type DetachEnv } from "../media/detach";
 import type { TelegramUpdate } from "./types";
 
 /** Telegram echoes the secret given to setWebhook back on every delivery. */
@@ -28,7 +30,13 @@ export interface TelegramEnv {
 }
 
 /** What the route needs on top of the gate: somewhere to put the draft, and a way to reply. */
-export interface WebhookEnv extends TelegramEnv, IntakeEnv, ApprovalEnv, RepostEnv {}
+export interface WebhookEnv
+  extends TelegramEnv,
+    IntakeEnv,
+    ApprovalEnv,
+    RepostEnv,
+    AttachMediaEnv,
+    DetachEnv {}
 
 export type WebhookAuthorization =
   | { status: "authorized"; update: TelegramUpdate; senderId: number }
@@ -171,6 +179,10 @@ export async function handleTelegramWebhook(
       // which would be a lie about a button that works.
       if (isRepostCallback(callbackQuery.data)) {
         await handleRepostCallback(callbackQuery, env);
+      } else if (isAttachCallback(callbackQuery.data)) {
+        await handleAttachCallback(callbackQuery, env);
+      } else if (isDetachCallback(callbackQuery.data)) {
+        await handleDetachCallback(callbackQuery, env);
       } else {
         await handlePreviewCallback(callbackQuery, env);
       }
