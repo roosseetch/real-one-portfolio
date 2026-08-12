@@ -4,7 +4,7 @@ import { CHUNK_CACHE_CONTROL, chunkKey } from "../content/chunks";
 import { MANIFEST_KEY, type Manifest } from "../content/manifest";
 import type { PublicRecord } from "../content/records";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
-import { amendRecord } from "./amend";
+import { amendRecord, retractRecord } from "./amend";
 
 let content: FakeBucket;
 
@@ -224,5 +224,133 @@ describe("amendRecord", () => {
 
     expect(result).toEqual({ status: "failed", reason: "conflict" });
     expect(chunkOf("chunk0")[0].title).toBe("First");
+  });
+});
+
+describe("retractRecord", () => {
+  it("republishes the holding chunk without the record, leaving the old one intact", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "First"), record("bbbbbbbbbbbbbbbb", "Second")]]);
+
+    const result = await retractRecord(env(), "aaaaaaaaaaaaaaaa");
+
+    expect(result).toMatchObject({ status: "removed", remaining: 1 });
+    expect(chunkOf("chunk0").map((r) => r.title)).toEqual(["First", "Second"]);
+    expect(chunkOf(manifest().records[0].id).map((r) => r.title)).toEqual(["Second"]);
+  });
+
+  /** So the caller can delete the files the record named without reading it again. */
+  it("hands back the record that went", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "First")]]);
+
+    const result = await retractRecord(env(), "aaaaaaaaaaaaaaaa");
+
+    expect(result.status === "removed" && result.record.title).toBe("First");
+  });
+
+  it("leaves the manifest counting what is actually there", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "First"), record("bbbbbbbbbbbbbbbb", "Second")], [record("cccccccccccccccc", "Third")]]);
+
+    await retractRecord(env(), "bbbbbbbbbbbbbbbb");
+
+    expect(manifest().totalRecords).toBe(2);
+    expect(manifest().records.map((entry) => entry.count)).toEqual([1, 1]);
+  });
+
+  /**
+   * An empty chunk is never published: its entry goes instead. A manifest entry
+   * pointing at an array with nothing in it would be a fetch the site pays for
+   * and learns nothing from.
+   */
+  it("drops the entry rather than publishing an empty chunk", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "Old")], [record("bbbbbbbbbbbbbbbb", "New")]]);
+    const before = content.objects.size;
+
+    await retractRecord(env(), "aaaaaaaaaaaaaaaa");
+
+    expect(manifest().records.map((entry) => entry.id)).toEqual(["chunk1"]);
+    // Only the manifest was rewritten.
+    expect(content.objects.size).toBe(before);
+  });
+
+  /**
+   * `latest` is where the next publication appends. Left naming a chunk that is
+   * no longer in the manifest, publishing would read nothing and roll a new
+   * chunk — which is survivable — but a `latest` that names nothing at all while
+   * records remain is not something any other code here expects.
+   */
+  it("hands `latest` to the newest chunk left when the one it named goes", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "Old")], [record("bbbbbbbbbbbbbbbb", "New")]]);
+
+    await retractRecord(env(), "bbbbbbbbbbbbbbbb");
+
+    expect(manifest().latest).toBe("chunk0");
+  });
+
+  it("keeps `latest` pointing at the newest chunk when an older one is emptied", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "Old")], [record("bbbbbbbbbbbbbbbb", "New")]]);
+
+    await retractRecord(env(), "aaaaaaaaaaaaaaaa");
+
+    expect(manifest().latest).toBe("chunk1");
+  });
+
+  it("empties the manifest when the last record of all goes", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "The only one")]]);
+
+    const result = await retractRecord(env(), "aaaaaaaaaaaaaaaa");
+
+    expect(result).toMatchObject({ status: "removed", remaining: 0 });
+    expect(manifest().records).toEqual([]);
+    expect(manifest().latest).toBeNull();
+    expect(manifest().totalRecords).toBe(0);
+  });
+
+  it("reports a record that is nowhere without writing anything", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "First")]]);
+    const before = content.objects.size;
+
+    expect(await retractRecord(env(), "zzzzzzzzzzzzzzzz")).toEqual({
+      status: "failed",
+      reason: "not-found",
+    });
+    expect(content.objects.size).toBe(before);
+  });
+
+  it("leaves the site as it was when the new chunk cannot be written", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "First"), record("bbbbbbbbbbbbbbbb", "Second")]]);
+    content.failPutsFor((key) => key !== MANIFEST_KEY);
+
+    expect(await retractRecord(env(), "aaaaaaaaaaaaaaaa")).toEqual({
+      status: "failed",
+      reason: "storage",
+    });
+    expect(manifest().records[0].id).toBe("chunk0");
+  });
+
+  /** A publication landing between the read and the write must not be swallowed. */
+  it("rebuilds against a manifest that changed underneath it", async () => {
+    publish([[record("aaaaaaaaaaaaaaaa", "First"), record("bbbbbbbbbbbbbbbb", "Second")]]);
+
+    content.interceptPut(MANIFEST_KEY, () => {
+      content.objects.set(chunkKey("chunk9"), JSON.stringify([record("cccccccccccccccc", "Landed meanwhile")]));
+      content.objects.set(
+        MANIFEST_KEY,
+        JSON.stringify({
+          ...manifest(),
+          records: [...manifest().records, { id: "chunk9", sha256: "y", count: 1 }],
+          latest: "chunk9",
+          totalRecords: 3,
+        }),
+      );
+    });
+
+    const result = await retractRecord(env(), "aaaaaaaaaaaaaaaa");
+
+    expect(result.status).toBe("removed");
+
+    const after = manifest();
+    expect(after.latest).toBe("chunk9");
+    expect(after.totalRecords).toBe(2);
+    expect(chunkOf("chunk9")[0].title).toBe("Landed meanwhile");
   });
 });

@@ -28,6 +28,17 @@ export const CHOICES = 5;
  */
 export const LOOKUP_CHUNKS = 3;
 
+/**
+ * The whole archive, for the one flow that has to be able to name *any*
+ * activity ever published.
+ *
+ * Deleting is that flow. The others act on something recent by nature — a
+ * repost, a photo added to what was just posted — and paying an R2 read per ten
+ * records ever published to answer them would be waste. A deletion is rare,
+ * deliberate, and useless if it cannot reach the entry the author wants gone.
+ */
+export const ALL_CHUNKS = Number.POSITIVE_INFINITY;
+
 export interface RecentEnv {
   CONTENT_BUCKET: R2Bucket;
 }
@@ -92,10 +103,14 @@ export function sortNewestFirst(records: PublicRecord[]): PublicRecord[] {
 }
 
 /** The record a button names, searched over more chunks than the chooser offered. */
-export async function findRecord(env: RecentEnv, recordId: string): Promise<PublicRecord | null> {
+export async function findRecord(
+  env: RecentEnv,
+  recordId: string,
+  maxChunks: number = LOOKUP_CHUNKS,
+): Promise<PublicRecord | null> {
   if (!isValidId(recordId)) return null;
 
-  const records = await loadRecords(env, Number.POSITIVE_INFINITY, LOOKUP_CHUNKS);
+  const records = await loadRecords(env, Number.POSITIVE_INFINITY, maxChunks);
   return records.find((record) => record.id === recordId) ?? null;
 }
 
@@ -134,11 +149,15 @@ export function referenceFrom(text: string): string {
  * than stored — it always has been, on the site and in the Worker both — so
  * this recomputes it per record instead of asking the record for it.
  */
-export async function findByReference(env: RecentEnv, text: string): Promise<PublicRecord | null> {
+export async function findByReference(
+  env: RecentEnv,
+  text: string,
+  maxChunks: number = LOOKUP_CHUNKS,
+): Promise<PublicRecord | null> {
   const reference = referenceFrom(text);
   if (reference === "") return null;
 
-  const records = await loadRecords(env, Number.POSITIVE_INFINITY, LOOKUP_CHUNKS);
+  const records = await loadRecords(env, Number.POSITIVE_INFINITY, maxChunks);
   return (
     records.find((record) => record.id === reference) ??
     records.find((record) => activitySlug(record) === reference) ??

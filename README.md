@@ -505,7 +505,7 @@ gh workflow run deploy-pages.yml --ref main
 
 ## The standing buttons
 
-The chat has five standing buttons under the message box, and the same five
+The chat has six standing buttons under the message box, and the same six
 actions in Telegram's `/` menu:
 
 | | |
@@ -515,6 +515,12 @@ actions in Telegram's `/` menu:
 | **🔗 Repost to LinkedIn** · `/repost` | Offers the five most recent published activities, newest first and labelled as the default. |
 | **📎 Add media** · `/addmedia` | Takes the next photos or videos and adds them to an activity that is already on the site. |
 | **🗑 Remove media** · `/removemedia` | Shows an activity's photos and videos one by one, each with its own Remove button. |
+| **❌ Delete activity** · `/deleteactivity` | Takes a published activity off the site altogether, after quoting it back. |
+
+**❌ Delete activity** has the last row to itself. It is the only button that
+destroys an entry rather than a file, and sitting it beside **🗑 Remove media** —
+a thumb's width from something that sounds almost the same — is precisely how the
+wrong one gets pressed.
 
 `scripts/set-telegram-webhook.ts` registers the commands alongside the webhook,
 from the one list in `worker/src/telegram/commands.ts`, so the `/` menu cannot
@@ -551,17 +557,17 @@ keeps single ones with `white-space: pre-line`.
 
 ## Changing the media on a published activity
 
-Everything else here creates. This is the one pair of flows that reaches back
-into something already live — and the constraint they run into is the one the
-whole content layer is built on: **a chunk is immutable**. So neither of them
-edits anything. The chunk holding the record is republished under a new id with
-the record replaced, and the manifest entry is repointed at it, which is exactly
-what publishing already does when it appends to a chunk that is not full. The
-superseded chunk is left in place, unreferenced, so every URL a browser has
-cached stays valid for as long as it is cached. `worker/src/publishing/amend.ts`
-is the whole of it, and the manifest is written last for the reason publication
-writes it last: a chunk nothing points at is invisible, a manifest pointing at a
-chunk that does not exist is a broken site.
+Everything else here creates. These are the flows that reach back into something
+already live — and the constraint they run into is the one the whole content
+layer is built on: **a chunk is immutable**. So none of them edits anything. The
+chunk holding the record is republished under a new id with the record replaced,
+and the manifest entry is repointed at it, which is exactly what publishing
+already does when it appends to a chunk that is not full. The superseded chunk is
+left in place, unreferenced, so every URL a browser has cached stays valid for as
+long as it is cached. `worker/src/publishing/amend.ts` is the whole of it, and the
+manifest is written last for the reason publication writes it last: a chunk
+nothing points at is invisible, a manifest pointing at a chunk that does not exist
+is a broken site.
 
 **Adding.** Press **📎 Add media**, send the photos or videos, and *then* pick
 the activity — five most recent as buttons, or **Other** and a pasted link. That
@@ -597,6 +603,46 @@ Pressing a spent button is harmless in both directions: an amendment that change
 nothing writes nothing, so a repeated **Remove** answers "that item is not on the
 activity any more" and a callback delivered twice does not put the same picture
 on the page twice.
+
+## Deleting an activity
+
+The same rewrite, one level up: instead of the record being republished with an
+item missing, the chunk is republished without the record. Nothing is edited and
+nothing is erased, so an already-cached chunk stays valid — it simply stops being
+in the manifest. A chunk that held only the deleted record is not republished
+empty at all; its manifest entry is dropped, and `latest` falls to the newest
+chunk still there so the next publication has somewhere to append.
+`retractRecord` in `worker/src/publishing/amend.ts` is that arithmetic, and the
+flow around it is `worker/src/publishing/delete-activity.ts`.
+
+**Any activity, not a recent one.** Every other flow looks three chunks back —
+thirty records — because a repost or an added photo is about something just
+posted. A deletion that could not reach an entry from last year would be useless,
+so this one reads the archive. Which is also why the question is asked the way it
+is: the chat is armed the moment **❌ Delete activity** is pressed, so the answer
+can simply be a pasted link, a slug or an id. The five most recent are offered as
+buttons beside it, but they are the shortcut, not the route.
+
+What comes back quotes the entry: its title, its text, when it was published, how
+much media goes with it, and its URL — followed by what cannot be undone,
+including that anything already posted to LinkedIn stays there pointing at a page
+that will no longer exist. Only the text is ever cut, and the cut is announced;
+the consequences and the link are what the author is being asked to weigh, and a
+long body must not be what pushes them off the end.
+
+On **Yes, delete it** the record leaves the site first and its files are deleted
+afterwards, the same order the remove-media flow runs on and for the same reason.
+Deleting is item by item rather than by emptying the activity's prefix: media
+added after publication came from its own draft and therefore its own prefix, so
+one record's files can be spread across several, and a prefix wiped on the
+assumption that it holds one activity's media is how another activity's would go
+with it.
+
+A visitor who follows a link to something deleted is not left at a broken page.
+`?v=` that resolves to nothing already renders "Activity not found", says the
+entry may have been removed since the link was made, and reports
+`activity_not_found` — a permalink resolving to nothing shows up in no page-view
+count.
 
 ## Reposting to LinkedIn
 

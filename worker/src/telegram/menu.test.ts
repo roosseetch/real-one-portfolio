@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BOT_COMMANDS, COMMANDS, parseCommand } from "./commands";
 import {
   ADD_MEDIA_LABEL,
+  DELETE_ACTIVITY_LABEL,
   MAIN_KEYBOARD,
   NEW_ACTIVITY_LABEL,
   RAW_LABEL,
@@ -19,6 +20,7 @@ describe("parseCommand", () => {
     expect(parseCommand("/repost")).toBe("repost");
     expect(parseCommand("/addmedia")).toBe("addmedia");
     expect(parseCommand("/removemedia")).toBe("removemedia");
+    expect(parseCommand("/deleteactivity")).toBe("deleteactivity");
   });
 
   it("ignores the arguments after one", () => {
@@ -67,6 +69,7 @@ describe("menuAction", () => {
     expect(menuAction(REPOST_LABEL)).toBe("repost");
     expect(menuAction(ADD_MEDIA_LABEL)).toBe("addmedia");
     expect(menuAction(REMOVE_MEDIA_LABEL)).toBe("removemedia");
+    expect(menuAction(DELETE_ACTIVITY_LABEL)).toBe("deleteactivity");
   });
 
   it("treats a button and its command as the same action", () => {
@@ -74,6 +77,7 @@ describe("menuAction", () => {
     expect(menuAction("/repost")).toBe(menuAction(REPOST_LABEL));
     expect(menuAction("/addmedia")).toBe(menuAction(ADD_MEDIA_LABEL));
     expect(menuAction("/removemedia")).toBe(menuAction(REMOVE_MEDIA_LABEL));
+    expect(menuAction("/deleteactivity")).toBe(menuAction(DELETE_ACTIVITY_LABEL));
   });
 
   it("leaves a note that merely mentions a button alone", () => {
@@ -93,7 +97,21 @@ describe("MAIN_KEYBOARD", () => {
       REPOST_LABEL,
       ADD_MEDIA_LABEL,
       REMOVE_MEDIA_LABEL,
+      DELETE_ACTIVITY_LABEL,
     ]);
+  });
+
+  /**
+   * The one button that destroys an entry rather than a file. Beside "Remove
+   * media" — a thumb's width from something that sounds almost the same — is
+   * exactly how the wrong one gets pressed.
+   */
+  it("keeps the destructive button off the row it could be confused with", () => {
+    const row = MAIN_KEYBOARD.keyboard.find((buttons) =>
+      buttons.some((button) => button.text === DELETE_ACTIVITY_LABEL),
+    );
+
+    expect(row?.map((button) => button.text)).toEqual([DELETE_ACTIVITY_LABEL]);
   });
 
   // The whole point is that it is still there tomorrow, and that it does not
