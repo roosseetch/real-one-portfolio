@@ -13,15 +13,19 @@
 import type { DraftRecord } from "../drafts/types";
 
 /**
- * The record's limit, not only the model's: a title is a heading on a page and a
- * link in a feed whoever wrote it, so the verbatim route in drafts/verbatim.ts
- * measures itself against this same number rather than keeping a second one.
+ * The record's limits, not only the model's.
+ *
+ * A title is a heading on a page and a link in a feed whoever wrote it, so the
+ * verbatim route in drafts/verbatim.ts measures itself against this same number
+ * rather than keeping a second one — and so does the flow that lets the author
+ * retype a published field by hand. A limit the model is held to and the author
+ * is not would be a limit that only sometimes applies.
  */
 export const MAX_TITLE = 120;
-const MAX_SUMMARY = 300;
-const MAX_BODY = 4000;
-const MAX_TAGS = 8;
-const MAX_TAG = 40;
+export const MAX_SUMMARY = 300;
+export const MAX_BODY = 4000;
+export const MAX_TAGS = 8;
+export const MAX_TAG = 40;
 
 export const RECORD_JSON_SCHEMA = {
   type: "object",

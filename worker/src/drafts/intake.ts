@@ -22,6 +22,12 @@ import {
   promptForDeletion,
   type DeleteActivityEnv,
 } from "../publishing/delete-activity";
+import {
+  applyEditTarget,
+  applyEditValue,
+  promptForEdit,
+  type EditActivityEnv,
+} from "../publishing/edit-activity";
 import { findAlbumDraft } from "./albums";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import {
@@ -127,7 +133,8 @@ export interface IntakeEnv
     RepostEnv,
     AttachMediaEnv,
     DetachEnv,
-    DeleteActivityEnv {
+    DeleteActivityEnv,
+    EditActivityEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
 
@@ -186,6 +193,18 @@ async function applyPending(
 
   if (pending.kind === "delete-target") {
     await applyDeleteTarget(env, chatId, text);
+    return { status: "unsupported" };
+  }
+
+  if (pending.kind === "edit-target") {
+    await applyEditTarget(env, chatId, text);
+    return { status: "unsupported" };
+  }
+
+  // The one pointer whose message is the content rather than a reference to it:
+  // this text becomes a field of a published record, untouched.
+  if (pending.kind === "edit-field") {
+    await applyEditValue(env, chatId, pending.recordId, pending.field, text);
     return { status: "unsupported" };
   }
 
@@ -280,6 +299,13 @@ async function runMenuAction(env: IntakeEnv, chatId: number, action: MenuAction)
   // typeable without a button being pressed first.
   if (action === "deleteactivity") {
     await promptForDeletion(env, chatId);
+    return;
+  }
+
+  // Armed the same way as deleting, and for the same reason: the flow starts
+  // from the link of something already published.
+  if (action === "editactivity") {
+    await promptForEdit(env, chatId);
     return;
   }
 

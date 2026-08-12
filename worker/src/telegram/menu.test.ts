@@ -4,6 +4,7 @@ import { BOT_COMMANDS, COMMANDS, parseCommand } from "./commands";
 import {
   ADD_MEDIA_LABEL,
   DELETE_ACTIVITY_LABEL,
+  EDIT_ACTIVITY_LABEL,
   MAIN_KEYBOARD,
   NEW_ACTIVITY_LABEL,
   RAW_LABEL,
@@ -21,6 +22,7 @@ describe("parseCommand", () => {
     expect(parseCommand("/addmedia")).toBe("addmedia");
     expect(parseCommand("/removemedia")).toBe("removemedia");
     expect(parseCommand("/deleteactivity")).toBe("deleteactivity");
+    expect(parseCommand("/editactivity")).toBe("editactivity");
   });
 
   it("ignores the arguments after one", () => {
@@ -70,6 +72,7 @@ describe("menuAction", () => {
     expect(menuAction(ADD_MEDIA_LABEL)).toBe("addmedia");
     expect(menuAction(REMOVE_MEDIA_LABEL)).toBe("removemedia");
     expect(menuAction(DELETE_ACTIVITY_LABEL)).toBe("deleteactivity");
+    expect(menuAction(EDIT_ACTIVITY_LABEL)).toBe("editactivity");
   });
 
   it("treats a button and its command as the same action", () => {
@@ -78,6 +81,7 @@ describe("menuAction", () => {
     expect(menuAction("/addmedia")).toBe(menuAction(ADD_MEDIA_LABEL));
     expect(menuAction("/removemedia")).toBe(menuAction(REMOVE_MEDIA_LABEL));
     expect(menuAction("/deleteactivity")).toBe(menuAction(DELETE_ACTIVITY_LABEL));
+    expect(menuAction("/editactivity")).toBe(menuAction(EDIT_ACTIVITY_LABEL));
   });
 
   it("leaves a note that merely mentions a button alone", () => {
@@ -95,6 +99,7 @@ describe("MAIN_KEYBOARD", () => {
       NEW_ACTIVITY_LABEL,
       RAW_LABEL,
       REPOST_LABEL,
+      EDIT_ACTIVITY_LABEL,
       ADD_MEDIA_LABEL,
       REMOVE_MEDIA_LABEL,
       DELETE_ACTIVITY_LABEL,
@@ -102,8 +107,8 @@ describe("MAIN_KEYBOARD", () => {
   });
 
   /**
-   * The one button that destroys an entry rather than a file. Beside "Remove
-   * media" — a thumb's width from something that sounds almost the same — is
+   * The one button that destroys an entry rather than a file. Beside "Edit
+   * activity" — a thumb's width from a label that reads almost the same — is
    * exactly how the wrong one gets pressed.
    */
   it("keeps the destructive button off the row it could be confused with", () => {

@@ -19,6 +19,7 @@ export const RAW_LABEL = "✍️ Publish as written";
 export const REPOST_LABEL = "🔗 Repost to LinkedIn";
 export const ADD_MEDIA_LABEL = "📎 Add media";
 export const REMOVE_MEDIA_LABEL = "🗑 Remove media";
+export const EDIT_ACTIVITY_LABEL = "✏️ Edit activity";
 export const DELETE_ACTIVITY_LABEL = "❌ Delete activity";
 
 /**
@@ -27,21 +28,22 @@ export const DELETE_ACTIVITY_LABEL = "❌ Delete activity";
  * rows. Deliberately not `one_time_keyboard`: the whole point is that it is
  * still there tomorrow.
  *
- * The two media buttons share a row. They are the pair that acts on something
- * already published, and putting each on its own row would make the keyboard
- * five deep — at which point it stops being glanceable, which is the only
- * reason it exists.
+ * The first two rows make something; the next two act on something that already
+ * exists and leave it existing; the last one destroys. Pairing them that way is
+ * what keeps the keyboard glanceable at five rows rather than seven, and it puts
+ * the two questions the author actually asks — "share this" and "fix this" —
+ * beside each other.
  *
- * Deleting an activity gets that fifth row anyway, alone, and the row is the
- * point. It is the only button here that destroys an entry rather than a file,
- * and sitting it beside "Remove media" — a thumb's width from something that
- * sounds almost the same — is precisely how the wrong one gets pressed.
+ * Deleting an activity has the last row to itself, and the row is the point. It
+ * is the only button here that destroys an entry rather than a file, and sitting
+ * it beside "Edit activity" — a thumb's width from a label that reads almost the
+ * same — is precisely how the wrong one gets pressed.
  */
 export const MAIN_KEYBOARD: ReplyKeyboardMarkup = {
   keyboard: [
     [{ text: NEW_ACTIVITY_LABEL }],
     [{ text: RAW_LABEL }],
-    [{ text: REPOST_LABEL }],
+    [{ text: REPOST_LABEL }, { text: EDIT_ACTIVITY_LABEL }],
     [{ text: ADD_MEDIA_LABEL }, { text: REMOVE_MEDIA_LABEL }],
     [{ text: DELETE_ACTIVITY_LABEL }],
   ],
@@ -68,6 +70,7 @@ export function menuAction(text: string): MenuAction | null {
   if (trimmed === REPOST_LABEL) return "repost";
   if (trimmed === ADD_MEDIA_LABEL) return "addmedia";
   if (trimmed === REMOVE_MEDIA_LABEL) return "removemedia";
+  if (trimmed === EDIT_ACTIVITY_LABEL) return "editactivity";
   if (trimmed === DELETE_ACTIVITY_LABEL) return "deleteactivity";
 
   return parseCommand(trimmed);
@@ -79,7 +82,8 @@ export const WELCOME =
   `Or use the buttons: "${NEW_ACTIVITY_LABEL}" starts one, "${RAW_LABEL}" publishes a note in your own ` +
   `words with nothing rewritten, and "${REPOST_LABEL}" shares something already published.\n\n` +
   `"${ADD_MEDIA_LABEL}" and "${REMOVE_MEDIA_LABEL}" change the photos and videos on an activity ` +
-  `that is already on the site, and "${DELETE_ACTIVITY_LABEL}" takes one off it for good.`;
+  `that is already on the site, "${EDIT_ACTIVITY_LABEL}" changes its wording, and ` +
+  `"${DELETE_ACTIVITY_LABEL}" takes one off it for good.`;
 
 /**
  * The prompt behind "Add media".
