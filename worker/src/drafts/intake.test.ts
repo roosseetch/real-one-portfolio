@@ -5,7 +5,7 @@ import { bodyFor, type SampleFormat } from "../test-support/bytes";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import type { TelegramMessage, TelegramUpdate } from "../telegram/types";
 import { intakeUpdate } from "./intake";
-import { setPendingEdit } from "./pending";
+import { setPendingEdit, setPendingEditField } from "./pending";
 import { loadDraft, saveDraft } from "./store";
 
 const SENDER = 4242;
@@ -771,6 +771,76 @@ describe("deleting an activity", () => {
     publish();
     await intakeUpdate(textMessage(DELETE_LABEL), SENDER, env());
     await intakeUpdate(textMessage("a-morning-run"), SENDER, env());
+
+    const result = await intakeUpdate(textMessage("swam this evening"), SENDER, env());
+
+    expect(result.status).toBe("created");
+  });
+});
+
+describe("editing a published activity", () => {
+  const EDIT_LABEL = "✏️ Edit activity";
+
+  function publish(): void {
+    content.objects.set(
+      "content/records-chunk0.json",
+      JSON.stringify([
+        {
+          id: "aaaaaaaaaaaaaaaa",
+          title: "A morning run",
+          summary: null,
+          body: "Eight kilometres before work.",
+          eventDate: null,
+          publishedAt: "2026-08-10T09:00:00.000Z",
+          tags: [],
+          media: [],
+        },
+      ]),
+    );
+    content.objects.set(
+      "content/manifest.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: "2026-08-12T10:00:00.000Z",
+        recordsPerFile: 10,
+        totalRecords: 1,
+        records: [{ id: "chunk0", sha256: "x", count: 1 }],
+        latest: "chunk0",
+      }),
+    );
+  }
+
+  it("asks which activity instead of drafting a note that says 'Edit activity'", async () => {
+    publish();
+
+    const result = await intakeUpdate(textMessage(EDIT_LABEL), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("Which activity should I change?");
+  });
+
+  /**
+   * The pointer that matters most here: this message is not a reference to
+   * something, it *is* the new wording, and reading it as a new note would
+   * publish the author's correction as a separate activity.
+   */
+  it("reads the wording that follows as the field, not as a new note", async () => {
+    publish();
+    await intakeUpdate(textMessage(EDIT_LABEL), SENDER, env());
+    await intakeUpdate(textMessage("a-morning-run"), SENDER, env());
+    await setPendingEditField(storage.bucket, 99, "aaaaaaaaaaaaaaaa", "body");
+
+    const result = await intakeUpdate(textMessage("Eight kilometres, in the rain."), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("would become");
+    expect(sent.join(" ")).toContain("Eight kilometres, in the rain.");
+  });
+
+  it("goes back to drafting once the pointer is spent", async () => {
+    publish();
+    await setPendingEditField(storage.bucket, 99, "aaaaaaaaaaaaaaaa", "body");
+    await intakeUpdate(textMessage("Eight kilometres, in the rain."), SENDER, env());
 
     const result = await intakeUpdate(textMessage("swam this evening"), SENDER, env());
 

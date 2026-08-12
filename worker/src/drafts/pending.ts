@@ -16,6 +16,7 @@
  * Stored under drafts/ so the bucket's seven-day rule sweeps up anything left
  * behind, and given a much shorter deadline of its own besides.
  */
+import { EDITABLE_FIELDS, type EditableField } from "../publishing/edit-fields";
 
 /**
  * A forgotten prompt should not silently swallow tomorrow's note as an edit
@@ -38,11 +39,21 @@ export type Pending =
   /** The next message names the activity to take media off. */
   | { kind: "detach-target" }
   /** The next message names the activity to delete outright. */
-  | { kind: "delete-target" };
+  | { kind: "delete-target" }
+  /** The next message names the activity to change the wording of. */
+  | { kind: "edit-target" }
+  /**
+   * The next message is the new wording itself, for one field of one published
+   * record. Both are carried because the author picked them a message ago and
+   * nothing in what they type now repeats either.
+   */
+  | { kind: "edit-field"; recordId: string; field: EditableField };
 
 interface StoredPending {
   kind?: Pending["kind"];
   draftId?: string;
+  recordId?: string;
+  field?: EditableField;
   expiresAt: string;
 }
 
@@ -123,6 +134,24 @@ export function setPendingDeleteTarget(
   return setPending(bucket, chatId, { kind: "delete-target" }, now);
 }
 
+export function setPendingEditTarget(
+  bucket: R2Bucket,
+  chatId: number,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "edit-target" }, now);
+}
+
+export function setPendingEditField(
+  bucket: R2Bucket,
+  chatId: number,
+  recordId: string,
+  field: EditableField,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "edit-field", recordId, field }, now);
+}
+
 /**
  * Consumes an "attach" pointer, and only that one.
  *
@@ -195,6 +224,16 @@ export async function takePending(
   if (stored.kind === "attach") return { kind: "attach" };
   if (stored.kind === "detach-target") return { kind: "detach-target" };
   if (stored.kind === "delete-target") return { kind: "delete-target" };
+  if (stored.kind === "edit-target") return { kind: "edit-target" };
+  if (stored.kind === "edit-field") {
+    // Both halves or neither. A pointer missing one of them cannot say what the
+    // author's next sentence is for, and guessing would put their words in the
+    // wrong field of a published record.
+    return typeof stored.recordId === "string" &&
+      (EDITABLE_FIELDS as readonly string[]).includes(stored.field ?? "")
+      ? { kind: "edit-field", recordId: stored.recordId, field: stored.field as EditableField }
+      : null;
+  }
   if (stored.kind === "attach-target") {
     return typeof stored.draftId === "string" ? { kind: "attach-target", draftId: stored.draftId } : null;
   }

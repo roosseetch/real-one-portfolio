@@ -16,6 +16,7 @@ export const COMMANDS = [
   "repost",
   "addmedia",
   "removemedia",
+  "editactivity",
   "deleteactivity",
 ] as const;
 
@@ -29,6 +30,7 @@ export const BOT_COMMANDS: Array<{ command: Command; description: string }> = [
   { command: "repost", description: "Repost an activity to LinkedIn" },
   { command: "addmedia", description: "Add photos or videos to a published activity" },
   { command: "removemedia", description: "Remove a photo or video from a published activity" },
+  { command: "editactivity", description: "Change the wording of a published activity" },
   { command: "deleteactivity", description: "Delete a published activity from the site" },
 ];
 

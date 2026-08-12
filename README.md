@@ -532,7 +532,7 @@ gh workflow run deploy-pages.yml --ref main
 
 ## The standing buttons
 
-The chat has six standing buttons under the message box, and the same six
+The chat has seven standing buttons under the message box, and the same seven
 actions in Telegram's `/` menu:
 
 | | |
@@ -542,12 +542,15 @@ actions in Telegram's `/` menu:
 | **🔗 Repost to LinkedIn** · `/repost` | Offers the five most recent published activities, newest first and labelled as the default. |
 | **📎 Add media** · `/addmedia` | Takes the next photos or videos and adds them to an activity that is already on the site. |
 | **🗑 Remove media** · `/removemedia` | Shows an activity's photos and videos one by one, each with its own Remove button. |
+| **✏️ Edit activity** · `/editactivity` | Retypes one field of a published activity — title, text, summary, date or tags. |
 | **❌ Delete activity** · `/deleteactivity` | Takes a published activity off the site altogether, after quoting it back. |
 
-**❌ Delete activity** has the last row to itself. It is the only button that
-destroys an entry rather than a file, and sitting it beside **🗑 Remove media** —
-a thumb's width from something that sounds almost the same — is precisely how the
-wrong one gets pressed.
+The rows group by what they do: the first two make something, the next two act on
+something that already exists and leave it existing, and the last one destroys.
+**❌ Delete activity** has that row to itself, and the row is the point — it is
+the only button that destroys an entry rather than a file, and sitting it beside
+**✏️ Edit activity**, a thumb's width from a label that reads almost the same, is
+precisely how the wrong one gets pressed.
 
 `scripts/set-telegram-webhook.ts` registers the commands alongside the webhook,
 from the one list in `worker/src/telegram/commands.ts`, so the `/` menu cannot
@@ -630,6 +633,48 @@ Pressing a spent button is harmless in both directions: an amendment that change
 nothing writes nothing, so a repeated **Remove** answers "that item is not on the
 activity any more" and a callback delivered twice does not put the same picture
 on the page twice.
+
+## Changing the wording of a published activity
+
+The third thing that reaches back into something live, and the one that touches
+what a visitor actually reads. **✏️ Edit activity**, then the link, slug or id —
+the same opening the delete flow has, armed as the question is asked so the
+answer can just be pasted, and reading the whole archive rather than the newest
+three chunks.
+
+What comes back is the entry as it stands, every field spelled out, with a button
+each: **Title**, **Text**, **Summary**, **Date**, **Tags**. Picking one reads that
+field back and waits for the replacement. Nullable fields get a **Clear it**
+button beside the prompt, because no typed sentence unambiguously means "empty" —
+an author who sends a dash means a dash. The title has no such button: a record
+with no title cannot be headed, rendered or linked to, which is why `parseRecord`
+refuses one too.
+
+**No model touches it.** Every other route to a record's words runs them through
+Workers AI. This one does not, and that is the design rather than an omission: an
+author fixing a typo in something already public is not asking to be rewritten,
+and a model handed "make it say Tuesday" can just as easily return a new second
+paragraph. What is typed is what the record says — the promise `/raw` makes on
+the way in, kept on the way back.
+
+Nothing is silently truncated or coerced. An overlong title is refused with its
+length and the limit rather than cut to fit, a date must be a date that exists
+(`2026-02-31` matches the pattern and is not a day), and tags are split on commas
+or lines and deduplicated case-insensitively. A refused value re-arms the
+pointer, so the corrected attempt is still an edit rather than becoming a
+brand-new activity.
+
+The proposal then waits in the private bucket under an id the **Save it** button
+carries — callback_data has 64 bytes, which is an id and nowhere near a
+paragraph. It stores the *value*, never a finished record, and is applied to
+whatever the record says at the moment the button is pressed: a photo added while
+the preview sat on screen survives the edit rather than being undone by it. Each
+proposal is keyed by its own id, so a button does what the message it sits under
+says rather than what a later one does, and the press that saves it consumes it.
+
+Renaming moves the page. The slug comes from the title, so the reply says the
+link changed and gives the new one — an older link now resolves to the
+"Activity not found" page, the same one a deleted activity leaves behind.
 
 ## Deleting an activity
 
