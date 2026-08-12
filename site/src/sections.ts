@@ -1,5 +1,5 @@
 import { activitiesHref } from "./activity";
-import { facts, personality, portfolio, mediaRef } from "./profile";
+import { facts, personality, portfolio, mediaRef, profileLinks } from "./profile";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -223,8 +223,82 @@ export function renderHobbies(section: HTMLElement) {
   sync();
 }
 
+/**
+ * LinkedIn's mark, drawn rather than fetched.
+ *
+ * Inline because the alternative is a request to somewhere for a 500-byte
+ * glyph: an image in the repository, which this one deliberately has none of, or
+ * a third-party CDN, which would tell LinkedIn about every visitor to a page
+ * they never clicked. The path is the mark as LinkedIn publishes it, in a 24×24
+ * box, and `currentColor` lets the stylesheet own what shade it is.
+ */
+function linkedInMark(): SVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "24");
+  svg.setAttribute("height", "24");
+  svg.setAttribute("fill", "currentColor");
+  // The icon says nothing the link's own label does not, and a screen reader
+  // announcing "image" before "LinkedIn" is one word of noise.
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute(
+    "d",
+    "M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.45v6.29zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.22.79 24 1.77 24h20.45c.98 0 1.78-.78 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z",
+  );
+
+  svg.append(path);
+  return svg;
+}
+
+/**
+ * Where a LinkedIn handle lives.
+ *
+ * Here rather than in the profile, and that is the whole reason the profile
+ * stores `dina-haman-b52b8716b` and not the address it sits at: an absolute URL
+ * and a domain in profile content is exactly what validate-profile.ts refuses,
+ * because a reusable repository's profile has no business naming hosts. In
+ * tracked source linkedin.com is something else entirely — a third-party service
+ * the code genuinely calls, which is why it is already an allowed host in
+ * scripts/no-deployment-values.test.ts.
+ */
+const LINKEDIN_PROFILE = "https://www.linkedin.com/in/";
+
+/**
+ * The link itself, or nothing.
+ *
+ * The handle is checked against the same character class the schema pins it to,
+ * a second time. The profile is fetched from a bucket at build time rather than
+ * read out of the repository, so what reaches this function is not what a
+ * validator saw — and a "handle" carrying a colon or a slash would not be a
+ * handle, it would be an address of the caller's choosing pasted into an href.
+ */
+export function linkedInLink(handle: string | undefined): HTMLAnchorElement | null {
+  if (!handle || !/^[A-Za-z0-9-]{1,100}$/.test(handle)) return null;
+
+  const link = document.createElement("a");
+  link.className = "footer-social";
+  link.href = `${LINKEDIN_PROFILE}${handle}`;
+  // The accessible name, since the only child is a decorative glyph.
+  link.setAttribute("aria-label", "LinkedIn");
+  link.rel = "noopener noreferrer me";
+  link.target = "_blank";
+  link.append(linkedInMark());
+
+  return link;
+}
+
 export function renderFooter(section: HTMLElement) {
   section.classList.add("footer");
   section.append(el("p", "footer-name", facts.displayName ?? ""));
   if (facts.headline) section.append(el("p", "footer-headline", facts.headline));
+
+  const linkedin = linkedInLink(profileLinks().linkedin);
+  if (linkedin !== null) {
+    const links = el("p", "footer-links");
+    links.append(linkedin);
+    section.append(links);
+  }
 }

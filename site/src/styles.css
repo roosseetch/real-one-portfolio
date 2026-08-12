@@ -627,6 +627,37 @@ main {
   margin-top: 0;
 }
 
+.footer-links {
+  margin-top: 0.9em;
+}
+
+/*
+ * The tap target is the link, not the glyph. A 24px icon is under every
+ * guideline's minimum for a finger, so the padding is what makes it reachable
+ * rather than the drawing being made bigger. 0.65rem either side of 24px is
+ * 44.8px, over WCAG 2.5.5's 44 — measured in the browser rather than assumed,
+ * because 0.6rem lands on 43.2 and looks identical.
+ */
+.footer-social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem;
+  border-radius: 50%;
+  color: var(--muted);
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.footer-social:hover,
+.footer-social:focus-visible {
+  color: var(--accent);
+  background-color: var(--surface, rgba(0, 0, 0, 0.04));
+}
+
+.footer-social svg {
+  display: block;
+}
+
 /* Subtle motion, disabled entirely for users who ask for less */
 @media (prefers-reduced-motion: no-preference) {
   html {

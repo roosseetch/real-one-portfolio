@@ -279,6 +279,13 @@ That checks them against the schemas and rejects deployment-specific values —
 absolute URLs, domains, account or chat ids, e-mail addresses — because none of
 that belongs in profile content.
 
+That rule is why `facts.links` stores **handles rather than addresses**.
+`links.linkedin` is `jane-doe-123`, never `https://www.linkedin.com/in/jane-doe-123`,
+which would be an absolute URL *and* a domain and would be refused. The host is a
+constant in `site/src/sections.ts`, where linkedin.com is a third-party service
+the code genuinely calls rather than a value belonging to whoever deployed first.
+The block is optional throughout: a profile without it renders no icon.
+
 Copy `worker/.env.example` to `worker/.env` and fill in the bucket names and
 public URLs from step 4 (this file drives the scripts, and step 8's Wrangler
 configuration), then publish:
