@@ -3,7 +3,11 @@
 
 Reads CLOUDFLARE_API_TOKEN from the environment. Refuses to upload anything
 that still carries identifying metadata, so a sanitization failure cannot
-become a public object.
+become a public object -- which is why the site icon goes through here too,
+rather than being put in the bucket by hand.
+
+Uploads the .webp the sanitiser emits and the .png the site icon is; anything
+else in the directory is left alone.
 
 Usage: upload-media.py <work-dir> <bucket> <key-prefix>
 """
@@ -25,6 +29,12 @@ CACHE_CONTROL = "public, max-age=604800"
 
 BLOCKED_TAGS = ("SerialNumber", "OwnerName", "Artist", "Software", "UserComment")
 
+# WebP is what the sanitiser emits and what the site asks for everywhere it
+# renders a picture. PNG is here for the site icon alone: a favicon is read by
+# the browser's chrome rather than by its renderer, and Safari's support for a
+# WebP one is not something a logo should rest on.
+CONTENT_TYPES = {".webp": "image/webp", ".png": "image/png"}
+
 
 def account_id() -> str:
     req = urllib.request.Request(f"{API}/accounts", headers={"Authorization": f"Bearer {TOKEN}"})
@@ -42,7 +52,7 @@ work_dir, bucket, prefix = Path(sys.argv[1]), sys.argv[2], sys.argv[3].strip("/"
 acct = account_id()
 uploaded = 0
 
-for path in sorted(work_dir.glob("*.webp")):
+for path in sorted(p for p in work_dir.iterdir() if p.suffix.lower() in CONTENT_TYPES):
     if not is_clean(path):
         sys.exit(f"refusing to upload {path.name}: identifying metadata present")
 
@@ -52,7 +62,7 @@ for path in sorted(work_dir.glob("*.webp")):
         data=path.read_bytes(),
         headers={
             "Authorization": f"Bearer {TOKEN}",
-            "Content-Type": "image/webp",
+            "Content-Type": CONTENT_TYPES[path.suffix.lower()],
             "Cache-Control": CACHE_CONTROL,
         },
         method="PUT",

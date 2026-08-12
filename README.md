@@ -325,6 +325,33 @@ re-checks each file with exiftool — the one command in this list that wants a
 host tool — and refuses anything still carrying identifying metadata, so a
 failed sanitisation cannot become a public object.
 
+**The site icon** goes to the same prefix, as `favicon-32.png` and
+`favicon-180.png`. It is a logo rather than a photograph, so it does not go
+through the sanitiser — there is no camera metadata to strip and nothing to
+transcode — but it does go through the same upload script, which re-checks it
+and is why it is a PNG the script now accepts alongside the sanitiser's WebP. A
+tab icon is read by the browser's chrome rather than by its renderer, and
+Safari's support for a WebP one is not something a logo should rest on.
+
+```sh
+magick <logo.png> -crop <square around the mark> +repage -strip \
+  -filter Lanczos -resize 32x32 -unsharp 0x0.7+0.8+0 favicon-32.png
+magick <logo.png> -crop <square around the mark> +repage -strip \
+  -filter Lanczos -resize 180x180 favicon-180.png
+CLOUDFLARE_API_TOKEN=... python3 scripts/upload-media.py <dir> <media-bucket> media/profile
+```
+
+Crop to the mark itself rather than scaling the whole logo. A wordmark that
+reads at 1024px is grey mush at 32, and the padding around a logo is padding
+around nothing once the image is the size of a tab. `-strip` is what leaves the
+file with no metadata for the upload check to find.
+
+Nothing about the icon is tracked. `site/src/head.ts` builds the `<link>` tags
+from `VITE_MEDIA_BASE_URL` and vite.config.ts writes them into every page at
+build time, so a page added to `routes.ts` has an icon without anyone
+remembering to paste one, and a build with no media bucket configured simply has
+no icon rather than a link that 404s.
+
 ### 7. Create the Telegram bot
 
 Follow [Telegram webhook](#telegram-webhook) for the bot token, the webhook
