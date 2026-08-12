@@ -1,3 +1,4 @@
+import { activitiesHref } from "./activity";
 import { facts, personality, portfolio, mediaRef } from "./profile";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -74,7 +75,9 @@ export function renderHero(section: HTMLElement) {
   const story = el("a", "button primary", "Discover my story") as HTMLAnchorElement;
   story.href = "#about";
   const activities = el("a", "button", "See recent activities") as HTMLAnchorElement;
-  activities.href = "#activity";
+  // The page rather than the section below: the section is a teaser of the two
+  // most recent, and this button promises the activities themselves.
+  activities.href = activitiesHref();
   actions.append(story, activities);
   text.append(actions);
 

@@ -1,8 +1,16 @@
 /* Static Activity loader (spec §21).
    Reads the public content bucket only: manifest once, then immutable
-   records-{id}.json chunks. No Worker, no database, no runtime API. */
+   records-{id}.json chunks. No Worker, no database, no runtime API.
 
-interface ActivityMedia {
+   Two places show activities and both start here: the landing page's teaser of
+   the two most recent (renderActivityPreview, below) and the /activities page
+   that lists them all and addresses one at a time (activities.ts). Everything
+   they share — loading, ordering, what a record looks like, and the URL that
+   names one — lives in this module, so the two cannot drift. */
+
+import { routeById, routeHref } from "./routes";
+
+export interface ActivityMedia {
   type: "image" | "video";
   src: string;
   thumbnail?: string;
@@ -11,7 +19,7 @@ interface ActivityMedia {
   poster?: string;
 }
 
-interface ActivityRecord {
+export interface ActivityRecord {
   id: string;
   title: string;
   summary?: string | null;
@@ -30,14 +38,19 @@ interface Manifest {
 
 const CONTENT_BASE = import.meta.env.VITE_CONTENT_BASE_URL?.replace(/\/$/, "");
 
-function el(tag: string, className?: string, text?: string): HTMLElement {
+/** "/" on a custom domain, "/<repo>/" on a project-pages deployment. Vite fixes it at build time. */
+const BASE = import.meta.env.BASE_URL;
+
+const ACTIVITIES = routeById("activities")!;
+
+export function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text) node.textContent = text;
   return node;
 }
 
-function note(section: HTMLElement, message: string) {
+export function note(section: HTMLElement, message: string) {
   section.querySelector(".activity-note")?.remove();
   section.append(el("p", "activity-note", message));
 }
@@ -98,7 +111,7 @@ function comparePublication(
   return a.position - b.position;
 }
 
-function sortRecords(records: ActivityRecord[], ascending: boolean): ActivityRecord[] {
+export function sortRecords(records: ActivityRecord[], ascending: boolean): ActivityRecord[] {
   // The position is carried explicitly rather than left to the sort's stability,
   // because it is the tiebreak itself: reversing for newest-first has to reverse
   // two records sharing a timestamp too.
@@ -107,9 +120,84 @@ function sortRecords(records: ActivityRecord[], ascending: boolean): ActivityRec
   return ordered.map((entry) => entry.record);
 }
 
-function renderRecord(record: ActivityRecord): HTMLElement {
+/** Long enough for a real title, short enough that a shared link stays readable. */
+const SLUG_MAX_LENGTH = 60;
+
+/**
+ * The readable half of an activity's URL: /activities/?v=morning-run-by-the-river.
+ *
+ * Derived from the title rather than stored on the record. A published record is
+ * immutable and none of the ones already in the bucket carry a slug, so a stored
+ * one would have to be backfilled into files that must never be rewritten.
+ *
+ * This is deliberately not an identifier: two records can be titled alike and
+ * would slug alike, which is why selectRecords returns a list and the page shows
+ * every match. A link that has to be unambiguous can use the record id, which
+ * selectRecords accepts in the same parameter.
+ */
+export function activitySlug(record: ActivityRecord): string {
+  const slug = record.title
+    .normalize("NFKD")
+    // The combining marks the decomposition left behind: "é" is now "e" + U+0301,
+    // and dropping the mark is what turns it into the "e" a URL can carry.
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, SLUG_MAX_LENGTH)
+    .replace(/^-+|-+$/g, "");
+
+  // A title with nothing ASCII in it — emoji, or a script that does not
+  // decompose into Latin — slugs to the empty string, and an empty ?v= names
+  // nothing at all. The id is not pretty, but it is always there.
+  return slug || record.id;
+}
+
+/**
+ * The records a `?v=` value names: none, one, or the several that share a slug.
+ *
+ * The id is tried first and exactly. A slug is derived from a title and a title
+ * can be anything, so a record could in principle be titled as another record's
+ * id — and the id is the link that is supposed to be unambiguous.
+ */
+export function selectRecords(records: ActivityRecord[], value: string): ActivityRecord[] {
+  const byId = records.filter((record) => record.id === value);
+  if (byId.length > 0) return byId;
+  return records.filter((record) => activitySlug(record) === value);
+}
+
+/** This record's own page. */
+export function activityHref(record: ActivityRecord): string {
+  return `${routeHref(BASE, ACTIVITIES)}?v=${encodeURIComponent(activitySlug(record))}`;
+}
+
+/** The whole list. */
+export function activitiesHref(): string {
+  return routeHref(BASE, ACTIVITIES);
+}
+
+export interface RecordOptions {
+  /**
+   * Where this record's title links to. Left out on the page that already shows
+   * this record on its own, where the link would point at itself.
+   */
+  href?: string;
+  /** Heading level for the title, so a record shown alone is not an h3 under nothing. */
+  heading?: "h2" | "h3";
+}
+
+export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
-  card.append(el("h3", undefined, record.title));
+
+  const heading = el(options.heading ?? "h3");
+  if (options.href) {
+    const link = el("a", "activity-card-link", record.title) as HTMLAnchorElement;
+    link.href = options.href;
+    heading.append(link);
+  } else {
+    heading.textContent = record.title;
+  }
+  card.append(heading);
+
   if (record.eventDate) card.append(el("p", "activity-date", record.eventDate));
   if (record.summary) card.append(el("p", "activity-summary", record.summary));
   if (record.body) card.append(el("p", "activity-body", record.body));
@@ -152,16 +240,24 @@ function renderRecord(record: ActivityRecord): HTMLElement {
   return card;
 }
 
-export function renderActivity(section: HTMLElement, title: string) {
-  section.append(el("h2", undefined, title));
-
+/**
+ * Loads the feed into a section and handles every state that is not "here are
+ * some records": no content bucket configured yet, nothing published, and a
+ * bucket that cannot be read. `paint` is called only when at least one record
+ * arrived, so no caller has to repeat those three sentences.
+ *
+ * The caller appends its own container before calling this, because the
+ * placeholders go after it and the notes go after them.
+ */
+export function mountFeed(
+  section: HTMLElement,
+  skeletonCards: number,
+  paint: (records: ActivityRecord[]) => void,
+): void {
   if (!CONTENT_BASE) {
     note(section, "Recent activities will appear here soon.");
     return;
   }
-
-  const list = el("div", "activity-list");
-  section.append(list);
 
   // Placeholder cards rather than a spinner: they occupy roughly the space the
   // real records will, so the page does not lurch when the feed arrives.
@@ -169,36 +265,44 @@ export function renderActivity(section: HTMLElement, title: string) {
   skeleton.setAttribute("role", "status");
   skeleton.setAttribute("aria-busy", "true");
   skeleton.setAttribute("aria-label", "Loading recent activities");
-  for (let i = 0; i < 2; i++) skeleton.append(el("div", "activity-skeleton-card"));
+  for (let i = 0; i < skeletonCards; i++) skeleton.append(el("div", "activity-skeleton-card"));
   section.append(skeleton);
 
-  let records: ActivityRecord[] = [];
-  let ascending = false;
-
-  const paint = () => {
-    list.replaceChildren(...sortRecords(records, ascending).map(renderRecord));
-  };
-
   loadRecords()
-    .then((loaded) => {
+    .then((records) => {
       skeleton.remove();
-      records = loaded;
       if (records.length === 0) {
         note(section, "No activities published yet.");
         return;
       }
-      const toggle = el("button", "activity-sort", "Oldest first") as HTMLButtonElement;
-      toggle.addEventListener("click", () => {
-        ascending = !ascending;
-        toggle.textContent = ascending ? "Newest first" : "Oldest first";
-        paint();
-      });
-      section.insertBefore(toggle, list);
-      paint();
+      paint(records);
     })
     .catch((error) => {
       skeleton.remove();
       console.warn("Activity feed unavailable:", error);
       note(section, "Activities are unavailable right now. Please check back later.");
     });
+}
+
+/**
+ * The landing page's activities: the newest few, side by side, and a way through
+ * to the rest.
+ *
+ * No sort control — there is nothing to reorder in two cards, and the page that
+ * has every record has the control instead.
+ */
+export function renderActivityPreview(section: HTMLElement, title: string, limit = 2) {
+  section.append(el("h2", undefined, title));
+
+  const list = el("div", "activity-list activity-preview");
+  section.append(list);
+
+  mountFeed(section, limit, (records) => {
+    const newest = sortRecords(records, false).slice(0, limit);
+    list.replaceChildren(...newest.map((record) => renderRecord(record, { href: activityHref(record) })));
+
+    const more = el("a", "activity-more", "See all activities") as HTMLAnchorElement;
+    more.href = activitiesHref();
+    section.append(more);
+  });
 }

@@ -369,6 +369,36 @@ main {
   gap: var(--space);
 }
 
+/* The landing page's two most recent, side by side. minmax(0, 1fr) rather than
+   1fr: a grid column's default minimum is its content, so one long unbroken
+   word in a title would push the pair wider than the page. */
+.activity-preview {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 48rem) {
+  .activity-preview {
+    grid-template-columns: 1fr;
+  }
+}
+
+.activity-more,
+.activity-back {
+  display: inline-block;
+  margin-top: var(--space);
+  color: var(--text);
+}
+
+.activity-card-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.activity-card-link:hover,
+.activity-card-link:focus-visible {
+  text-decoration: underline;
+}
+
 .activity-skeleton-card {
   height: 8rem;
   border-radius: 1rem;
@@ -396,6 +426,14 @@ main {
 .activity-date {
   color: var(--muted);
   margin-top: 0;
+}
+
+/* One record on its own page. The card is as wide as the section, but a line of
+   prose that wide is hard to come back to, so the text keeps a reading measure
+   while the photographs do not. */
+.activity-single .activity-summary,
+.activity-single .activity-body {
+  max-width: 42rem;
 }
 
 .activity-media img,
