@@ -37,7 +37,8 @@ export function applyDesignTokens() {
  *
  * Section links are written against the landing page's full path rather than as
  * a bare "#about", because on any other page a bare hash points at a section
- * that is not there.
+ * that is not there. A section a route claims with `landingSectionId` links to
+ * that route instead of to the section.
  *
  * @param current id of the route being rendered, so it can be marked as the page the visitor is on.
  */
@@ -58,7 +59,12 @@ export function renderNav(current: string): HTMLElement {
   const targets = portfolio.landingPageOrder.filter((id) => id !== "footer");
   targets.forEach((id, index) => {
     const label = portfolio.navigation[index] ?? portfolio.sections.find((s) => s.id === id)?.title ?? id;
-    nav.append(navLink(`${home}#${id}`, label));
+    // A section that has a page of its own — the landing page shows a teaser of
+    // it — links to that page rather than to the teaser.
+    const page = ROUTES.find((route) => route.landingSectionId === id);
+    const link = navLink(page ? routeHref(BASE, page) : `${home}#${id}`, label);
+    if (page?.id === current) link.setAttribute("aria-current", "page");
+    nav.append(link);
   });
 
   for (const route of ROUTES) {

@@ -2,7 +2,7 @@ import "./styles.css";
 import { initializeAnalytics } from "./analytics";
 import { facts, portfolio } from "./profile";
 import { renderHero, renderAbout, renderExperience, renderHobbies, renderFooter } from "./sections";
-import { renderActivity } from "./activity";
+import { renderActivityPreview } from "./activity";
 import { applyDesignTokens, renderNav } from "./shell";
 
 const SECTION_RENDERERS: Record<string, (section: HTMLElement) => void> = {
@@ -10,8 +10,11 @@ const SECTION_RENDERERS: Record<string, (section: HTMLElement) => void> = {
   about: renderAbout,
   experience: renderExperience,
   hobbies: renderHobbies,
+  // A teaser of the two most recent, not the whole feed: /activities is where
+  // every record lives, and a landing page that grows a section for each one
+  // published buries everything under it.
   activity: (section) =>
-    renderActivity(section, portfolio.sections.find((s) => s.id === "activity")?.title ?? "Recent Activities"),
+    renderActivityPreview(section, portfolio.sections.find((s) => s.id === "activity")?.title ?? "Recent Activities"),
   footer: renderFooter
 };
 

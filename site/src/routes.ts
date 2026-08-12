@@ -29,9 +29,19 @@ export interface Route {
   entry: string;
   /**
    * Primary-navigation label. Null for the landing page, whose own navigation
-   * is built from the profile's section titles rather than from this file.
+   * is built from the profile's section titles rather than from this file, and
+   * null for a page that `landingSectionId` already gives an entry.
    */
   navLabel: string | null;
+  /**
+   * The landing-page section this page is the full version of.
+   *
+   * That section already has a navigation entry, labelled from the profile, and
+   * a second entry for the page would leave the menu with two near-identical
+   * items. Declaring the section here sends its existing entry to this page
+   * instead.
+   */
+  landingSectionId?: string;
   /**
    * What this page's <title> says ahead of the profile's name. Null keeps the
    * profile's title exactly as the landing page has it.
@@ -49,6 +59,15 @@ export const ROUTES: Route[] = [
     navLabel: null,
     title: null,
     description: null,
+  },
+  {
+    id: "activities",
+    path: "activities/",
+    entry: "activities/index.html",
+    navLabel: null,
+    landingSectionId: "activity",
+    title: "Recent Activities",
+    description: "Everything I have published, most recent first.",
   },
   {
     id: "contact",
