@@ -12,7 +12,12 @@
  */
 import type { DraftRecord } from "../drafts/types";
 
-const MAX_TITLE = 120;
+/**
+ * The record's limit, not only the model's: a title is a heading on a page and a
+ * link in a feed whoever wrote it, so the verbatim route in drafts/verbatim.ts
+ * measures itself against this same number rather than keeping a second one.
+ */
+export const MAX_TITLE = 120;
 const MAX_SUMMARY = 300;
 const MAX_BODY = 4000;
 const MAX_TAGS = 8;

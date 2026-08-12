@@ -15,6 +15,7 @@ import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import {
   MAIN_KEYBOARD,
   NEW_ACTIVITY_PROMPT,
+  RAW_PROMPT,
   WELCOME,
   menuAction,
   type MenuAction,
@@ -26,9 +27,10 @@ import {
   sendPreview,
   type ApprovalEnv,
 } from "./approval";
-import { clearPendingEdit, takePendingEdit } from "./pending";
+import { clearPending, setPendingVerbatim, takePending } from "./pending";
 import { createDraft, loadDraft, saveDraft } from "./store";
 import type { Draft } from "./types";
+import { verbatimRecord } from "./verbatim";
 
 const NOTHING_USABLE_MESSAGE =
   "I could not find anything to publish in that message. Send a note, a photo, or a video — a picture sent as a file works too, and so does a sticker.";
@@ -125,21 +127,27 @@ export type IntakeResult =
  * broken bot, and it leaves nothing behind to explain what happened.
  */
 /**
- * Consumes a pending edit instruction, if this chat owes one.
+ * Consumes whatever this chat's next message was promised to, if anything.
  *
  * Returns null when the message is an ordinary new note. The pointer is taken
  * — read and cleared — before the draft is checked, so a pointer to a draft
  * that has since been cancelled or published cannot keep intercepting messages.
  */
-async function applyPendingEdit(
+async function applyPending(
   chatId: number,
+  senderId: number,
+  messageId: number,
   text: string,
   env: IntakeEnv,
 ): Promise<IntakeResult | null> {
-  const draftId = await takePendingEdit(env.PRIVATE_BUCKET, chatId);
-  if (draftId === null) return null;
+  const pending = await takePending(env.PRIVATE_BUCKET, chatId);
+  if (pending === null) return null;
 
-  const draft = await loadDraft(env.PRIVATE_BUCKET, draftId);
+  if (pending.kind === "verbatim") {
+    return publishAsWritten(env, { chatId, senderId, messageId }, text);
+  }
+
+  const draft = await loadDraft(env.PRIVATE_BUCKET, pending.draftId);
 
   // The draft moved on while the author was typing. Treating the message as an
   // instruction would silently discard it, so it starts a new draft instead.
@@ -147,6 +155,47 @@ async function applyPendingEdit(
 
   await applyEditInstruction(env, draft, text);
   return { status: "created", draft };
+}
+
+/**
+ * Turns the author's message into a draft without asking a model anything.
+ *
+ * Same draft, same bucket, same preview and the same Publish button as every
+ * other note — the only difference is where the record comes from, which is
+ * `verbatimRecord` and therefore the author. Approval is not skipped along with
+ * the model: seeing what will become public before it does is the point of the
+ * preview, and it does not stop being the point because nobody rewrote it.
+ */
+async function publishAsWritten(
+  env: IntakeEnv,
+  source: { chatId: number; senderId: number; messageId: number },
+  text: string,
+): Promise<IntakeResult> {
+  const record = verbatimRecord(text);
+
+  // The menu action guards against an empty message before it ever gets here,
+  // so this is the belt to that braces.
+  if (record === null) {
+    await sendMessage(env, source.chatId, NOTHING_USABLE_MESSAGE);
+    return { status: "unsupported" };
+  }
+
+  const draft = await createDraft(env.PRIVATE_BUCKET, source, text);
+  const withRecord: Draft = { ...draft, record, updatedAt: new Date().toISOString() };
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, withRecord);
+  } catch {
+    // Swallowed for the reason describeAndPreview swallows its own: the draft
+    // exists, and a 503 here would have Telegram redeliver the note into a
+    // second draft for the same thought. Nothing was lost that a press of
+    // "Use my text" on the preview cannot put back.
+    console.error("Could not store the verbatim record; the draft is saved without it");
+    await sendGenerationFailure(env, draft);
+    return { status: "created", draft };
+  }
+
+  return { status: "created", draft: await sendPreview(env, withRecord) };
 }
 
 /**
@@ -162,10 +211,18 @@ async function applyPendingEdit(
  * the rest of the intake would have to know about.
  */
 async function runMenuAction(env: IntakeEnv, chatId: number, action: MenuAction): Promise<void> {
-  await clearPendingEdit(env.PRIVATE_BUCKET, chatId);
+  await clearPending(env.PRIVATE_BUCKET, chatId);
 
   if (action === "repost") {
     await promptForActivity(env, chatId);
+    return;
+  }
+
+  // Armed rather than done: the note itself is the next message, exactly as
+  // "Edit text" leaves the instruction to be the next one.
+  if (action === "raw") {
+    await setPendingVerbatim(env.PRIVATE_BUCKET, chatId);
+    await sendMessage(env, chatId, RAW_PROMPT);
     return;
   }
 
@@ -214,10 +271,10 @@ export async function intakeUpdate(
   }
 
   // Checked before anything else that could make a draft: after "Edit text" the
-  // author's next message is the instruction, and it is indistinguishable from a
-  // new note otherwise.
-  const edited = await applyPendingEdit(message.chat.id, text, env);
-  if (edited) return edited;
+  // author's next message is the instruction, and after "Publish as written" it
+  // is the note to use untouched. Both are indistinguishable from a new note.
+  const promised = await applyPending(message.chat.id, senderId, message.message_id, text, env);
+  if (promised) return promised;
 
   const draft = await createDraft(
     env.PRIVATE_BUCKET,

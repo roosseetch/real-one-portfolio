@@ -27,6 +27,7 @@ export const PREVIEW_ACTIONS = [
   "regenerate",
   "retry",
   "generate",
+  "verbatim",
   "cancel",
 ] as const;
 export type PreviewAction = (typeof PREVIEW_ACTIONS)[number];
@@ -46,6 +47,7 @@ export const ACTION_CODES: Record<string, PreviewAction> = {
   r: "regenerate",
   t: "retry",
   g: "generate",
+  v: "verbatim",
   c: "cancel",
 };
 
@@ -56,6 +58,7 @@ const CODE_FOR: Record<PreviewAction, string> = {
   regenerate: "r",
   retry: "t",
   generate: "g",
+  verbatim: "v",
   cancel: "c",
 };
 
@@ -66,6 +69,7 @@ const LABELS: Record<PreviewAction, string> = {
   regenerate: "Regenerate",
   retry: "Retry",
   generate: "Try again",
+  verbatim: "Use my text",
   cancel: "Cancel",
 };
 
@@ -123,11 +127,23 @@ function button(action: PreviewAction, draftId: string, token: string) {
   return { text: LABELS[action], callback_data: `${CODE_FOR[action]}:${draftId}:${token}` };
 }
 
+/**
+ * "Use my text" sits beside Regenerate because the two answer the same
+ * complaint from opposite ends: the model wrote the wrong thing, so either ask
+ * it again or stop asking it. Cancel moves to its own row rather than sharing
+ * one with an action that publishes different words — they were adjacent, and
+ * adjacent is how the wrong one gets pressed.
+ */
 export function previewKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
   const key = (action: PreviewAction) => button(action, draftId, token);
 
   return {
-    inline_keyboard: [[key("publish")], [key("edit"), key("media")], [key("regenerate"), key("cancel")]],
+    inline_keyboard: [
+      [key("publish")],
+      [key("edit"), key("media")],
+      [key("regenerate"), key("verbatim")],
+      [key("cancel")],
+    ],
   };
 }
 
@@ -175,12 +191,16 @@ export function failureKeyboard(draftId: string, token: string): InlineKeyboardM
  * the generation. Sharing the `retry` code would have given a button on a
  * record-less draft the power to publish.
  *
- * Try again and Cancel, and nothing else: there is no record yet, so editing or
- * regenerating one would be a button that could only be refused.
+ * Editing and regenerating are left off — there is no record yet, so either
+ * would be a button that could only be refused. "Use my text" is the exception
+ * and belongs here most of all: it needs nothing from the model, so it works
+ * precisely when nothing else does.
  */
 export function generationKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
+  const key = (action: PreviewAction) => button(action, draftId, token);
+
   return {
-    inline_keyboard: [[button("generate", draftId, token), button("cancel", draftId, token)]],
+    inline_keyboard: [[key("generate"), key("verbatim")], [key("cancel")]],
   };
 }
 

@@ -15,6 +15,7 @@ import type { ReplyKeyboardMarkup } from "./api";
 import { parseCommand, type Command } from "./commands";
 
 export const NEW_ACTIVITY_LABEL = "📝 New site activity";
+export const RAW_LABEL = "✍️ Publish as written";
 export const REPOST_LABEL = "🔗 Repost to LinkedIn";
 
 /**
@@ -24,7 +25,7 @@ export const REPOST_LABEL = "🔗 Repost to LinkedIn";
  * still there tomorrow.
  */
 export const MAIN_KEYBOARD: ReplyKeyboardMarkup = {
-  keyboard: [[{ text: NEW_ACTIVITY_LABEL }], [{ text: REPOST_LABEL }]],
+  keyboard: [[{ text: NEW_ACTIVITY_LABEL }], [{ text: RAW_LABEL }], [{ text: REPOST_LABEL }]],
   resize_keyboard: true,
   is_persistent: true,
   input_field_placeholder: "Send a note, a photo, or a video",
@@ -44,6 +45,7 @@ export function menuAction(text: string): MenuAction | null {
   const trimmed = text.trim();
 
   if (trimmed === NEW_ACTIVITY_LABEL) return "new";
+  if (trimmed === RAW_LABEL) return "raw";
   if (trimmed === REPOST_LABEL) return "repost";
 
   return parseCommand(trimmed);
@@ -52,8 +54,20 @@ export function menuAction(text: string): MenuAction | null {
 /** Shown once when the keyboard is put up, and again whenever it is asked for. */
 export const WELCOME =
   "Send me a note, a photo, or a video and I will write it up for the site.\n\n" +
-  `Or use the buttons: "${NEW_ACTIVITY_LABEL}" starts one, "${REPOST_LABEL}" shares something already published.`;
+  `Or use the buttons: "${NEW_ACTIVITY_LABEL}" starts one, "${RAW_LABEL}" publishes a note in your own ` +
+  `words with nothing rewritten, and "${REPOST_LABEL}" shares something already published.`;
 
 /** The prompt behind the first button. The flow itself is just "send a message". */
 export const NEW_ACTIVITY_PROMPT =
   "Go ahead — send the note, photo or video. I will come back with a draft to approve.";
+
+/**
+ * The prompt behind "Publish as written".
+ *
+ * It says where the title comes from, because that is the one thing the author
+ * has to know to use this: everything else about the message is left alone, and
+ * a heading has to come from somewhere.
+ */
+export const RAW_PROMPT =
+  "Send the note and I will use it exactly as you write it — nothing rewritten, nothing added.\n\n" +
+  "The first line becomes the title and the rest is the text. You still see it before anything is published.";

@@ -284,6 +284,28 @@ describe("what a record renders as", () => {
     expect(card.querySelector(".activity-summary")).toBeNull();
     expect(card.querySelector(".activity-date")).toBeNull();
     expect(card.querySelector(".activity-tags")).toBeNull();
+    expect(card.querySelector(".activity-body")).toBeNull();
+  });
+
+  it("keeps the paragraphs the author wrote", async () => {
+    // A note published in the author's own words arrives with its blank lines
+    // intact. As one <p> the browser collapses every one of them, and the whole
+    // note lands as a single block of prose.
+    serve(bucketOf([record("in her words", { body: "First paragraph.\n\nSecond one.\n\nThird." })]));
+    const section = mount();
+    await loaded(section);
+
+    const paragraphs = [...section.querySelectorAll(".activity-body")].map((p) => p.textContent);
+    expect(paragraphs).toEqual(["First paragraph.", "Second one.", "Third."]);
+  });
+
+  it("keeps a body with no blank lines as one paragraph", async () => {
+    // Which is nearly every record: the model writes a paragraph.
+    serve(bucketOf([record("as generated", { body: "Cool air, quiet paths, and a good pace." })]));
+    const section = mount();
+    await loaded(section);
+
+    expect(section.querySelectorAll(".activity-body")).toHaveLength(1);
   });
 
   it("loads a picture lazily, from its thumbnail, with the caption beside it", async () => {

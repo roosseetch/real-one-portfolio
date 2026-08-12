@@ -146,7 +146,12 @@ describe("intakeUpdate", () => {
 
     if (result.status !== "created") throw new Error("expected a draft");
     expect(keyboards).toEqual([
-      { inline_keyboard: [[expect.objectContaining({ text: "Try again" }), expect.objectContaining({ text: "Cancel" })]] },
+      {
+        inline_keyboard: [
+          [expect.objectContaining({ text: "Try again" }), expect.objectContaining({ text: "Use my text" })],
+          [expect.objectContaining({ text: "Cancel" })],
+        ],
+      },
     ]);
 
     // The token has to be stored, or the buttons can only ever be refused.
@@ -697,5 +702,94 @@ describe("the standing buttons", () => {
     );
 
     expect(result.status).toBe("created");
+  });
+});
+
+describe("publishing as written", () => {
+  // Spelled out rather than imported, like the labels above: these strings are
+  // the interface, and a test that reads them from the source cannot notice one
+  // changing under it.
+  const RAW_LABEL = "✍️ Publish as written";
+  const REPOST_LABEL = "🔗 Repost to LinkedIn";
+
+  /** The AI binding that must never be reached on this route. */
+  function noAi() {
+    return {
+      ...env(),
+      AI: {
+        run() {
+          throw new Error("the model was asked for something on the verbatim route");
+        },
+      } as unknown as Ai,
+    };
+  }
+
+  it("says what will happen, and arms the next message", async () => {
+    await intakeUpdate(textMessage("/raw"), SENDER, noAi());
+
+    expect(sent.join(" ")).toContain("exactly as you write it");
+    // The one thing the author has to know to use it.
+    expect(sent.join(" ")).toContain("first line becomes the title");
+    expect(storage.objects.has("drafts/pending/99.json")).toBe(true);
+  });
+
+  it("publishes the note without asking the model anything", async () => {
+    await intakeUpdate(textMessage("/raw"), SENDER, noAi());
+    sent.length = 0;
+
+    const result = await intakeUpdate(
+      textMessage("A morning at the campus\nThe coffee was good, and the walk over was better."),
+      SENDER,
+      noAi(),
+    );
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    const stored = await loadDraft(storage.bucket, result.draft.draftId);
+    expect(stored?.record?.title).toBe("A morning at the campus");
+    expect(stored?.record?.body).toBe("The coffee was good, and the walk over was better.");
+    expect(stored?.record?.tags).toEqual([]);
+  });
+
+  it("still asks before anything becomes public", async () => {
+    // Skipping the model is not skipping approval: the preview is what makes
+    // publishing an informed act, whoever wrote the words.
+    await intakeUpdate(textMessage("/raw"), SENDER, noAi());
+    sent.length = 0;
+
+    const result = await intakeUpdate(textMessage("A morning at the campus\nThe coffee was good."), SENDER, noAi());
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(result.draft.state).toBe("awaiting_approval");
+    expect(sent[0]).toContain("Is this the information and media that should become public?");
+    expect(keyboards).toHaveLength(1);
+  });
+
+  it("answers the button the same way as the command", async () => {
+    await intakeUpdate(textMessage("/raw"), SENDER, noAi());
+    const viaCommand = [...sent];
+
+    sent.length = 0;
+    await intakeUpdate(textMessage(RAW_LABEL), SENDER, noAi());
+
+    expect(sent).toEqual(viaCommand);
+  });
+
+  it("applies to one message only", async () => {
+    await intakeUpdate(textMessage("/raw"), SENDER, noAi());
+    await intakeUpdate(textMessage("Taken as written\nThis one is mine."), SENDER, noAi());
+
+    // The pointer is spent, so the next note goes through the model as usual.
+    const second = await intakeUpdate(textMessage("ran 8k"), SENDER, env());
+
+    if (second.status !== "created") throw new Error("expected a second draft");
+    expect(second.draft.record?.title).toBe("Morning run by the river");
+  });
+
+  it("does not swallow a button press as the note", async () => {
+    await intakeUpdate(textMessage("/raw"), SENDER, noAi());
+    await intakeUpdate(textMessage(REPOST_LABEL), SENDER, noAi());
+
+    // Nothing was published as written, and the pointer went with the press.
+    expect([...storage.objects.keys()].some((key) => key.startsWith("drafts/pending/"))).toBe(false);
   });
 });

@@ -1022,6 +1022,105 @@ describe("Retry outside a failure", () => {
   });
 });
 
+describe("using the author's own text", () => {
+  it("replaces the model's record with the note, exactly as it was sent", async () => {
+    const created = await createDraft(
+      storage.bucket,
+      { chatId: 99, senderId: 42, messageId: 7 },
+      "A morning at the campus\nThe coffee was good, and the walk over was better.",
+    );
+    const draft = await sendPreview(env(), { ...created, record: RECORD });
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "v"), env());
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.record).toEqual({
+      title: "A morning at the campus",
+      summary: null,
+      body: "The coffee was good, and the walk over was better.",
+      eventDate: null,
+      tags: [],
+      media: [],
+    });
+  });
+
+  it("asks the model nothing", async () => {
+    const draft = await awaitingApproval();
+    const fake = createFakeAi(aiRecord());
+
+    await handlePreviewCallback(press(draft, "v"), { ...env(), AI: fake.AI });
+
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it("previews the result rather than publishing it", async () => {
+    // The model is skipped; approval is not. Nothing becomes public until the
+    // author has seen exactly what would.
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "v"), env());
+
+    const preview = calls.find((c) => c.method === "sendMessage" && c.body.reply_markup);
+    expect(preview?.body.text).toContain("an easy 8k");
+    expect(buttonsOn(preview)).toContain("Publish");
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("awaiting_approval");
+  });
+
+  it("retires the superseded preview", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "v"), env());
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.preview?.token).not.toBe(draft.preview?.token);
+    expect(calls.map((c) => c.method)).toContain("editMessageReplyMarkup");
+  });
+
+  it("works on a draft the model never described", async () => {
+    // The case it matters most in: nothing generated, so Regenerate and Edit
+    // have nothing to work from, and this needs nothing from them.
+    const created = await createDraft(
+      storage.bucket,
+      { chatId: 99, senderId: 42, messageId: 7 },
+      "A morning at the campus\nThe coffee was good.",
+    );
+    await sendGenerationFailure(env(), created);
+    const draft = (await loadDraft(storage.bucket, created.draftId)) as Draft;
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "v"), env());
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.record?.title).toBe("A morning at the campus");
+    expect(stored?.state).toBe("awaiting_approval");
+  });
+
+  it("says so when the message had no words in it", async () => {
+    // A photo sent with no caption: there is nothing to fall back to.
+    const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "");
+    const draft = await sendPreview(env(), { ...created, record: RECORD });
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "v"), env());
+
+    expect(answers()).toEqual(["That message had no words to publish."]);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.record?.title).toBe("Morning run by the river");
+  });
+
+  it("refuses a press from a superseded message", async () => {
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "v", "wrongtoken12"), env());
+
+    expect(answers()).toEqual(["This preview has been replaced. Use the newest one."]);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.record?.title).toBe("Morning run by the river");
+  });
+});
+
 describe("trying the generation again", () => {
   /** A draft the model never described: saved, record-less, buttons offering another go. */
   async function undescribed(): Promise<Draft> {
@@ -1037,7 +1136,7 @@ describe("trying the generation again", () => {
     const message = calls.find((c) => c.method === "sendMessage");
 
     expect(message?.body.text).toBe("The draft has been saved. AI processing can continue later.");
-    expect(buttonsOn(message)).toEqual(["Try again", "Cancel"]);
+    expect(buttonsOn(message)).toEqual(["Try again", "Use my text", "Cancel"]);
     expect(draft.state).toBe("draft");
     expect(draft.preview?.messageId).toBe(4242);
     expect(draft.preview?.token).toHaveLength(12);
@@ -1090,7 +1189,11 @@ describe("trying the generation again", () => {
     expect(stored?.record).toBeNull();
     expect(stored?.state).toBe("draft");
     expect(stored?.preview?.token).not.toBe(draft.preview?.token);
-    expect(buttonsOn(calls.find((c) => c.method === "sendMessage"))).toEqual(["Try again", "Cancel"]);
+    expect(buttonsOn(calls.find((c) => c.method === "sendMessage"))).toEqual([
+      "Try again",
+      "Use my text",
+      "Cancel",
+    ]);
   });
 
   it("refuses a press from a superseded message", async () => {

@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { BOT_COMMANDS, COMMANDS, parseCommand } from "./commands";
-import { MAIN_KEYBOARD, NEW_ACTIVITY_LABEL, REPOST_LABEL, menuAction } from "./menu";
+import { MAIN_KEYBOARD, NEW_ACTIVITY_LABEL, RAW_LABEL, REPOST_LABEL, menuAction } from "./menu";
 
 describe("parseCommand", () => {
   it("recognises the bot's own commands", () => {
     expect(parseCommand("/start")).toBe("start");
     expect(parseCommand("/new")).toBe("new");
+    expect(parseCommand("/raw")).toBe("raw");
     expect(parseCommand("/repost")).toBe("repost");
   });
 
@@ -74,6 +75,7 @@ describe("MAIN_KEYBOARD", () => {
   it("draws the buttons menuAction matches on, and no others", () => {
     expect(MAIN_KEYBOARD.keyboard.flat().map((button) => button.text)).toEqual([
       NEW_ACTIVITY_LABEL,
+      RAW_LABEL,
       REPOST_LABEL,
     ]);
   });

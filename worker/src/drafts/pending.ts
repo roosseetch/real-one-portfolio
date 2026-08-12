@@ -1,11 +1,17 @@
 /**
- * Remembers that a chat owes an edit instruction (spec §7.3, step 2).
+ * Remembers what a chat's next message is for (spec §7.3, step 2).
  *
  * Pressing "Edit text" and then typing the change are two separate Telegram
  * updates, and the second one looks exactly like someone starting a new draft.
  * This pointer is what tells them apart. It is keyed by chat rather than by
  * message, because the author replies with an ordinary message rather than a
  * threaded reply.
+ *
+ * "Publish as written" works the same way and shares the pointer, because the
+ * two are mutually exclusive by nature: a chat cannot owe an edit instruction
+ * and a verbatim note at the same time, and asking for one after the other
+ * plainly means the author changed their mind. One key makes that automatic —
+ * two would leave both armed and the order of the checks deciding which wins.
  *
  * Stored under drafts/ so the bucket's seven-day rule sweeps up anything left
  * behind, and given a much shorter deadline of its own besides.
@@ -17,8 +23,14 @@
  */
 const TTL_MS = 30 * 60 * 1000;
 
-interface PendingEdit {
-  draftId: string;
+/** What the chat's next message will be taken as. */
+export type Pending =
+  | { kind: "edit"; draftId: string }
+  | { kind: "verbatim" };
+
+interface StoredPending {
+  kind?: "edit" | "verbatim";
+  draftId?: string;
   expiresAt: string;
 }
 
@@ -31,22 +43,39 @@ function isValidChatId(chatId: number): boolean {
   return Number.isSafeInteger(chatId);
 }
 
-export async function setPendingEdit(
+async function setPending(
+  bucket: R2Bucket,
+  chatId: number,
+  pending: Pending,
+  now: Date,
+): Promise<void> {
+  if (!isValidChatId(chatId)) return;
+
+  const stored: StoredPending = {
+    ...pending,
+    expiresAt: new Date(now.getTime() + TTL_MS).toISOString(),
+  };
+
+  await bucket.put(pendingKey(chatId), JSON.stringify(stored), {
+    httpMetadata: { contentType: "application/json" },
+  });
+}
+
+export function setPendingEdit(
   bucket: R2Bucket,
   chatId: number,
   draftId: string,
   now: Date = new Date(),
 ): Promise<void> {
-  if (!isValidChatId(chatId)) return;
+  return setPending(bucket, chatId, { kind: "edit", draftId }, now);
+}
 
-  const pending: PendingEdit = {
-    draftId,
-    expiresAt: new Date(now.getTime() + TTL_MS).toISOString(),
-  };
-
-  await bucket.put(pendingKey(chatId), JSON.stringify(pending), {
-    httpMetadata: { contentType: "application/json" },
-  });
+export function setPendingVerbatim(
+  bucket: R2Bucket,
+  chatId: number,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "verbatim" }, now);
 }
 
 /**
@@ -55,11 +84,11 @@ export async function setPendingEdit(
  * Clearing even when the pointer has expired matters: leaving a dead one in
  * place would have every later message check, and fail, the same stale record.
  */
-export async function takePendingEdit(
+export async function takePending(
   bucket: R2Bucket,
   chatId: number,
   now: Date = new Date(),
-): Promise<string | null> {
+): Promise<Pending | null> {
   if (!isValidChatId(chatId)) return null;
 
   const key = pendingKey(chatId);
@@ -68,20 +97,27 @@ export async function takePendingEdit(
 
   await bucket.delete(key);
 
-  let pending: PendingEdit;
+  let stored: StoredPending;
   try {
-    pending = (await object.json()) as PendingEdit;
+    stored = (await object.json()) as StoredPending;
   } catch {
     return null;
   }
 
-  if (typeof pending?.draftId !== "string" || typeof pending.expiresAt !== "string") return null;
-  if (Date.parse(pending.expiresAt) <= now.getTime()) return null;
+  if (typeof stored?.expiresAt !== "string") return null;
+  if (Date.parse(stored.expiresAt) <= now.getTime()) return null;
 
-  return pending.draftId;
+  if (stored.kind === "verbatim") return { kind: "verbatim" };
+
+  // An absent `kind` is an edit pointer written before this field existed. They
+  // live half an hour at most, so this only matters across a deploy — but it is
+  // one comparison, and the alternative is swallowing the author's next message.
+  if (typeof stored.draftId === "string") return { kind: "edit", draftId: stored.draftId };
+
+  return null;
 }
 
-export async function clearPendingEdit(bucket: R2Bucket, chatId: number): Promise<void> {
+export async function clearPending(bucket: R2Bucket, chatId: number): Promise<void> {
   if (!isValidChatId(chatId)) return;
   await bucket.delete(pendingKey(chatId));
 }
