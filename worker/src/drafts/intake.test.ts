@@ -138,6 +138,23 @@ describe("intakeUpdate", () => {
     expect(await loadDraft(storage.bucket, result.draft.draftId)).not.toBeNull();
   });
 
+  it("leaves a way to ask the model again", async () => {
+    // "Later" used to mean retyping the note: with no record there is no
+    // preview, so the draft carried no buttons at all and nothing else ever
+    // picked it back up.
+    const result = await intakeUpdate(textMessage("an easy 8k"), SENDER, env(new Error("daily quota exceeded")));
+
+    if (result.status !== "created") throw new Error("expected a draft");
+    expect(keyboards).toEqual([
+      { inline_keyboard: [[expect.objectContaining({ text: "Try again" }), expect.objectContaining({ text: "Cancel" })]] },
+    ]);
+
+    // The token has to be stored, or the buttons can only ever be refused.
+    const stored = await loadDraft(storage.bucket, result.draft.draftId);
+    expect(stored?.state).toBe("draft");
+    expect(stored?.preview?.token).toHaveLength(12);
+  });
+
   it("keeps the draft when the model only ever returns unusable output", async () => {
     const result = await intakeUpdate(textMessage("an easy 8k"), SENDER, env({ response: "{not json" }));
 

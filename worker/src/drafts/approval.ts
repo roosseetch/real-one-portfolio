@@ -7,7 +7,7 @@
  * it was drawn for. A press proves only that someone tapped something that was
  * true once.
  */
-import { editRecord, regenerateRecord } from "../ai/generate";
+import { editRecord, generateRecord, regenerateRecord } from "../ai/generate";
 import { toPublicRecord } from "../content/records";
 import { activityUrl } from "../content/urls";
 import { timingSafeEqual } from "../crypto";
@@ -35,6 +35,7 @@ import {
 import {
   ACTION_CODES,
   formatPreview,
+  generationKeyboard,
   hasPreviewableRecord,
   previewKeyboard,
   type PreviewAction,
@@ -174,6 +175,88 @@ async function sendPreviewMessages(
   return sendMessage(env, draft.source.chatId, text, keyboard);
 }
 
+/**
+ * Says that the model produced nothing, and leaves a way to ask it again.
+ *
+ * Without this the sentence is a lie. A draft whose generation failed has no
+ * record, so no preview is ever sent, so it carries none of the buttons that
+ * Regenerate and Edit live on — and nothing else picks a record-less draft back
+ * up: the sweep only looks at `processing`. "AI processing can continue later"
+ * described a recovery that did not exist, and the author's only way back was to
+ * type the note again.
+ *
+ * The state deliberately does not move. The draft is still a `draft`, which is
+ * what `sendPreview` expects to advance once a record finally arrives; only the
+ * token is written, so the buttons can be told apart from a stale press. The
+ * write order is `failDraft`'s, for its reason: buttons on screen carrying a
+ * token that was never stored can only be refused.
+ */
+export async function sendGenerationFailure(env: ApprovalEnv, draft: Draft): Promise<void> {
+  const token = randomId(TOKEN_LENGTH);
+
+  const messageId = await sendMessage(
+    env,
+    draft.source.chatId,
+    AI_UNAVAILABLE_MESSAGE,
+    generationKeyboard(draft.draftId, token),
+  );
+
+  if (messageId === null) {
+    // Telegram never took the message. The draft and the author's words are
+    // safe in the bucket either way; there is nothing to press, which is where
+    // this started, so it is worth a line in the log.
+    console.error("Could not offer the author another attempt at the draft");
+    return;
+  }
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, {
+      ...draft,
+      preview: { messageId, token },
+      updatedAt: new Date().toISOString(),
+    });
+  } catch {
+    console.error("Could not record the generation retry token; its buttons will not work");
+  }
+}
+
+/**
+ * Asks the model again for a draft that never got a record.
+ *
+ * A plain generation rather than a regeneration, because there is nothing to
+ * regenerate from — the note is all this draft has ever had. A second failure
+ * re-offers the buttons with a fresh token rather than going quiet, which is
+ * what makes a third attempt possible.
+ */
+async function generateAgain(env: ApprovalEnv, draft: Draft): Promise<void> {
+  const generated = await generateRecord(env, draft.input.text);
+
+  if (generated.status !== "generated") {
+    await sendGenerationFailure(env, draft);
+    return;
+  }
+
+  const withRecord: Draft = { ...draft, record: generated.record, updatedAt: new Date().toISOString() };
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, withRecord);
+  } catch {
+    // The record is lost but the note is not, so the offer stands rather than
+    // leaving the author with a dead message and a draft that looks unchanged.
+    console.error("Could not store the regenerated record; the draft is saved without it");
+    await sendGenerationFailure(env, draft);
+    return;
+  }
+
+  // The failure message's buttons are retired by the token sendPreview mints,
+  // but leaving the keyboard on screen invites a press that can only be refused.
+  if (draft.preview !== null) {
+    await removeKeyboard(env, draft.source.chatId, draft.preview.messageId);
+  }
+
+  await sendPreview(env, withRecord);
+}
+
 export interface ParsedCallback {
   action: PreviewAction;
   draftId: string;
@@ -223,11 +306,16 @@ export async function handlePreviewCallback(
   // exist. Nothing is given away by saying so: reaching here already required
   // an allowlisted sender and an unguessable draft id.
   //
-  // A failed draft is the one state other than `awaiting_approval` that still
-  // has live buttons, and it has exactly the two the failure message drew.
+  // A failed draft is one of two states other than `awaiting_approval` that
+  // still have live buttons, and it has exactly the two the failure message
+  // drew. The other is a draft the model never described: it has never been
+  // previewed, so it is still `draft`, and it carries Try again and Cancel.
   const failedAction = parsed.action === "retry" || parsed.action === "cancel";
+  const undescribedAction = parsed.action === "generate" || parsed.action === "cancel";
   const actionable =
-    draft.state === "awaiting_approval" || (draft.state === "failed" && failedAction);
+    draft.state === "awaiting_approval" ||
+    (draft.state === "failed" && failedAction) ||
+    (draft.state === "draft" && undescribedAction);
 
   if (!actionable) {
     await answerCallback(env, query.id, `Already ${draft.state.replace("_", " ")}.`);
@@ -252,6 +340,23 @@ export async function handlePreviewCallback(
     // gives up on an unanswered callback long before that.
     await answerCallback(env, query.id, "Rewriting…");
     await regenerateDraft(env, draft);
+    return;
+  }
+
+  if (parsed.action === "generate") {
+    // Only a draft with nothing to show has anything to generate. The button is
+    // drawn nowhere else, so a press against a draft that already has a record
+    // is hand-made — and running it there would quietly discard a record the
+    // author may already have been reading.
+    if (draft.state !== "draft" || draft.record !== null) {
+      await answerCallback(env, query.id, NOT_YET);
+      return;
+    }
+
+    // Answered before the model runs, like regenerate: generation takes seconds
+    // and Telegram gives up on an unanswered callback long before that.
+    await answerCallback(env, query.id, "Trying again…");
+    await generateAgain(env, draft);
     return;
   }
 

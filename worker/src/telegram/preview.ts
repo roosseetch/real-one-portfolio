@@ -20,15 +20,24 @@ const MAX_MESSAGE = 4096;
 
 const EMPTY = "—";
 
-export const PREVIEW_ACTIONS = ["publish", "edit", "media", "regenerate", "retry", "cancel"] as const;
+export const PREVIEW_ACTIONS = [
+  "publish",
+  "edit",
+  "media",
+  "regenerate",
+  "retry",
+  "generate",
+  "cancel",
+] as const;
 export type PreviewAction = (typeof PREVIEW_ACTIONS)[number];
 
 /**
  * Short codes keep callback_data inside Telegram's 64-byte limit alongside a
  * 16-character draft id and a 12-character token.
  *
- * Retry is `t` because `r` was already regenerate's, and a code that changes
- * meaning would give a button still sitting in the chat a new one.
+ * Retry is `t` because `r` was already regenerate's, and generate is `g` for the
+ * same reason: a code that changes meaning would give a button still sitting in
+ * the chat a new one.
  */
 export const ACTION_CODES: Record<string, PreviewAction> = {
   p: "publish",
@@ -36,6 +45,7 @@ export const ACTION_CODES: Record<string, PreviewAction> = {
   m: "media",
   r: "regenerate",
   t: "retry",
+  g: "generate",
   c: "cancel",
 };
 
@@ -45,6 +55,7 @@ const CODE_FOR: Record<PreviewAction, string> = {
   media: "m",
   regenerate: "r",
   retry: "t",
+  generate: "g",
   cancel: "c",
 };
 
@@ -54,6 +65,7 @@ const LABELS: Record<PreviewAction, string> = {
   media: "Change media",
   regenerate: "Regenerate",
   retry: "Retry",
+  generate: "Try again",
   cancel: "Cancel",
 };
 
@@ -151,6 +163,24 @@ export function confirmationKeyboard(draftId: string, token: string): InlineKeyb
 export function failureKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
   return {
     inline_keyboard: [[button("retry", draftId, token), button("cancel", draftId, token)]],
+  };
+}
+
+/**
+ * The buttons under a note the model could not describe.
+ *
+ * Distinct from `failureKeyboard` because the two failures are nothing alike.
+ * That one follows an approval, and Retry runs the publication again; this one
+ * comes before there is anything to approve, and the only work left to redo is
+ * the generation. Sharing the `retry` code would have given a button on a
+ * record-less draft the power to publish.
+ *
+ * Try again and Cancel, and nothing else: there is no record yet, so editing or
+ * regenerating one would be a button that could only be refused.
+ */
+export function generationKeyboard(draftId: string, token: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[button("generate", draftId, token), button("cancel", draftId, token)]],
   };
 }
 

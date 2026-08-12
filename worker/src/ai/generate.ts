@@ -18,6 +18,18 @@ const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 /** Two more tries after the first. Constrained decoding rarely needs them, and a stuck model will not improve on the fourth. */
 const MAX_ATTEMPTS = 3;
 
+/**
+ * Enough for the whole reply, not for the body alone.
+ *
+ * This caps the entire JSON object, and schema.ts already permits a body of
+ * 4000 characters — so at the previous 1024 a long note could only be answered
+ * by a reply cut off mid-string, which parses as nothing and burns all three
+ * attempts. Cyrillic makes it worse: the same 3000 characters cost roughly twice
+ * the tokens they would in English. A ceiling rather than a target, so a short
+ * note still costs what it always did.
+ */
+const MAX_TOKENS = 2048;
+
 const SYSTEM_PROMPT = [
   "You turn a short personal note into a structured entry for her personal website.",
   "",
@@ -136,7 +148,7 @@ async function requestRecord(
           { role: "user", content: userPrompt },
         ],
         response_format: { type: "json_schema", json_schema: RECORD_JSON_SCHEMA },
-        max_tokens: 1024,
+        max_tokens: MAX_TOKENS,
         temperature,
       });
     } catch (error) {

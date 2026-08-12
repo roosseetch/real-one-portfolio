@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DraftRecord } from "../drafts/types";
-import { ACTION_CODES, formatPreview, previewKeyboard } from "./preview";
+import { ACTION_CODES, formatPreview, generationKeyboard, previewKeyboard } from "./preview";
 
 const RECORD: DraftRecord = {
   title: "Morning run by the river",
@@ -97,6 +97,29 @@ describe("previewKeyboard", () => {
       expect(ACTION_CODES[code]).toBeDefined();
       expect(draftId).toBe("abc123def456ghjk");
       expect(token).toBe("tok123456789");
+    }
+  });
+});
+
+describe("generationKeyboard", () => {
+  const keyboard = () => generationKeyboard("abc123def456ghjk", "tok123456789").inline_keyboard.flat();
+
+  it("offers another attempt and nothing that needs a record", () => {
+    expect(keyboard().map((button) => button.text)).toEqual(["Try again", "Cancel"]);
+  });
+
+  it("does not carry the code that publishes", () => {
+    // The failure keyboard's Retry runs a publication. A record-less draft must
+    // not be able to reach that, so the two keyboards use different codes.
+    const codes = keyboard().map((button) => button.callback_data.split(":")[0]);
+
+    expect(codes).toContain("g");
+    expect(codes).not.toContain("t");
+  });
+
+  it("fits callback_data inside Telegram's 64-byte limit", () => {
+    for (const button of keyboard()) {
+      expect(new TextEncoder().encode(button.callback_data).length).toBeLessThanOrEqual(64);
     }
   });
 });
