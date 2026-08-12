@@ -5,6 +5,16 @@ import { composePost } from "./compose";
 
 const SITE = "https://site.example";
 
+/**
+ * What the default record's link comes out as, campaign parameters and all. The
+ * parameters are asserted for their own sake in content/urls.test.ts; here the
+ * link is only ever the thing that has to survive escaping and truncation
+ * intact, so it is named once rather than spelled out at every use.
+ */
+const LINK =
+  "https://site.example/activities/?v=morning-run-by-the-river" +
+  "&utm_source=linkedin&utm_medium=social&utm_campaign=morning-run-by-the-river";
+
 function record(overrides: Partial<PublicRecord> = {}): PublicRecord {
   return {
     id: "k3m9qq2vabcd1234",
@@ -26,8 +36,22 @@ describe("composePost", () => {
     expect(post.preview).toContain("Morning run by the river");
     expect(post.preview).toContain("An easy 8 km before work.");
     expect(post.preview).toContain("Cool air, quiet paths, and a good pace.");
-    expect(post.preview).toContain("https://site.example/activities/?v=morning-run-by-the-river");
-    expect(post.url).toBe("https://site.example/activities/?v=morning-run-by-the-river");
+    expect(post.preview).toContain(LINK);
+    expect(post.url).toBe(LINK);
+  });
+
+  /**
+   * The whole point of the post is the visit it produces, and a visit is only
+   * countable if the link says where it came from. LinkedIn's own hops strip the
+   * referrer, so this has to ride in the URL — in the commentary as well as in
+   * the card, because a reshare can lose the card and keep the text.
+   */
+  it("tags both the card link and the one in the text as LinkedIn's", () => {
+    const post = composePost(SITE, record());
+
+    expect(post.url).toContain("utm_source=linkedin");
+    expect(post.preview).toContain("utm_source=linkedin");
+    expect(post.commentary).toContain("utm_source=linkedin");
   });
 
   it("turns tags into single-word hashtags", () => {
@@ -60,9 +84,7 @@ describe("composePost", () => {
 
   it("omits the sections a record does not have", () => {
     const post = composePost(SITE, record({ summary: null, body: null, tags: [] }));
-    expect(post.preview).toBe(
-      "Morning run by the river\n\nhttps://site.example/activities/?v=morning-run-by-the-river",
-    );
+    expect(post.preview).toBe(`Morning run by the river\n\n${LINK}`);
   });
 
   describe("escaping", () => {
@@ -86,9 +108,7 @@ describe("composePost", () => {
 
     it("leaves the link unescaped so it stays a link", () => {
       const post = composePost(SITE, record());
-      expect(post.commentary.endsWith("https://site.example/activities/?v=morning-run-by-the-river")).toBe(
-        true,
-      );
+      expect(post.commentary.endsWith(LINK)).toBe(true);
     });
   });
 
@@ -102,9 +122,7 @@ describe("composePost", () => {
     // word is placed is what guarantees it is never what gets cut.
     it("keeps the whole link when the prose has to give way", () => {
       const post = composePost(SITE, record({ body: "word ".repeat(1200) }));
-      expect(post.commentary.endsWith("https://site.example/activities/?v=morning-run-by-the-river")).toBe(
-        true,
-      );
+      expect(post.commentary.endsWith(LINK)).toBe(true);
       expect(post.commentary).toContain("…");
     });
 
