@@ -75,6 +75,9 @@ function env(...steps: AiStep[]) {
     GITHUB_REPOSITORY: "owner/repo",
     MEDIA_WORKFLOW_FILE: "process-media.yml",
     GITHUB_DISPATCH_TOKEN: "dispatch-token",
+    WORKER_BASE_URL: "https://worker.example",
+    LINKEDIN_CLIENT_ID: "client-id",
+    LINKEDIN_CLIENT_SECRET: "client-secret",
   };
 }
 
@@ -594,5 +597,88 @@ describe("messages the intake cannot use", () => {
 
     expect((await intakeUpdate(update, SENDER, env())).status).toBe("unsupported");
     expect(sent).toEqual([]);
+  });
+});
+
+/**
+ * The standing buttons, and the one thing that can go wrong with them: a reply
+ * keyboard sends its label as an ordinary message, which is exactly what the
+ * intake turns into a draft.
+ */
+describe("the standing buttons", () => {
+  const NEW_LABEL = "📝 New site activity";
+  const REPOST_LABEL = "🔗 Repost to LinkedIn";
+
+  it("prompts instead of drafting a note that says 'New site activity'", async () => {
+    const result = await intakeUpdate(textMessage(NEW_LABEL), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(storage.objects.size).toBe(0);
+    expect(sent.join(" ")).toContain("send the note, photo or video");
+  });
+
+  it("puts the keyboard up with the reply, which is how it first appears", async () => {
+    await intakeUpdate(textMessage("/start"), SENDER, env());
+
+    expect(keyboards).toHaveLength(1);
+    expect(keyboards[0]).toMatchObject({ is_persistent: true });
+  });
+
+  it("offers the published activities instead of drafting a note that says 'Repost to LinkedIn'", async () => {
+    const result = await intakeUpdate(textMessage(REPOST_LABEL), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(storage.objects.size).toBe(0);
+    // No manifest in the content bucket here, so this is the honest answer.
+    expect(sent.join(" ")).toContain("nothing to repost");
+  });
+
+  it("answers a command the same way as its button", async () => {
+    await intakeUpdate(textMessage("/repost"), SENDER, env());
+    const viaCommand = [...sent];
+
+    sent.length = 0;
+    await intakeUpdate(textMessage(REPOST_LABEL), SENDER, env());
+
+    expect(sent).toEqual(viaCommand);
+  });
+
+  /**
+   * The bug this exists for: with a pending edit outstanding, a button press
+   * would otherwise be read as the instruction and rewrite the draft to say
+   * "Repost to LinkedIn".
+   */
+  it("does not become an edit instruction when one was outstanding", async () => {
+    const created = await intakeUpdate(textMessage("ran 8k"), SENDER, env());
+    if (created.status !== "created") throw new Error("expected a draft");
+    await setPendingEdit(storage.bucket, 99, created.draft.draftId);
+
+    await intakeUpdate(textMessage(REPOST_LABEL), SENDER, env());
+
+    const stored = await loadDraft(storage.bucket, created.draft.draftId);
+    expect(stored?.record?.title).toBe(created.draft.record?.title);
+  });
+
+  it("clears the pending edit, so the next real note is not read as one either", async () => {
+    const created = await intakeUpdate(textMessage("ran 8k"), SENDER, env());
+    if (created.status !== "created") throw new Error("expected a draft");
+    await setPendingEdit(storage.bucket, 99, created.draft.draftId);
+
+    await intakeUpdate(textMessage(REPOST_LABEL), SENDER, env());
+    const second = await intakeUpdate(textMessage("swam this evening"), SENDER, env());
+
+    if (second.status !== "created") throw new Error("expected a second draft");
+    expect(second.draft.draftId).not.toBe(created.draft.draftId);
+    expect(second.draft.input.text).toBe("swam this evening");
+  });
+
+  it("leaves a note that merely mentions a button alone", async () => {
+    const result = await intakeUpdate(
+      textMessage(`Thinking about a ${REPOST_LABEL} tomorrow`),
+      SENDER,
+      env(),
+    );
+
+    expect(result.status).toBe("created");
   });
 });

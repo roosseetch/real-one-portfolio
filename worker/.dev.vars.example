@@ -22,3 +22,11 @@ GITHUB_DISPATCH_TOKEN=
 # Shared secret the media workflow signs its callback with. Must match the
 # CALLBACK_HMAC_SECRET GitHub secret exactly.
 CALLBACK_HMAC_SECRET=
+
+# Secret half of the LinkedIn app, from https://www.linkedin.com/developers/apps
+# -> Auth. Used only to exchange an authorization code for a member token and to
+# refresh one. The member token itself is not configured anywhere: it expires
+# every sixty days, and the Worker writes each new one into the private bucket
+# after the author logs in. Leave this empty and the Repost button says LinkedIn
+# is not set up.
+LINKEDIN_CLIENT_SECRET=

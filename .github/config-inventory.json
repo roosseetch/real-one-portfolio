@@ -118,6 +118,11 @@
       "purpose": "DKIM public key the email provider issued for this domain, the whole p=... string. Terraform writes it to <selector>._domainkey.<domain> so a receiving server can check the signature on a verification code. Public by construction — anyone can dig it — but specific to one deployment, which is why it is a variable rather than a literal in dns.",
       "whenUnset": "Terraform writes none of the sending records. Codes may still send, and will be treated as unauthenticated mail by the receiving server, which usually means the spam folder."
     },
+    "LINKEDIN_CLIENT_ID": {
+      "required": false,
+      "purpose": "Public half of the LinkedIn app the Worker reposts activities through. It appears in the query string of every authorize URL the author is sent, which is why it is a variable and not a secret; its secret half is a repository secret synced to the Worker.",
+      "whenUnset": "The Repost to LinkedIn button answers that LinkedIn is not set up for this deployment. Nothing else changes — drafting and publishing to the site are unaffected."
+    },
     "EMAIL_BOUNCE_HOST": {
       "required": false,
       "purpose": "Host the email provider collects bounce reports on, for example feedback-smtp.<region>.amazonses.com. Region-specific, so it is read off the provider's own setup page rather than defaulted.",
@@ -196,6 +201,11 @@
     "RESEND_API_KEY": {
       "required": true,
       "purpose": "Sends the contact form's six-digit verification codes through Resend. Sending access only: it can post a message and read nothing about the account."
+    },
+    "LINKEDIN_CLIENT_SECRET": {
+      "required": false,
+      "purpose": "Secret half of the LinkedIn app, used by the Worker only to exchange an authorization code for a member token and to refresh one. The member token itself is not here: it expires every sixty days and the Worker rewrites it in the private bucket after each login, which a secret could not be.",
+      "whenUnset": "The Repost to LinkedIn button answers that LinkedIn is not set up for this deployment, like its LINKEDIN_CLIENT_ID half."
     }
   }
 }

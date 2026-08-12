@@ -337,7 +337,7 @@ describe("publish", () => {
     const loaded = await readManifest(content.bucket);
     expect(loaded?.manifest.totalRecords).toBe(1);
     expect(calls.find((c) => c.method === "sendMessage")?.body.text).toBe(
-      "Published. https://site.example/#activity",
+      "Published. https://site.example/activities/?v=morning-run-by-the-river",
     );
   });
 
@@ -348,7 +348,7 @@ describe("publish", () => {
     const stored = await loadDraft(storage.bucket, draft.draftId);
     expect(stored?.state).toBe("published");
     expect(stored?.preview).toBeNull();
-    expect(stored?.published?.url).toBe("https://site.example/#activity");
+    expect(stored?.published?.url).toBe("https://site.example/activities/?v=morning-run-by-the-river");
   });
 
   it("strips the buttons off the approved preview", async () => {
@@ -729,7 +729,7 @@ describe("confirming a processed video (spec Phase 6)", () => {
     expect(stored?.state).toBe("published");
     expect(stored?.preview).toBeNull();
     expect(calls.find((c) => c.method === "sendMessage")?.body.text).toBe(
-      "Published. https://site.example/#activity",
+      "Published. https://site.example/activities/?v=morning-run-by-the-river",
     );
     // And the buttons come off the message that was answered.
     expect(calls.map((c) => c.method)).toContain("editMessageReplyMarkup");

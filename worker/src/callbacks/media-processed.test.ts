@@ -364,8 +364,8 @@ describe("publishing on a valid callback", () => {
 
     const stored = await loadDraft(storage.bucket, draft.draftId);
     expect(stored?.state).toBe("published");
-    expect(stored?.published?.url).toBe("https://site.example/#activity");
-    expect(sent).toEqual(["Published. https://site.example/#activity"]);
+    expect(stored?.published?.url).toBe("https://site.example/activities/?v=morning-coffee");
+    expect(sent).toEqual(["Published. https://site.example/activities/?v=morning-coffee"]);
   });
 
   it("keeps the private side out of the published record", async () => {

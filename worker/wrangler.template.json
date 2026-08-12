@@ -44,6 +44,10 @@
     "GITHUB_REPOSITORY": "__GITHUB_REPOSITORY__",
     "MEDIA_BASE_URL": "__MEDIA_BASE_URL__",
     "MEDIA_WORKFLOW_FILE": "__MEDIA_WORKFLOW_FILE__",
-    "SITE_BASE_URL": "__SITE_BASE_URL__"
+    "SITE_BASE_URL": "__SITE_BASE_URL__",
+    "//WORKER_BASE_URL": "This Worker's own origin. It cannot be derived from an incoming request: the LinkedIn redirect URI has to match the one registered on the LinkedIn app byte for byte, and a value read off whichever hostname happened to deliver the update would differ the first time one of them changes.",
+    "WORKER_BASE_URL": "__WORKER_BASE_URL__",
+    "//LINKEDIN_CLIENT_ID": "Public half of the LinkedIn app: it is in the query string of every authorize URL the author is sent, so a variable rather than a secret. Its secret half is a Worker secret.",
+    "LINKEDIN_CLIENT_ID": "__LINKEDIN_CLIENT_ID__"
   }
 }

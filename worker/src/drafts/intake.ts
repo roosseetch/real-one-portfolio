@@ -8,12 +8,20 @@
  * the work can be picked up later.
  */
 import { generateRecord, type AiEnv } from "../ai/generate";
+import { promptForActivity, type RepostEnv } from "../linkedin/repost";
 import { carriesMedia, intakeMedia, type DeclineReason, type MediaIntakeEnv } from "../media/intake";
 import type { FileLabel } from "../media/formats";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
+import {
+  MAIN_KEYBOARD,
+  NEW_ACTIVITY_PROMPT,
+  WELCOME,
+  menuAction,
+  type MenuAction,
+} from "../telegram/menu";
 import type { TelegramMessage, TelegramUpdate } from "../telegram/types";
 import { applyEditInstruction, sendPreview, type ApprovalEnv } from "./approval";
-import { takePendingEdit } from "./pending";
+import { clearPendingEdit, takePendingEdit } from "./pending";
 import { createDraft, loadDraft, saveDraft } from "./store";
 import type { Draft } from "./types";
 
@@ -88,7 +96,7 @@ export function declineMessage(reason: DeclineReason): string {
   }
 }
 
-export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv, MediaIntakeEnv {
+export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv, MediaIntakeEnv, RepostEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
 
@@ -139,6 +147,36 @@ async function applyPendingEdit(
   return { status: "created", draft };
 }
 
+/**
+ * Runs one of the standing buttons, or its command.
+ *
+ * The pending edit is cleared first, on every action. Taking a button means the
+ * author has moved on from whatever they were editing, and leaving the pointer
+ * in place would have their next real message silently rewrite a draft they had
+ * stopped thinking about.
+ *
+ * "New site activity" has nothing to start: the flow is, and always was, "send a
+ * message". So it prompts and gets out of the way rather than inventing a state
+ * the rest of the intake would have to know about.
+ */
+async function runMenuAction(env: IntakeEnv, chatId: number, action: MenuAction): Promise<void> {
+  await clearPendingEdit(env.PRIVATE_BUCKET, chatId);
+
+  if (action === "repost") {
+    await promptForActivity(env, chatId);
+    return;
+  }
+
+  // The keyboard rides along with the reply, which is also how it first appears:
+  // /start is what an author sends a bot they have never used.
+  await sendMessage(
+    env,
+    chatId,
+    action === "start" ? WELCOME : NEW_ACTIVITY_PROMPT,
+    MAIN_KEYBOARD,
+  );
+}
+
 export async function intakeUpdate(
   update: TelegramUpdate,
   senderId: number,
@@ -163,8 +201,19 @@ export async function intakeUpdate(
     return decline(env, message, "no text and no usable media", NOTHING_USABLE_MESSAGE);
   }
 
-  // Checked before anything else: after "Edit text" the author's next message
-  // is the instruction, and it is indistinguishable from a new note otherwise.
+  // Before the pending edit, and before anything becomes a draft. A reply
+  // keyboard sends its own label as an ordinary message, so without this,
+  // pressing "Repost to LinkedIn" while an edit was outstanding would rewrite
+  // the draft to say "Repost to LinkedIn".
+  const action = menuAction(text);
+  if (action !== null) {
+    await runMenuAction(env, message.chat.id, action);
+    return { status: "unsupported" };
+  }
+
+  // Checked before anything else that could make a draft: after "Edit text" the
+  // author's next message is the instruction, and it is indistinguishable from a
+  // new note otherwise.
   const edited = await applyPendingEdit(message.chat.id, text, env);
   if (edited) return edited;
 

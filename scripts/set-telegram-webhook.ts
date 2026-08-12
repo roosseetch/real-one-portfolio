@@ -1,5 +1,11 @@
 /**
- * Points the Telegram bot at this deployment's Worker and confirms the result.
+ * Points the Telegram bot at this deployment's Worker, registers its commands,
+ * and confirms the result.
+ *
+ * The commands are here rather than in the Worker because they are told to
+ * Telegram once, like the webhook, and not on every update. Their labels and the
+ * text the Worker matches on come from the same module, so the "/" menu cannot
+ * advertise a command the bot does not answer.
  *
  * The bot token and the shared secret are read from the environment, never
  * passed on the command line and never printed, so neither reaches shell
@@ -17,6 +23,13 @@
  *
  * Exit code 0 = webhook registered, 1 = missing configuration or Telegram error.
  */
+
+// Reached across into the Worker on purpose: the "/" menu must not advertise a
+// command the Worker does not answer, and two lists would drift the first time
+// one changed. commands.ts is import-free so it compiles under this program's
+// NodeNext resolution as well as the Worker's bundler resolution; the .js
+// extension is what NodeNext wants here, and tsx maps it to the .ts beside it.
+import { BOT_COMMANDS } from "../worker/src/telegram/commands.js";
 
 const API_BASE = "https://api.telegram.org";
 
@@ -133,10 +146,16 @@ await callBotApi(token!, "setWebhook", {
   drop_pending_updates: true,
 });
 
+// Replaces the whole list rather than adding to it, which is what makes a
+// renamed or removed command disappear from the "/" menu instead of lingering
+// there as something the Worker no longer answers.
+await callBotApi(token!, "setMyCommands", { commands: BOT_COMMANDS });
+
 const info = await callBotApi<WebhookInfo>(token!, "getWebhookInfo");
 
 console.log(`Webhook registered for ${webhookUrl}`);
 console.log(`  allowed updates: ${ALLOWED_UPDATES.join(", ")}`);
+console.log(`  commands: ${BOT_COMMANDS.map((c) => `/${c.command}`).join(", ")}`);
 console.log(`  pending updates dropped`);
 console.log(`  pending_update_count: ${info.pending_update_count ?? 0}`);
 if (info.url !== webhookUrl) {

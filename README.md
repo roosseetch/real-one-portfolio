@@ -29,6 +29,7 @@ scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 
 - [Deploying a new instance](#deploying-a-new-instance) — from an empty account to a live site
 - [Publishing: the draft lifecycle](#publishing-the-draft-lifecycle) — what happens between a Telegram message and a record
+- [Reposting to LinkedIn](#reposting-to-linkedin) — sharing something already published, and the token that expires
 - [The contact form](#the-contact-form) — what happens between a stranger writing and a message arriving
 - [Backups and export](#backups-and-export) — what has a second copy and what does not
 - [Tests](#tests) · [Media sanitiser](#media-sanitiser) · [Repository variables and secrets](#repository-variables-and-secrets)
@@ -215,6 +216,7 @@ may reference and what each name is for. This is where the values come from.
 | `EMAIL_BOUNCE_HOST` | where the provider collects bounces, `feedback-smtp.<region>.amazonses.com`. Region-specific, so read it off the provider's setup page. With either of these unset, Terraform writes **none** of the sending records — a domain claiming a provider it has no key for is worse than one claiming nothing |
 | `MEDIA_WORKFLOW_FILE` | optional; defaults to `process-media.yml` |
 | `CONTACT_WORKFLOW_FILE` | optional; defaults to `validate-contact.yml` |
+| `LINKEDIN_CLIENT_ID` | the LinkedIn app's Client ID. Optional; without it the Repost button says LinkedIn is not set up. See [Reposting to LinkedIn](#reposting-to-linkedin) |
 
 **Secrets** (same page, Secrets tab):
 
@@ -232,6 +234,7 @@ may reference and what each name is for. This is where the values come from.
 | `TURNSTILE_SECRET_KEY` | main stack's `turnstile_secret_key` output. The Worker verifies every contact submission's token against it |
 | `WORKERS_AI_API_TOKEN` | a Cloudflare API token with **Account → Workers AI → Read** and nothing else. It runs the model that screens a contact message, and is deliberately not `CLOUDFLARE_API_TOKEN`, which can rewrite the buckets and the DNS |
 | `RESEND_API_KEY` | a Resend API key with **sending access only**. It mails the contact form's verification codes. Resend also needs the sending domain verified, which means its DKIM and SPF records in the zone — add them to `infrastructure/main/dns.tf` rather than by hand, so the next deployment has them too |
+| `LINKEDIN_CLIENT_SECRET` | the LinkedIn app's Client Secret, used only to exchange and refresh member tokens. Optional, and paired with the `LINKEDIN_CLIENT_ID` variable. The member token itself is configured nowhere: it expires every sixty days and the Worker rewrites it in the private bucket after each login. See [Reposting to LinkedIn](#reposting-to-linkedin) |
 
 Each R2 API token yields an S3 pair directly: Cloudflare shows the access key id
 and the secret once, at creation. Scope each one to the buckets named above and
@@ -498,6 +501,59 @@ Changing the profile is not a publication and rebuilds nothing on its own:
 npm run profile:publish
 gh workflow run deploy-pages.yml --ref main
 ```
+
+## Reposting to LinkedIn
+
+The chat has two standing buttons under the message box, and the same two
+actions in Telegram's `/` menu:
+
+| | |
+| --- | --- |
+| **📝 New site activity** · `/new` | Prompts for the note, photo or video. The flow above is unchanged — this is the affordance it never had. |
+| **🔗 Repost to LinkedIn** · `/repost` | Offers the five most recent published activities, newest first and labelled as the default. |
+
+Picking one shows the exact post — truncated to LinkedIn's 3000-character
+ceiling, with the activity's own URL reserved first so it is never what gets cut
+— and asks. Nothing reaches LinkedIn before that **Post** is pressed, for the
+same reason nothing reaches the site before **Publish** is.
+
+`scripts/set-telegram-webhook.ts` registers the commands alongside the webhook,
+from the one list in `worker/src/telegram/commands.ts`, so the `/` menu cannot
+advertise something the Worker does not answer. Re-run `npm --prefix worker run
+webhook` after changing them.
+
+**The credential expires, and that is the design.** A LinkedIn member access
+token lasts 60 days, and refresh tokens are only issued to apps LinkedIn has
+approved for them. So the token is not a Worker secret — it lives at
+`linkedin/token.json` in the private bucket, deliberately outside the `drafts/`
+prefix the seven-day lifecycle rule sweeps, because the Worker has to be able to
+replace it without a deploy.
+
+When a post comes back 401 and there is no usable refresh token, the bot replies
+with a login link. Opening it, logging in, and being redirected back to
+`/linkedin/callback` is the whole recovery: the Worker exchanges the code, stores
+the new token, and posts the activity that was waiting — whose exact text was
+approved before the 401, so nothing new goes public unapproved. With a refresh
+token, none of that is ever seen; the Worker renews the token itself.
+
+That callback is the one route a browser reaches without a secret or a
+signature. What guards it is a single-use `state`, minted by the Worker, handed
+out only inside an authorized chat, and claimed with a conditional write so a
+prefetched or reloaded redirect cannot post twice. Every outcome answers the same
+page; what actually happened is reported in Telegram.
+
+Setting it up, once, at <https://www.linkedin.com/developers/apps>:
+
+1. Create an app and verify it against the LinkedIn Page it will post as.
+2. On **Products**, request **Share on LinkedIn** and **Sign In with LinkedIn
+   using OpenID Connect**. The first grants `w_member_social`, the second is only
+   there because the member's own URN has to be read before anything can be
+   authored on their behalf.
+3. On **Auth**, add `<WORKER_BASE_URL>/linkedin/callback` as a redirect URL.
+   LinkedIn matches it exactly and rejects the token exchange otherwise.
+4. Set `LINKEDIN_CLIENT_ID` as a repository variable and `LINKEDIN_CLIENT_SECRET`
+   as a repository secret. Both are optional: with either unset, the Repost
+   button says LinkedIn is not set up and nothing else changes.
 
 ## The contact form
 
@@ -869,8 +925,10 @@ Set it up in this order — step 3 in particular is hard to undo out of sequence
    npm --prefix worker run webhook
    ```
 
-   The script registers the webhook and prints what Telegram reports back,
-   including the last delivery error — expected until the Worker is deployed.
+   The script registers the webhook *and* the bot's commands, then prints what
+   Telegram reports back, including the last delivery error — expected until the
+   Worker is deployed. Re-run it after changing
+   `worker/src/telegram/commands.ts`.
 
 To unregister: `curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"`.
 
