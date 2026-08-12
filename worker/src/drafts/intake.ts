@@ -17,6 +17,11 @@ import {
 import { applyDetachTarget, promptForRemoval, type DetachEnv } from "../media/detach";
 import { carriesMedia, intakeMedia, type DeclineReason, type MediaIntakeEnv } from "../media/intake";
 import type { FileLabel } from "../media/formats";
+import {
+  applyDeleteTarget,
+  promptForDeletion,
+  type DeleteActivityEnv,
+} from "../publishing/delete-activity";
 import { findAlbumDraft } from "./albums";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import {
@@ -121,7 +126,8 @@ export interface IntakeEnv
     MediaIntakeEnv,
     RepostEnv,
     AttachMediaEnv,
-    DetachEnv {
+    DetachEnv,
+    DeleteActivityEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
 
@@ -175,6 +181,11 @@ async function applyPending(
 
   if (pending.kind === "detach-target") {
     await applyDetachTarget(env, chatId, text);
+    return { status: "unsupported" };
+  }
+
+  if (pending.kind === "delete-target") {
+    await applyDeleteTarget(env, chatId, text);
     return { status: "unsupported" };
   }
 
@@ -261,6 +272,14 @@ async function runMenuAction(env: IntakeEnv, chatId: number, action: MenuAction)
   // the files to choose from are on whichever one is picked.
   if (action === "removemedia") {
     await promptForRemoval(env, chatId);
+    return;
+  }
+
+  // This one does arm, and arms itself: the flow is built around the author
+  // pasting the link of the entry they want gone, so the answer has to be
+  // typeable without a button being pressed first.
+  if (action === "deleteactivity") {
+    await promptForDeletion(env, chatId);
     return;
   }
 

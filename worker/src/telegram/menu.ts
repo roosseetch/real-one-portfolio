@@ -19,6 +19,7 @@ export const RAW_LABEL = "✍️ Publish as written";
 export const REPOST_LABEL = "🔗 Repost to LinkedIn";
 export const ADD_MEDIA_LABEL = "📎 Add media";
 export const REMOVE_MEDIA_LABEL = "🗑 Remove media";
+export const DELETE_ACTIVITY_LABEL = "❌ Delete activity";
 
 /**
  * `is_persistent` keeps it open rather than collapsing to an icon after one
@@ -30,6 +31,11 @@ export const REMOVE_MEDIA_LABEL = "🗑 Remove media";
  * already published, and putting each on its own row would make the keyboard
  * five deep — at which point it stops being glanceable, which is the only
  * reason it exists.
+ *
+ * Deleting an activity gets that fifth row anyway, alone, and the row is the
+ * point. It is the only button here that destroys an entry rather than a file,
+ * and sitting it beside "Remove media" — a thumb's width from something that
+ * sounds almost the same — is precisely how the wrong one gets pressed.
  */
 export const MAIN_KEYBOARD: ReplyKeyboardMarkup = {
   keyboard: [
@@ -37,6 +43,7 @@ export const MAIN_KEYBOARD: ReplyKeyboardMarkup = {
     [{ text: RAW_LABEL }],
     [{ text: REPOST_LABEL }],
     [{ text: ADD_MEDIA_LABEL }, { text: REMOVE_MEDIA_LABEL }],
+    [{ text: DELETE_ACTIVITY_LABEL }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -61,6 +68,7 @@ export function menuAction(text: string): MenuAction | null {
   if (trimmed === REPOST_LABEL) return "repost";
   if (trimmed === ADD_MEDIA_LABEL) return "addmedia";
   if (trimmed === REMOVE_MEDIA_LABEL) return "removemedia";
+  if (trimmed === DELETE_ACTIVITY_LABEL) return "deleteactivity";
 
   return parseCommand(trimmed);
 }
@@ -71,7 +79,7 @@ export const WELCOME =
   `Or use the buttons: "${NEW_ACTIVITY_LABEL}" starts one, "${RAW_LABEL}" publishes a note in your own ` +
   `words with nothing rewritten, and "${REPOST_LABEL}" shares something already published.\n\n` +
   `"${ADD_MEDIA_LABEL}" and "${REMOVE_MEDIA_LABEL}" change the photos and videos on an activity ` +
-  "that is already on the site.";
+  `that is already on the site, and "${DELETE_ACTIVITY_LABEL}" takes one off it for good.`;
 
 /**
  * The prompt behind "Add media".

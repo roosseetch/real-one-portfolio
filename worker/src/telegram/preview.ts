@@ -7,16 +7,13 @@
  * re-sent rather than the changed field alone.
  */
 import type { Draft, DraftRecord, ProcessedMedia } from "../drafts/types";
-import type { InlineKeyboardMarkup } from "./api";
+import { MAX_MESSAGE, type InlineKeyboardMarkup } from "./api";
 
 /** Spec §7.2, quoted rather than paraphrased. */
 const APPROVAL_QUESTION = "Is this the information and media that should become public?";
 
 /** Spec Phase 6: the question asked when a transcode changed the clip visibly. */
 const CONFIRMATION_QUESTION = "Publishing this version?";
-
-/** Telegram rejects a sendMessage over 4096 characters outright. */
-const MAX_MESSAGE = 4096;
 
 const EMPTY = "—";
 

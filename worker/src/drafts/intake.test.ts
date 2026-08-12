@@ -705,6 +705,79 @@ describe("the standing buttons", () => {
   });
 });
 
+describe("deleting an activity", () => {
+  const DELETE_LABEL = "❌ Delete activity";
+
+  /** One published activity, laid down as publication would have. */
+  function publish(): void {
+    const records = [
+      {
+        id: "aaaaaaaaaaaaaaaa",
+        title: "A morning run",
+        summary: null,
+        body: "Eight kilometres.",
+        eventDate: null,
+        publishedAt: "2026-08-10T09:00:00.000Z",
+        tags: [],
+        media: [],
+      },
+    ];
+
+    content.objects.set("content/records-chunk0.json", JSON.stringify(records));
+    content.objects.set(
+      "content/manifest.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: "2026-08-12T10:00:00.000Z",
+        recordsPerFile: 10,
+        totalRecords: 1,
+        records: [{ id: "chunk0", sha256: "x", count: 1 }],
+        latest: "chunk0",
+      }),
+    );
+  }
+
+  it("asks which activity instead of drafting a note that says 'Delete activity'", async () => {
+    publish();
+
+    const result = await intakeUpdate(textMessage(DELETE_LABEL), SENDER, env());
+
+    expect(result.status).toBe("unsupported");
+    expect(storage.objects.size).toBe(1);
+    expect(sent.join(" ")).toContain("Which activity should I delete?");
+  });
+
+  /**
+   * The whole reason the pointer is armed as the question is asked: the author
+   * pastes the link of the entry they want gone, and without this it becomes a
+   * new activity about a URL.
+   */
+  it("reads the link that follows as the activity, not as a new note", async () => {
+    publish();
+    await intakeUpdate(textMessage(DELETE_LABEL), SENDER, env());
+
+    const result = await intakeUpdate(
+      textMessage("https://site.example/activities/?v=a-morning-run"),
+      SENDER,
+      env(),
+    );
+
+    expect(result.status).toBe("unsupported");
+    expect(sent.join(" ")).toContain("Delete this activity?");
+    expect(sent.join(" ")).toContain("A morning run");
+  });
+
+  it("goes back to drafting once that question is answered", async () => {
+    publish();
+    await intakeUpdate(textMessage(DELETE_LABEL), SENDER, env());
+    await intakeUpdate(textMessage("a-morning-run"), SENDER, env());
+
+    const result = await intakeUpdate(textMessage("swam this evening"), SENDER, env());
+
+    expect(result.status).toBe("created");
+  });
+});
+
 describe("publishing as written", () => {
   // Spelled out rather than imported, like the labels above: these strings are
   // the interface, and a test that reads them from the source cannot notice one

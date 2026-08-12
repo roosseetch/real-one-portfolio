@@ -12,6 +12,11 @@ import { intakeUpdate, type IntakeEnv } from "../drafts/intake";
 import { handleRepostCallback, isRepostCallback, type RepostEnv } from "../linkedin/repost";
 import { handleAttachCallback, isAttachCallback, type AttachMediaEnv } from "../media/attach";
 import { handleDetachCallback, isDetachCallback, type DetachEnv } from "../media/detach";
+import {
+  handleDeleteCallback,
+  isDeleteCallback,
+  type DeleteActivityEnv,
+} from "../publishing/delete-activity";
 import type { TelegramUpdate } from "./types";
 
 /** Telegram echoes the secret given to setWebhook back on every delivery. */
@@ -36,7 +41,8 @@ export interface WebhookEnv
     ApprovalEnv,
     RepostEnv,
     AttachMediaEnv,
-    DetachEnv {}
+    DetachEnv,
+    DeleteActivityEnv {}
 
 export type WebhookAuthorization =
   | { status: "authorized"; update: TelegramUpdate; senderId: number }
@@ -183,6 +189,8 @@ export async function handleTelegramWebhook(
         await handleAttachCallback(callbackQuery, env);
       } else if (isDetachCallback(callbackQuery.data)) {
         await handleDetachCallback(callbackQuery, env);
+      } else if (isDeleteCallback(callbackQuery.data)) {
+        await handleDeleteCallback(callbackQuery, env);
       } else {
         await handlePreviewCallback(callbackQuery, env);
       }

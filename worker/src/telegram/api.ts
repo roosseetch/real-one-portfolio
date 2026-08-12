@@ -14,6 +14,9 @@
 
 const API_BASE = "https://api.telegram.org";
 
+/** Telegram rejects a sendMessage over this outright, so every long message is cut to fit. */
+export const MAX_MESSAGE = 4096;
+
 export interface TelegramApiEnv {
   TELEGRAM_BOT_TOKEN: string;
 }

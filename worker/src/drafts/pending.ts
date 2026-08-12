@@ -36,7 +36,9 @@ export type Pending =
   /** The next message names the activity these already-filed files belong to. */
   | { kind: "attach-target"; draftId: string }
   /** The next message names the activity to take media off. */
-  | { kind: "detach-target" };
+  | { kind: "detach-target" }
+  /** The next message names the activity to delete outright. */
+  | { kind: "delete-target" };
 
 interface StoredPending {
   kind?: Pending["kind"];
@@ -113,6 +115,14 @@ export function setPendingDetachTarget(
   return setPending(bucket, chatId, { kind: "detach-target" }, now);
 }
 
+export function setPendingDeleteTarget(
+  bucket: R2Bucket,
+  chatId: number,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "delete-target" }, now);
+}
+
 /**
  * Consumes an "attach" pointer, and only that one.
  *
@@ -184,6 +194,7 @@ export async function takePending(
   if (stored.kind === "verbatim") return { kind: "verbatim" };
   if (stored.kind === "attach") return { kind: "attach" };
   if (stored.kind === "detach-target") return { kind: "detach-target" };
+  if (stored.kind === "delete-target") return { kind: "delete-target" };
   if (stored.kind === "attach-target") {
     return typeof stored.draftId === "string" ? { kind: "attach-target", draftId: stored.draftId } : null;
   }
