@@ -181,8 +181,12 @@ export interface RecordOptions {
    * this record on its own, where the link would point at itself.
    */
   href?: string;
-  /** Heading level for the title, so a record shown alone is not an h3 under nothing. */
-  heading?: "h2" | "h3";
+  /**
+   * Heading level for the title, so a record shown alone is not an h3 under
+   * nothing. "h1" on the page that is this one record: there the title is the
+   * page's heading, and no other heading is above it.
+   */
+  heading?: "h1" | "h2" | "h3";
 }
 
 /**

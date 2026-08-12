@@ -445,6 +445,15 @@ main {
   max-width: 42rem;
 }
 
+/* The record's title heads that page, so it is an h1 — and the size of an h1
+   inside sectioning content is the browser's to decide: current Chrome leaves
+   it at 2em, while a browser still applying the old nesting rule shrinks this
+   one, two levels deep, to 1.17em, which is smaller than the h2 it used to be.
+   Sized here instead, to the 2rem the heading of every other page renders at. */
+.activity-single .activity-card h1 {
+  font-size: 2rem;
+}
+
 .activity-media img,
 .activity-media video {
   border-radius: 0.75rem;

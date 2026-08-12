@@ -13,7 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderActivitiesSection } from "./activities";
-import { facts } from "./profile";
+import { facts, portfolio } from "./profile";
 import { CONTENT_BASE, bucketOf, loaded, record, serve } from "./test-support/activity-bucket";
 
 function mount(search = "", track?: (eventType: string, properties?: Record<string, unknown>) => void): HTMLElement {
@@ -23,7 +23,15 @@ function mount(search = "", track?: (eventType: string, properties?: Record<stri
 }
 
 const titles = (section: HTMLElement) =>
-  [...section.querySelectorAll(".activity-card h2, .activity-card h3")].map((node) => node.textContent);
+  [...section.querySelectorAll(".activity-card h1, .activity-card h2, .activity-card h3")].map(
+    (node) => node.textContent,
+  );
+
+/** The page's own heading, whatever the view put there. */
+const pageHeading = (section: HTMLElement) => section.querySelector("h1")?.textContent;
+
+/** What the profile calls the feed, read the way the page reads it. */
+const SECTION_TITLE = portfolio.sections.find((s) => s.id === "activity")?.title ?? "Recent Activities";
 
 const noteText = (section: HTMLElement) => section.querySelector(".activity-note")?.textContent;
 
@@ -41,6 +49,14 @@ afterEach(() => {
 });
 
 describe("one chunk", () => {
+  it("heads the whole feed with what the profile calls it", async () => {
+    serve(bucketOf([record("first")]));
+    const section = mount();
+    await loaded(section);
+
+    expect(pageHeading(section)).toBe(SECTION_TITLE);
+  });
+
   it("renders every record it holds", async () => {
     serve(bucketOf([record("first"), record("second")]));
     const section = mount();
@@ -390,12 +406,23 @@ describe("one activity, by ?v=", () => {
     expect(section.querySelector(".activity-body")?.textContent).toBe("Cool air, quiet paths.");
   });
 
-  it("gives it the page's own heading level, and no link to where it already is", async () => {
+  it("is headed by the activity itself, not by the feed it came from", async () => {
     serve(feed());
     const section = mount("?v=morning-run");
     await loaded(section);
 
-    expect(section.querySelector(".activity-card h2")?.textContent).toBe("Morning run");
+    // The record's title is the page's heading, so nothing above it claims the
+    // visitor is looking at the whole feed.
+    expect(pageHeading(section)).toBe("Morning run");
+    expect(section.querySelector(".activity-card h1")?.textContent).toBe("Morning run");
+    expect(section.textContent).not.toContain(SECTION_TITLE);
+  });
+
+  it("does not link the title to where it already is", async () => {
+    serve(feed());
+    const section = mount("?v=morning-run");
+    await loaded(section);
+
     expect(section.querySelector(".activity-card-link")).toBeNull();
   });
 
@@ -458,6 +485,9 @@ describe("one activity, by ?v=", () => {
     );
     expect(titles(section)).toEqual([]);
     expect(section.querySelector(".activity-back")).not.toBeNull();
+    // Headed by what happened, not by the feed, which is the page it offers to
+    // go to next rather than the page the visitor is on.
+    expect(pageHeading(section)).toBe("Activity not found");
   });
 
   it("reports a link that names nothing, which a page-view count cannot show", async () => {
