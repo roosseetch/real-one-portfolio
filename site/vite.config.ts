@@ -2,10 +2,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 
+import { escape, headTags } from "./src/head";
 import { ROUTES, type Route } from "./src/routes";
-
-const escape = (value: string) =>
-  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 const readProfile = (name: string) =>
   JSON.parse(readFileSync(new URL(`../profile/${name}.json`, import.meta.url), "utf8"));
@@ -14,15 +12,23 @@ const readProfile = (name: string) =>
 const entryPath = (route: Route) => fileURLToPath(new URL(route.entry, import.meta.url));
 
 /**
- * Writes the title and social metadata into each page's HTML at build time.
+ * Writes the title, the social metadata and the site icon into each page's HTML
+ * at build time.
  *
  * Setting document.title from JavaScript leaves the wrong name in the served
  * HTML, which is what search engines and link previews read. Injecting here
  * keeps the tracked HTML free of personal values while the built pages carry
  * the real ones.
  *
- * Every page gets its own, from routes.ts: a second page inheriting the landing
- * page's title and description is a second page indistinguishable from the
+ * The icon is here for that second reason rather than the first. A logo is one
+ * person's brand mark, so it belongs in the media bucket beside the portrait and
+ * not in a repository meant to be reused for someone else (spec §1) — which is
+ * why the tag is built from `VITE_MEDIA_BASE_URL` instead of pointing at a file
+ * in `public/`. Injecting it also means a page added to routes.ts is a page with
+ * an icon, rather than one more `<link>` somebody has to remember to paste.
+ *
+ * Every page gets its own title and description, from routes.ts: a second page
+ * inheriting the landing page's is a second page indistinguishable from the
  * first in a search result.
  */
 function profileMetadata(): Plugin {
@@ -49,14 +55,7 @@ function profileMetadata(): Plugin {
       const description = route?.description ?? summary;
       const mediaBase = process.env.VITE_MEDIA_BASE_URL?.replace(/\/$/, "");
 
-      const tags = [
-        `<meta name="description" content="${escape(description)}">`,
-        `<meta property="og:type" content="profile">`,
-        `<meta property="og:title" content="${escape(pageTitle)}">`,
-        `<meta property="og:description" content="${escape(description)}">`,
-        mediaBase ? `<meta property="og:image" content="${mediaBase}/media/profile/hero-800.webp">` : "",
-        `<meta name="twitter:card" content="summary_large_image">`,
-      ].filter(Boolean);
+      const tags = headTags({ pageTitle, description, mediaBase });
 
       return html
         .replace(/<title>[^<]*<\/title>/, `<title>${escape(pageTitle)}</title>`)
