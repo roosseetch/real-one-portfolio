@@ -13,6 +13,7 @@
  */
 import { timingSafeEqual } from "../crypto";
 import { randomId } from "../ids";
+import { attachProcessedMedia, type AttachEnv } from "../publishing/attach-record";
 import { publishProcessedMedia, type MediaPublishEnv } from "../publishing/media-record";
 import { sendMediaGroup, sendMessage, type TelegramApiEnv } from "../telegram/api";
 import { confirmationKeyboard, formatMediaConfirmation } from "../telegram/preview";
@@ -24,7 +25,7 @@ import { readSignedCallback, refuse, type SignedCallbackEnv } from "./signature"
 /** Matches the approval loop's preview tokens: unguessable inside 64 bytes of callback_data. */
 const CONFIRMATION_TOKEN_LENGTH = 12;
 
-export interface CallbackEnv extends MediaPublishEnv, TelegramApiEnv, SignedCallbackEnv {
+export interface CallbackEnv extends MediaPublishEnv, AttachEnv, TelegramApiEnv, SignedCallbackEnv {
   PRIVATE_BUCKET: R2Bucket;
   MEDIA_BASE_URL: string;
   SITE_BASE_URL: string;
@@ -148,7 +149,15 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   const urls = body.media.flatMap((item) => [item.src, item.thumbnail, item.poster].filter(Boolean) as string[]);
   if (!urls.every((url) => url.startsWith(prefix))) return refuse(400);
 
-  if (draft.record === null) return refuse(400);
+  // An attachment carries no record — the words are already on the site, and
+  // this draft exists only to put files beside them — so the two are told apart
+  // here rather than one of them being refused for looking like the other.
+  const attachment = draft.attachment ?? null;
+  if (attachment === null && draft.record === null) return refuse(400);
+  // Nothing names an activity to amend, so there is nowhere for these files to
+  // go. The author never confirmed a target, which means nothing dispatched
+  // this — a callback that reaches here is describing work nobody asked for.
+  if (attachment !== null && attachment.recordId === null) return refuse(400);
 
   const media: ProcessedMedia[] = body.media.map((item) => ({
     sourceId: item.sourceId,
@@ -166,6 +175,18 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   const changed = changedVideos(media);
   if (changed.length > 0) {
     return holdForConfirmation(env, draft, media, changed);
+  }
+
+  if (attachment !== null) {
+    const attached = await attachProcessedMedia(env, draft, media);
+
+    if (attached.status !== "attached") {
+      // Same as below: the draft stays in processing so the retry flow can work
+      // from there, and the spent nonce means a retry carries a fresh one.
+      return new Response("Amendment failed", { status: 500 });
+    }
+
+    return Response.json({ status: "attached", url: attached.url });
   }
 
   const result = await publishProcessedMedia(env, draft, media);

@@ -557,6 +557,116 @@ describe("the confirmation gate (spec Phase 6)", () => {
   });
 });
 
+/**
+ * The same job, the same runner, the same signed callback — and a draft that
+ * exists only to put files on an activity that is already live. Only the last
+ * step differs, and this is where the two part.
+ */
+describe("media added to an activity that already exists", () => {
+  /** A record on the site, and a draft whose files are meant for it. */
+  async function attachingDraft(recordId = "aaaaaaaaaaaaaaaa"): Promise<Draft> {
+    const draft = await processingDraft();
+    const attaching: Draft = { ...draft, record: null, attachment: { recordId } };
+    await saveDraft(storage.bucket, attaching);
+
+    content.objects.set(
+      "content/records-chunk0.json",
+      JSON.stringify([
+        {
+          id: "aaaaaaaaaaaaaaaa",
+          title: "A morning run",
+          summary: null,
+          body: null,
+          eventDate: null,
+          publishedAt: "2026-08-10T09:00:00.000Z",
+          tags: [],
+          media: [],
+        },
+      ]),
+    );
+    content.objects.set(
+      "content/manifest.json",
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: "2026-08-12T10:00:00.000Z",
+        recordsPerFile: 10,
+        totalRecords: 1,
+        records: [{ id: "chunk0", sha256: "x", count: 1 }],
+        latest: "chunk0",
+      }),
+    );
+
+    return attaching;
+  }
+
+  it("amends the activity instead of publishing a second record", async () => {
+    const draft = await attachingDraft();
+
+    const response = await handleMediaProcessed(await callback(payload(draft)), env());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: "attached",
+      url: "https://site.example/activities/?v=a-morning-run",
+    });
+
+    const manifest = (await readManifest(content.bucket))?.manifest;
+    expect(manifest?.totalRecords).toBe(1);
+
+    const records = JSON.parse(
+      content.objects.get(`content/records-${manifest?.records[0].id}.json`) as string,
+    ) as Array<{ media: unknown[] }>;
+    expect(records[0].media).toHaveLength(1);
+
+    expect(sent.at(-1)).toContain('Added the file to "A morning run"');
+  });
+
+  /**
+   * Nothing dispatched a draft that names no activity, so a callback describing
+   * one is describing work nobody asked for.
+   */
+  it("refuses a callback for a draft that never chose an activity", async () => {
+    const draft = await attachingDraft();
+    await saveDraft(storage.bucket, { ...draft, attachment: { recordId: null } });
+
+    const response = await handleMediaProcessed(await callback(payload(draft)), env());
+
+    expect(response.status).toBe(400);
+  });
+
+  it("still asks about a video the transcode changed", async () => {
+    const draft = await attachingDraft();
+    const video: Draft = {
+      ...draft,
+      originals: [
+        { mediaId: "media0", type: "video", fileId: "f0", key: `originals/${draft.activityId}/media0.mov` },
+      ],
+    };
+    await saveDraft(storage.bucket, video);
+
+    const response = await handleMediaProcessed(
+      await callback(videoPayload(video, { visibleChanges: ["The audio was removed."] })),
+      env(),
+    );
+
+    expect(await response.json()).toMatchObject({ status: "awaiting-confirmation" });
+    // Nothing is on the activity until the author has looked at it.
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("awaiting_approval");
+    expect(stored?.published).toBeNull();
+  });
+
+  it("leaves the draft in processing when the activity has gone", async () => {
+    const draft = await attachingDraft("zzzzzzzzzzzzzzzz");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await handleMediaProcessed(await callback(payload(draft)), env());
+
+    expect(response.status).toBe(500);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("processing");
+  });
+});
+
 describe("idempotency (spec §13.4)", () => {
   it("returns the existing result instead of publishing twice", async () => {
     const draft = await processingDraft();

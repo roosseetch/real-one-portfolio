@@ -9,10 +9,18 @@
  */
 import { generateRecord, type AiEnv } from "../ai/generate";
 import { promptForActivity, type RepostEnv } from "../linkedin/repost";
+import {
+  applyAttachTarget,
+  promptForAttachTarget,
+  type AttachMediaEnv,
+} from "../media/attach";
+import { applyDetachTarget, promptForRemoval, type DetachEnv } from "../media/detach";
 import { carriesMedia, intakeMedia, type DeclineReason, type MediaIntakeEnv } from "../media/intake";
 import type { FileLabel } from "../media/formats";
+import { findAlbumDraft } from "./albums";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import {
+  ADD_MEDIA_PROMPT,
   MAIN_KEYBOARD,
   NEW_ACTIVITY_PROMPT,
   RAW_PROMPT,
@@ -27,7 +35,13 @@ import {
   sendPreview,
   type ApprovalEnv,
 } from "./approval";
-import { clearPending, setPendingVerbatim, takePending } from "./pending";
+import {
+  clearPending,
+  setPendingAttach,
+  setPendingVerbatim,
+  takePending,
+  takePendingAttach,
+} from "./pending";
 import { createDraft, loadDraft, saveDraft } from "./store";
 import type { Draft } from "./types";
 import { verbatimRecord } from "./verbatim";
@@ -100,7 +114,14 @@ export function declineMessage(reason: DeclineReason): string {
   }
 }
 
-export interface IntakeEnv extends AiEnv, TelegramApiEnv, ApprovalEnv, MediaIntakeEnv, RepostEnv {
+export interface IntakeEnv
+  extends AiEnv,
+    TelegramApiEnv,
+    ApprovalEnv,
+    MediaIntakeEnv,
+    RepostEnv,
+    AttachMediaEnv,
+    DetachEnv {
   PRIVATE_BUCKET: R2Bucket;
 }
 
@@ -147,7 +168,25 @@ async function applyPending(
     return publishAsWritten(env, { chatId, senderId, messageId }, text);
   }
 
+  // The author pressed "Add media" and then sent words instead of a file. There
+  // is nothing filed to attach, so this is a new note — but the pointer has to
+  // be consumed rather than left to swallow the message after next.
+  if (pending.kind === "attach") return null;
+
+  if (pending.kind === "detach-target") {
+    await applyDetachTarget(env, chatId, text);
+    return { status: "unsupported" };
+  }
+
   const draft = await loadDraft(env.PRIVATE_BUCKET, pending.draftId);
+
+  if (pending.kind === "attach-target") {
+    // Same rule as the edit below: a draft that has moved on since the button
+    // was pressed leaves the message to be an ordinary note rather than having
+    // it silently discarded.
+    if (draft === null) return null;
+    return (await applyAttachTarget(env, draft, text)) ? { status: "unsupported" } : null;
+  }
 
   // The draft moved on while the author was typing. Treating the message as an
   // instruction would silently discard it, so it starts a new draft instead.
@@ -218,11 +257,27 @@ async function runMenuAction(env: IntakeEnv, chatId: number, action: MenuAction)
     return;
   }
 
+  // Nothing is armed here: removing media starts from a list of activities, and
+  // the files to choose from are on whichever one is picked.
+  if (action === "removemedia") {
+    await promptForRemoval(env, chatId);
+    return;
+  }
+
   // Armed rather than done: the note itself is the next message, exactly as
   // "Edit text" leaves the instruction to be the next one.
   if (action === "raw") {
     await setPendingVerbatim(env.PRIVATE_BUCKET, chatId);
     await sendMessage(env, chatId, RAW_PROMPT);
+    return;
+  }
+
+  // Armed the same way, and for the same reason: what follows is a photo rather
+  // than a note, and a photo sent to this bot has always meant "write me an
+  // activity about this". The pointer is the only thing that says otherwise.
+  if (action === "addmedia") {
+    await setPendingAttach(env.PRIVATE_BUCKET, chatId);
+    await sendMessage(env, chatId, ADD_MEDIA_PROMPT);
     return;
   }
 
@@ -252,7 +307,7 @@ export async function intakeUpdate(
   }
 
   if (carriesMedia(message)) {
-    return intakeMediaMessage(message, senderId, env, waitUntil);
+    return intakeMediaMessage(message, senderId, env, waitUntil, await attaching(env, message));
   }
 
   const text = message.text?.trim();
@@ -286,6 +341,38 @@ export async function intakeUpdate(
 }
 
 /**
+ * Whether this message's files were promised to an activity that already exists.
+ *
+ * The pointer is consumed here, once, by the item that will create the draft —
+ * an album's later items find that draft through its media group id and inherit
+ * the answer from it, so taking the pointer per item would have the second photo
+ * of three start a second, unattached draft.
+ *
+ * Only an "attach" pointer is touched. An outstanding edit instruction or a
+ * promised verbatim note is left exactly where it is: neither has anything to do
+ * with a photo, and clearing one here would silently swallow it.
+ */
+async function attaching(env: IntakeEnv, message: TelegramMessage): Promise<boolean> {
+  const groupId = message.media_group_id ?? null;
+  if (groupId !== null && (await findAlbumDraft(env.PRIVATE_BUCKET, groupId)) !== null) return false;
+
+  return takePendingAttach(env.PRIVATE_BUCKET, message.chat.id);
+}
+
+/**
+ * Puts the "Add media" pointer back after a file that never became one.
+ *
+ * The pointer is spent by the time the file is refused, so without this the
+ * author presses the button, sends something the publisher cannot open, is told
+ * why — and their next photo quietly becomes a new activity instead. Only for a
+ * refusal that left no draft behind: once one exists, its siblings find it.
+ */
+async function rearm(env: IntakeEnv, message: TelegramMessage, attachment: boolean): Promise<void> {
+  if (!attachment) return;
+  await setPendingAttach(env.PRIVATE_BUCKET, message.chat.id);
+}
+
+/**
  * Files the media, then previews the draft it belongs to.
  *
  * Only the item that created the draft previews it. An album arrives as several
@@ -298,18 +385,21 @@ async function intakeMediaMessage(
   senderId: number,
   env: IntakeEnv,
   waitUntil: (promise: Promise<unknown>) => void,
+  attachment: boolean,
 ): Promise<IntakeResult> {
-  const filed = await intakeMedia(message, senderId, env);
+  const filed = await intakeMedia(message, senderId, env, attachment);
 
   // The gate said the message carried media, so this is a field carrying
   // nothing usable at all rather than an empty message.
   if (filed.status === "none") {
+    await rearm(env, message, attachment);
     return decline(env, message, "media fields carrying no file", NOTHING_USABLE_MESSAGE);
   }
 
   // Refused on what the file claimed to be, before any download and before any
   // draft: nothing is left behind to clean up.
   if (filed.status === "declined") {
+    await rearm(env, message, attachment);
     return decline(env, message, describeReason(filed.reason), declineMessage(filed.reason));
   }
 
@@ -332,7 +422,7 @@ async function intakeMediaMessage(
     if (draft.originals.length === 0 && draft.input.text.trim() === "") {
       return { status: "unsupported" };
     }
-    return describeAndPreview(env, draft, draft.input.text);
+    return settle(env, draft);
   }
 
   // Answer the webhook now and let the album settle in the background: holding
@@ -345,11 +435,28 @@ async function intakeMediaMessage(
       const settled = (await loadDraft(env.PRIVATE_BUCKET, draft.draftId)) ?? draft;
       if (settled.state !== "draft") return;
       if (settled.originals.length === 0 && settled.input.text.trim() === "") return;
-      await describeAndPreview(env, settled, settled.input.text);
+      await settle(env, settled);
     })(),
   );
 
   return { status: "created", draft };
+}
+
+/**
+ * What happens once everything a message was going to bring has arrived.
+ *
+ * The two answers are the two things a photo can mean here. An ordinary draft
+ * gets a record written for it and a preview to approve; files promised to an
+ * activity that already exists get the only question that flow has to ask, which
+ * is which activity — there is no entry to propose, so the model is never
+ * called.
+ */
+async function settle(env: IntakeEnv, draft: Draft): Promise<IntakeResult> {
+  if ((draft.attachment ?? null) !== null) {
+    return { status: "created", draft: await promptForAttachTarget(env, draft) };
+  }
+
+  return describeAndPreview(env, draft, draft.input.text);
 }
 
 /** The log's version of a refusal: short, literal, and never the author's words. */

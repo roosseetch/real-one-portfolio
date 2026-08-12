@@ -17,15 +17,27 @@ import { parseCommand, type Command } from "./commands";
 export const NEW_ACTIVITY_LABEL = "📝 New site activity";
 export const RAW_LABEL = "✍️ Publish as written";
 export const REPOST_LABEL = "🔗 Repost to LinkedIn";
+export const ADD_MEDIA_LABEL = "📎 Add media";
+export const REMOVE_MEDIA_LABEL = "🗑 Remove media";
 
 /**
  * `is_persistent` keeps it open rather than collapsing to an icon after one
  * press; `resize_keyboard` stops Telegram reserving half the screen for two
  * rows. Deliberately not `one_time_keyboard`: the whole point is that it is
  * still there tomorrow.
+ *
+ * The two media buttons share a row. They are the pair that acts on something
+ * already published, and putting each on its own row would make the keyboard
+ * five deep — at which point it stops being glanceable, which is the only
+ * reason it exists.
  */
 export const MAIN_KEYBOARD: ReplyKeyboardMarkup = {
-  keyboard: [[{ text: NEW_ACTIVITY_LABEL }], [{ text: RAW_LABEL }], [{ text: REPOST_LABEL }]],
+  keyboard: [
+    [{ text: NEW_ACTIVITY_LABEL }],
+    [{ text: RAW_LABEL }],
+    [{ text: REPOST_LABEL }],
+    [{ text: ADD_MEDIA_LABEL }, { text: REMOVE_MEDIA_LABEL }],
+  ],
   resize_keyboard: true,
   is_persistent: true,
   input_field_placeholder: "Send a note, a photo, or a video",
@@ -47,6 +59,8 @@ export function menuAction(text: string): MenuAction | null {
   if (trimmed === NEW_ACTIVITY_LABEL) return "new";
   if (trimmed === RAW_LABEL) return "raw";
   if (trimmed === REPOST_LABEL) return "repost";
+  if (trimmed === ADD_MEDIA_LABEL) return "addmedia";
+  if (trimmed === REMOVE_MEDIA_LABEL) return "removemedia";
 
   return parseCommand(trimmed);
 }
@@ -55,7 +69,21 @@ export function menuAction(text: string): MenuAction | null {
 export const WELCOME =
   "Send me a note, a photo, or a video and I will write it up for the site.\n\n" +
   `Or use the buttons: "${NEW_ACTIVITY_LABEL}" starts one, "${RAW_LABEL}" publishes a note in your own ` +
-  `words with nothing rewritten, and "${REPOST_LABEL}" shares something already published.`;
+  `words with nothing rewritten, and "${REPOST_LABEL}" shares something already published.\n\n` +
+  `"${ADD_MEDIA_LABEL}" and "${REMOVE_MEDIA_LABEL}" change the photos and videos on an activity ` +
+  "that is already on the site.";
+
+/**
+ * The prompt behind "Add media".
+ *
+ * It asks for the files first and the activity second, which is the order the
+ * author is already in: they are looking at a photo and thinking "that belongs
+ * with the run I posted". Asking which activity first would mean holding that
+ * answer while they go and find the picture.
+ */
+export const ADD_MEDIA_PROMPT =
+  "Send the photos or videos to add. You can send several at once.\n\n" +
+  "I will ask which activity they belong to once they have arrived.";
 
 /** The prompt behind the first button. The flow itself is just "send a message". */
 export const NEW_ACTIVITY_PROMPT =

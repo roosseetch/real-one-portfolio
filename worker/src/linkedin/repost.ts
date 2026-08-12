@@ -12,10 +12,8 @@
  * normal Tuesday rather than an incident. It is answered with a login link and a
  * remembered activity, so one tap finishes what the press started.
  */
-import { readChunk } from "../content/chunks";
-import { readManifest } from "../content/manifest";
+import { CHOICES, findRecord, loadRecords, sortNewestFirst } from "../content/recent";
 import type { PublicRecord } from "../content/records";
-import { isValidId } from "../ids";
 import { answerCallback, sendMessage, type InlineKeyboardMarkup, type TelegramApiEnv } from "../telegram/api";
 import type { TelegramCallbackQuery } from "../telegram/types";
 import { composePost } from "./compose";
@@ -31,16 +29,13 @@ import {
   type LinkedInToken,
 } from "./tokens";
 
-/** How many activities the chooser offers. Enough to find a recent one, few enough to read at a glance. */
-const CHOICES = 5;
-
 /**
- * How far back a remembered activity is looked for.
- *
- * A state lives fifteen minutes, so anything that has fallen more than three
- * chunks back in that time is not the post somebody is still waiting on.
+ * Re-exported because this is where the rule was written and where its tests
+ * live. It moved to content/recent.ts when adding and removing media started
+ * asking the same "which activity?" question; a second copy of the site's
+ * ordering rule is a second place for it to drift.
  */
-const LOOKUP_CHUNKS = 3;
+export { sortNewestFirst };
 
 /** Telegram truncates a long button label itself; this keeps the list readable first. */
 const LABEL_MAX = 40;
@@ -75,81 +70,6 @@ const DISMISS = `${PREFIX}x`;
 
 export function isRepostCallback(data: string | undefined): boolean {
   return typeof data === "string" && data.startsWith(PREFIX);
-}
-
-/* ------------------------------------------------------------------ reading */
-
-/**
- * Published records, newest first.
- *
- * Chunks are read from the newest backwards and only until `enough` records are
- * in hand: answering "what did I publish recently" does not need the archive,
- * and reading it would cost one more R2 call for every ten records ever
- * published. `maxChunks` is the ceiling for the case where `enough` is never
- * reached — a manifest whose newest chunks are all short.
- */
-async function loadRecords(
-  env: RepostEnv,
-  enough: number,
-  maxChunks: number,
-): Promise<PublicRecord[]> {
-  const loaded = await readManifest(env.CONTENT_BUCKET);
-  if (loaded === null) return [];
-
-  const entries = loaded.manifest.records;
-  const collected: PublicRecord[] = [];
-
-  for (let i = entries.length - 1; i >= 0 && entries.length - i <= maxChunks; i--) {
-    // unshift, so the array stays in publication order: the position tiebreak
-    // below depends on it, exactly as the site's feed does.
-    collected.unshift(...(await readChunk(env.CONTENT_BUCKET, entries[i].id)));
-    if (collected.length >= enough) break;
-  }
-
-  return sortNewestFirst(collected);
-}
-
-/**
- * Publication order, newest first.
- *
- * The same rule as site/src/activity.ts: `publishedAt`, never `eventDate` —
- * which is null whenever the author's note named no date, and would drop every
- * undated record to the bottom however recent it is. A record with no
- * `publishedAt` predates the field, which makes it older than every record that
- * has one; among themselves those keep the order the chunks store them in.
- */
-export function sortNewestFirst(records: PublicRecord[]): PublicRecord[] {
-  const ordered = records.map((record, position) => ({ record, position }));
-
-  ordered.sort((a, b) => {
-    const at = typeof a.record.publishedAt === "string" ? a.record.publishedAt : null;
-    const bt = typeof b.record.publishedAt === "string" ? b.record.publishedAt : null;
-
-    // ISO 8601 in UTC, so lexicographic order is chronological order.
-    if (at !== null && bt !== null) {
-      if (at !== bt) return at < bt ? 1 : -1;
-    } else if (at !== bt) {
-      return at === null ? 1 : -1;
-    }
-
-    return b.position - a.position;
-  });
-
-  return ordered.map((entry) => entry.record);
-}
-
-/**
- * The record a button names.
- *
- * Searched over more chunks than the chooser offers, because the press and the
- * post can be minutes apart: an activity picked before a login can have been
- * pushed out of the newest few by the time the login finishes.
- */
-async function findRecord(env: RepostEnv, recordId: string): Promise<PublicRecord | null> {
-  if (!isValidId(recordId)) return null;
-
-  const records = await loadRecords(env, Number.POSITIVE_INFINITY, LOOKUP_CHUNKS);
-  return records.find((record) => record.id === recordId) ?? null;
 }
 
 /* ------------------------------------------------------------------ prompting */

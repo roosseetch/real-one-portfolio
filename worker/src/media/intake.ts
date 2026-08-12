@@ -204,6 +204,14 @@ export async function intakeMedia(
   message: TelegramMessage,
   senderId: number,
   env: MediaIntakeEnv,
+  /**
+   * Whether these files are being added to an activity that already exists.
+   *
+   * Decided by the caller, from the pointer the "Add media" button leaves, and
+   * only ever true for the item that creates the draft: the rest of an album
+   * finds that draft and inherits the answer with it.
+   */
+  attachment: boolean = false,
 ): Promise<MediaIntakeResult> {
   const decision = mediaRequest(message);
   if (decision.status === "none") return { status: "none" };
@@ -241,6 +249,9 @@ export async function intakeMedia(
     caption,
     new Date(),
     groupId,
+    // `recordId` is null until the author says which activity: the files are
+    // what arrived first, and the question about them comes after.
+    attachment ? { recordId: null } : null,
   );
 
   // Recorded before the download, which can take seconds: a sibling arriving

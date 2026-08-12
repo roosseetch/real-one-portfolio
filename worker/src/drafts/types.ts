@@ -125,6 +125,25 @@ export interface Draft {
   /** Null until Workers AI proposes one, which is why a quota failure can leave a usable draft. */
   record: DraftRecord | null;
   /**
+   * Set when this draft is not a new activity at all, but files being added to
+   * one that is already published.
+   *
+   * It exists so that everything between the files arriving and them becoming
+   * public can stay exactly as it is: the same private originals, the same
+   * GitHub Actions sanitisation, the same signed callback. Only the last step
+   * differs — the record is amended rather than written — and this is what tells
+   * the two apart at that point.
+   *
+   * `record` stays null on such a draft: there is no entry to propose, so the
+   * model is never asked and there is no preview to approve. `recordId` is null
+   * between the files arriving and the author saying which activity they belong
+   * to, which is the one question this flow does ask.
+   *
+   * Absent rather than null on drafts written before this existed, which is why
+   * every read of it goes through `?? null`.
+   */
+  attachment: { recordId: string | null } | null;
+  /**
    * The preview currently awaiting a decision, if there is one.
    *
    * `token` is minted fresh for every preview sent, so the buttons under an

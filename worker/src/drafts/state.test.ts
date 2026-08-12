@@ -26,6 +26,7 @@ function draftIn(state: DraftState): Draft {
     mediaDeclined: false,
     input: { text: "a morning run by the river" },
     record: null,
+    attachment: null,
     preview: null,
     published: null,
     job: null,

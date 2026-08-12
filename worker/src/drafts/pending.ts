@@ -26,10 +26,20 @@ const TTL_MS = 30 * 60 * 1000;
 /** What the chat's next message will be taken as. */
 export type Pending =
   | { kind: "edit"; draftId: string }
-  | { kind: "verbatim" };
+  | { kind: "verbatim" }
+  /**
+   * The next thing sent is media for an activity that is already published, not
+   * a new entry. Nothing else distinguishes the two: a photo sent to this bot
+   * has always meant "write me an activity about this".
+   */
+  | { kind: "attach" }
+  /** The next message names the activity these already-filed files belong to. */
+  | { kind: "attach-target"; draftId: string }
+  /** The next message names the activity to take media off. */
+  | { kind: "detach-target" };
 
 interface StoredPending {
-  kind?: "edit" | "verbatim";
+  kind?: Pending["kind"];
   draftId?: string;
   expiresAt: string;
 }
@@ -78,6 +88,70 @@ export function setPendingVerbatim(
   return setPending(bucket, chatId, { kind: "verbatim" }, now);
 }
 
+export function setPendingAttach(
+  bucket: R2Bucket,
+  chatId: number,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "attach" }, now);
+}
+
+export function setPendingAttachTarget(
+  bucket: R2Bucket,
+  chatId: number,
+  draftId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "attach-target", draftId }, now);
+}
+
+export function setPendingDetachTarget(
+  bucket: R2Bucket,
+  chatId: number,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "detach-target" }, now);
+}
+
+/**
+ * Consumes an "attach" pointer, and only that one.
+ *
+ * The media path needs to know whether these files are for an existing activity
+ * *before* it files them, and it cannot use `takePending`: an album arrives as
+ * several updates, and clearing an edit or verbatim pointer on the way past
+ * would silently swallow what the author was actually promised. So this reads
+ * the pointer, leaves anything else exactly where it was, and clears only its
+ * own kind.
+ */
+export async function takePendingAttach(
+  bucket: R2Bucket,
+  chatId: number,
+  now: Date = new Date(),
+): Promise<boolean> {
+  if (!isValidChatId(chatId)) return false;
+
+  const object = await bucket.get(pendingKey(chatId));
+  if (object === null) return false;
+
+  let stored: StoredPending;
+  try {
+    stored = (await object.json()) as StoredPending;
+  } catch {
+    return false;
+  }
+
+  if (stored?.kind !== "attach") return false;
+  if (typeof stored.expiresAt !== "string" || Date.parse(stored.expiresAt) <= now.getTime()) {
+    // Expired, and still ours to clear: leaving it would have the next album
+    // item read the same dead pointer.
+    await bucket.delete(pendingKey(chatId));
+    return false;
+  }
+
+  await bucket.delete(pendingKey(chatId));
+  return true;
+}
+
 /**
  * Reads and clears the pointer in one go.
  *
@@ -108,6 +182,11 @@ export async function takePending(
   if (Date.parse(stored.expiresAt) <= now.getTime()) return null;
 
   if (stored.kind === "verbatim") return { kind: "verbatim" };
+  if (stored.kind === "attach") return { kind: "attach" };
+  if (stored.kind === "detach-target") return { kind: "detach-target" };
+  if (stored.kind === "attach-target") {
+    return typeof stored.draftId === "string" ? { kind: "attach-target", draftId: stored.draftId } : null;
+  }
 
   // An absent `kind` is an edit pointer written before this field existed. They
   // live half an hour at most, so this only matters across a deploy — but it is

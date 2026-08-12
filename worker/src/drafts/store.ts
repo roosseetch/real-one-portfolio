@@ -72,6 +72,13 @@ export async function createDraft(
   text: string,
   now: Date = new Date(),
   mediaGroupId: string | null = null,
+  /**
+   * Set when the files being filed are for an activity that already exists.
+   * Decided at creation rather than later because the album that follows finds
+   * this draft and appends to it, and every item of it belongs to the same
+   * question.
+   */
+  attachment: { recordId: string | null } | null = null,
 ): Promise<Draft> {
   const timestamp = now.toISOString();
   const draft: Draft = {
@@ -92,8 +99,10 @@ export async function createDraft(
     mediaDeclined: false,
     input: { text },
     // Task 16 fills this in from Workers AI. It stays null if the model is
-    // unavailable, which is what lets the draft survive a quota failure.
+    // unavailable, which is what lets the draft survive a quota failure — and
+    // it stays null for good on an attachment, which has no entry to propose.
     record: null,
+    attachment,
     // No preview has been sent, so there is no live button anywhere.
     preview: null,
     published: null,
