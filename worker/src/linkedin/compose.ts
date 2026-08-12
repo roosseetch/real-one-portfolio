@@ -7,7 +7,7 @@
  * what gives way.
  */
 import type { PublicRecord } from "../content/records";
-import { activityUrl } from "../content/urls";
+import { linkedinActivityUrl } from "../content/urls";
 
 /**
  * LinkedIn's own limit on a member post. The API documents the refusal
@@ -129,7 +129,7 @@ export interface ComposedPost {
  * attached, not for it to be attached conditionally.
  */
 export function composePost(siteBaseUrl: string, record: PublicRecord): ComposedPost {
-  const url = activityUrl(siteBaseUrl, record);
+  const url = linkedinActivityUrl(siteBaseUrl, record);
 
   const sections = [record.title, record.summary ?? "", record.body ?? ""]
     .map((part) => part.trim())
@@ -145,8 +145,11 @@ export function composePost(siteBaseUrl: string, record: PublicRecord): Composed
   const prose = sections.join("\n\n");
 
   // The URL is not escaped and does not need to be: it is built from the
-  // configured site origin and a slug of [a-z0-9-], so it cannot contain a
-  // reserved character. Reserving its room first is what guarantees it survives.
+  // configured site origin, a slug of [a-z0-9-], and the campaign parameters
+  // that mark the visit as LinkedIn's — and `?`, `&` and `=` are no more
+  // reserved in little text than the slug is, so it cannot contain a character
+  // the grammar would take as syntax. Reserving its room first is what
+  // guarantees it survives.
   const suffix = `\n\n${url}`;
   const commentary = `${cut(prose, MAX_COMMENTARY - suffix.length)}${suffix}`;
 

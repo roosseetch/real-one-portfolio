@@ -39,3 +39,33 @@ export function activitySlug(record: Addressable): string {
 export function activityUrl(siteBaseUrl: string, record: Addressable): string {
   return `${siteBaseUrl.replace(/\/$/, "")}/activities/?v=${encodeURIComponent(activitySlug(record))}`;
 }
+
+/**
+ * The same page, but carrying who sent the visitor.
+ *
+ * Analytics works out where a visit came from with `document.referrer`, and a
+ * LinkedIn one is the case where that is least likely to survive: LinkedIn
+ * rewrites the links in a post to `lnkd.in` and sends most of its traffic
+ * through the in-app browser of its own mobile app, which routinely hands the
+ * destination an empty referrer. A visit that arrives with no referrer and no
+ * campaign is indistinguishable from somebody typing the address in — which is
+ * why LinkedIn traffic was being counted as direct.
+ *
+ * Query parameters survive all of it, so the answer is written into the link
+ * rather than inferred from the request. These are the conventional UTM names
+ * because Amplitude reads exactly those, without configuration, on to both the
+ * visitor and every event of the visit.
+ *
+ * The campaign is the record's own slug rather than a fixed word. Amplitude
+ * only re-attributes a visitor when the campaign it sees differs from the one
+ * it stored, so a single shared name would make every post after the first look
+ * like a continuation of the same visit; per-record, each post is its own
+ * campaign and is separately countable.
+ */
+export function linkedinActivityUrl(siteBaseUrl: string, record: Addressable): string {
+  const url = new URL(activityUrl(siteBaseUrl, record));
+  url.searchParams.set("utm_source", "linkedin");
+  url.searchParams.set("utm_medium", "social");
+  url.searchParams.set("utm_campaign", activitySlug(record));
+  return url.toString();
+}
