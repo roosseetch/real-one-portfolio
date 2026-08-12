@@ -17,9 +17,10 @@ import { applyDesignTokens, renderFooterSection, renderNav } from "./shell";
 /**
  * The activities page's own entry point (routes.ts, id "activities").
  *
- * Two views, one built file. `/activities/` lists every published record;
- * `/activities/?v=<slug>` shows one of them on its own, which is the link a
- * record can be shared or referred to by.
+ * Two views, one built file. `/activities/` lists every published record under
+ * the feed's own heading; `/activities/?v=<slug>` shows one of them on its own,
+ * headed by that record's title, which is the link a record can be shared or
+ * referred to by.
  *
  * The single view is a query parameter rather than a path of its own because a
  * record published five minutes ago has no built file and never will: the site
@@ -82,6 +83,9 @@ function renderSelection(
   const matches = selectRecords(records, value);
 
   if (matches.length === 0) {
+    // There is no activity to head this page with, and the feed's own title
+    // would say the visitor is looking at a list that is not there either.
+    section.insertBefore(el("h1", undefined, "Activity not found"), list);
     note(section, "That activity is not here. It may have been removed since the link was made.");
     section.append(backLink());
     // Worth its own event: a permalink that resolves to nothing is either a
@@ -104,8 +108,9 @@ function renderSelection(
   }
 
   list.classList.add("activity-single");
-  // No href on the title: it would link this page to itself.
-  list.replaceChildren(...matches.map((record) => renderRecord(record, { heading: "h2" })));
+  // The record's own title is this page's heading. No href on it either: it
+  // would link this page to itself.
+  list.replaceChildren(...matches.map((record) => renderRecord(record, { heading: "h1" })));
   section.append(backLink());
 }
 
@@ -122,7 +127,11 @@ export function renderActivitiesSection(search: string, options: ActivitiesOptio
 
   const selected = new URLSearchParams(search).get("v");
 
-  section.append(el("h1", undefined, SECTION_TITLE));
+  // "Recent Activities" heads the list of them. A page showing one is headed by
+  // that activity's own title instead — it is what the tab, a bookmark and a
+  // link preview already call this page, and a heading naming the whole feed
+  // above a single record says the visitor is somewhere they are not.
+  if (selected === null) section.append(el("h1", undefined, SECTION_TITLE));
 
   const list = el("div", "activity-list");
   section.append(list);
