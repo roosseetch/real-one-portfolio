@@ -187,6 +187,12 @@ export interface RecordOptions {
    * page's heading, and no other heading is above it.
    */
   heading?: "h1" | "h2" | "h3";
+  /**
+   * Cut the text to a card-sized excerpt, for the views that show many records
+   * at once. Needs `href`: a card with nowhere to link to would cut the text and
+   * leave no way to read the rest of it.
+   */
+  excerpt?: boolean;
 }
 
 /**
@@ -211,6 +217,79 @@ function paragraphsOf(body: string | null | undefined): string[] {
     .filter((paragraph) => paragraph !== "");
 }
 
+interface TextBlock {
+  /** The class the card renders this paragraph with — summary or body. */
+  className: string;
+  text: string;
+}
+
+/** A record's prose, in the order and the classes a card shows it in. */
+function textOf(record: ActivityRecord): TextBlock[] {
+  const blocks: TextBlock[] = [];
+  if (record.summary) blocks.push({ className: "activity-summary", text: record.summary });
+  for (const text of paragraphsOf(record.body)) blocks.push({ className: "activity-body", text });
+  return blocks;
+}
+
+/**
+ * How much prose a card shows on a page that is listing records rather than
+ * showing one. Roughly a short paragraph — enough to tell one activity from
+ * another, little enough that the record below it is still on the screen.
+ *
+ * Characters rather than a CSS line clamp, for two reasons. A clamp applies to
+ * one element, so a note of five paragraphs would be five clamped paragraphs and
+ * still fill the page; and nothing in the document would say whether anything
+ * had been hidden, so the link offering the rest would appear on cards that are
+ * already showing all of it.
+ */
+const EXCERPT_MAX_LENGTH = 240;
+
+/**
+ * Overflow small enough that cutting is not worth it. Trading the last line of a
+ * note for an ellipsis and a second trip saves nobody any scrolling.
+ */
+const EXCERPT_GRACE = 60;
+
+/**
+ * `text` up to `room` characters, ending where a word does.
+ *
+ * Trailing punctuation goes with it. A cut landing just after a comma reads as
+ * ", …", which looks like part of the sentence rather than like what replaced
+ * the rest of it.
+ */
+function cutAtWord(text: string, room: number): string {
+  if (room <= 0) return "";
+
+  const head = text.slice(0, room);
+  // Where the last word of the slice starts: that is the word the cut fell in
+  // the middle of. A word longer than the whole allowance has no boundary to cut
+  // at, and half a word beats an empty card.
+  const boundary = head.search(/\s\S*$/u);
+  const whole = boundary > 0 ? head.slice(0, boundary) : head;
+  return whole.replace(/[\s.,;:!?—–-]+$/u, "");
+}
+
+/** The blocks a listing card shows, and whether anything was left behind. */
+function excerptOf(blocks: TextBlock[]): { blocks: TextBlock[]; cut: boolean } {
+  const total = blocks.reduce((length, block) => length + block.text.length, 0);
+  if (total <= EXCERPT_MAX_LENGTH + EXCERPT_GRACE) return { blocks, cut: false };
+
+  const kept: TextBlock[] = [];
+  let used = 0;
+  for (const block of blocks) {
+    const room = EXCERPT_MAX_LENGTH - used;
+    if (block.text.length <= room) {
+      kept.push(block);
+      used += block.text.length;
+      continue;
+    }
+    const head = cutAtWord(block.text, room);
+    if (head) kept.push({ ...block, text: `${head}…` });
+    break;
+  }
+  return { blocks: kept, cut: true };
+}
+
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
 
@@ -225,8 +304,11 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
   card.append(heading);
 
   if (record.eventDate) card.append(el("p", "activity-date", record.eventDate));
-  if (record.summary) card.append(el("p", "activity-summary", record.summary));
-  for (const paragraph of paragraphsOf(record.body)) card.append(el("p", "activity-body", paragraph));
+
+  const text = textOf(record);
+  const shown = options.excerpt && options.href ? excerptOf(text) : { blocks: text, cut: false };
+  for (const block of shown.blocks) card.append(el("p", block.className, block.text));
+
   for (const media of record.media ?? []) {
     if (media.type === "image") {
       const figure = el("figure", "activity-media");
@@ -263,6 +345,17 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
     for (const tag of record.tags) tags.append(el("span", "activity-tag", tag));
     card.append(tags);
   }
+
+  if (shown.cut && options.href) {
+    const more = el("a", "activity-read-more", "Read more") as HTMLAnchorElement;
+    more.href = options.href;
+    // The title is already a link to the same page, but a list of ten cards is
+    // ten links reading "Read more" to anyone stepping through them one at a
+    // time. This one says which activity it opens.
+    more.setAttribute("aria-label", `Read more: ${record.title}`);
+    card.append(more);
+  }
+
   return card;
 }
 
@@ -325,7 +418,9 @@ export function renderActivityPreview(section: HTMLElement, title: string, limit
 
   mountFeed(section, limit, (records) => {
     const newest = sortRecords(records, false).slice(0, limit);
-    list.replaceChildren(...newest.map((record) => renderRecord(record, { href: activityHref(record) })));
+    list.replaceChildren(
+      ...newest.map((record) => renderRecord(record, { href: activityHref(record), excerpt: true })),
+    );
 
     const more = el("a", "activity-more", "See all activities") as HTMLAnchorElement;
     more.href = activitiesHref();

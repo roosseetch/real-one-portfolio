@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { activityHref, activitySlug, renderActivityPreview, selectRecords } from "./activity";
+import { activityHref, activitySlug, renderActivityPreview, renderRecord, selectRecords } from "./activity";
 import { bucketOf, loaded, record, serve } from "./test-support/activity-bucket";
 
 function mount(): HTMLElement {
@@ -97,6 +97,90 @@ describe("what a ?v= value selects", () => {
   });
 });
 
+/* What a card shows when it is one of many, rather than the page itself. The
+   allowance is a number in the module and deliberately not repeated here: these
+   fix the behaviour — cut at a word, offer the rest, leave short notes alone —
+   and leave the tuning free to move. */
+describe("the excerpt a listing card shows", () => {
+  /** Prose of about `length` characters, in short words and no punctuation. */
+  const prose = (length: number) => "word ".repeat(Math.ceil(length / 5)).slice(0, length).trim();
+
+  const listed = (extra: Record<string, unknown>) =>
+    renderRecord({ id: "rec-1", title: "A long note", ...extra }, { href: "/activities/?v=a-long-note", excerpt: true });
+
+  const bodies = (card: HTMLElement) => [...card.querySelectorAll(".activity-body")].map((p) => p.textContent ?? "");
+
+  const readMore = (card: HTMLElement) => card.querySelector(".activity-read-more") as HTMLAnchorElement | null;
+
+  it("leaves a note that fits exactly as it was written", () => {
+    const body = prose(250);
+    const card = listed({ body });
+
+    expect(bodies(card)).toEqual([body]);
+    expect(readMore(card)).toBeNull();
+  });
+
+  it("cuts a long one between words, not through one", () => {
+    const body = prose(1000);
+    const shown = bodies(listed({ body }))[0];
+
+    expect(shown.endsWith("…")).toBe(true);
+    const kept = shown.slice(0, -1);
+    expect(body.startsWith(kept)).toBe(true);
+    // The character the note carries on with is a space, so no half word was
+    // left on the card.
+    expect(body[kept.length]).toBe(" ");
+  });
+
+  it("cuts it down to something card-sized", () => {
+    const card = listed({ body: prose(4000) });
+    const shown = bodies(card).join("").length;
+
+    expect(shown).toBeLessThan(400);
+  });
+
+  it("drops the paragraphs that did not fit rather than squeezing them in", () => {
+    const card = listed({ body: [prose(200), prose(200), prose(200)].join("\n\n") });
+
+    expect(bodies(card).length).toBeLessThan(3);
+  });
+
+  it("counts the summary against the same allowance", () => {
+    // Both are prose the visitor reads, so a card carrying a long summary and a
+    // long body is as tall as one carrying only a long body.
+    const card = listed({ summary: prose(200), body: prose(1000) });
+
+    expect(card.querySelector(".activity-summary")?.textContent).toBe(prose(200));
+    expect(bodies(card).join("").length).toBeLessThan(200);
+  });
+
+  it("cuts the summary too when the summary is the long part", () => {
+    const shown = listed({ summary: prose(1000) }).querySelector(".activity-summary")?.textContent ?? "";
+
+    expect(shown.endsWith("…")).toBe(true);
+    expect(shown.length).toBeLessThan(1000);
+  });
+
+  it("offers the rest, saying which activity it opens", () => {
+    const link = readMore(listed({ body: prose(1000) }));
+
+    expect(link?.textContent).toBe("Read more");
+    expect(link?.getAttribute("href")).toBe("/activities/?v=a-long-note");
+    // Ten cards on a page would otherwise be ten links all reading "Read more".
+    expect(link?.getAttribute("aria-label")).toBe("Read more: A long note");
+  });
+
+  it("shows the whole note on the card that is the page, however long it is", () => {
+    // No href: this is the record on its own page, and there is nowhere to send
+    // anyone for the rest of it.
+    const body = prose(4000);
+    const card = renderRecord({ id: "rec-1", title: "A long note", body }, { heading: "h1" });
+
+    expect(bodies(card)).toEqual([body]);
+    expect(readMore(card)).toBeNull();
+  });
+});
+
 describe("the landing page's teaser", () => {
   it("shows the two most recent and not the rest", async () => {
     serve(bucketOf([dated("oldest", "01"), dated("middle", "02")], [dated("newest", "03")]));
@@ -138,6 +222,15 @@ describe("the landing page's teaser", () => {
     const link = section.querySelector(".activity-card-link") as HTMLAnchorElement;
     expect(link.textContent).toBe("Morning run");
     expect(link.getAttribute("href")).toBe("/activities/?v=morning-run");
+  });
+
+  it("cuts a long note down, two cards being side by side up here", async () => {
+    serve(bucketOf([record("A long one", { body: "word ".repeat(400) })]));
+    const section = mount();
+    await loaded(section);
+
+    expect(section.querySelector(".activity-body")?.textContent?.endsWith("…")).toBe(true);
+    expect(section.querySelector(".activity-read-more")).not.toBeNull();
   });
 
   it("leads on to the whole list", async () => {

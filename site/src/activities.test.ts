@@ -379,6 +379,37 @@ describe("what a record renders as", () => {
     expect(video.getAttribute("aria-label")).toBe("A clip of something");
   });
 
+  it("cuts a long note to an excerpt, so the records under it stay on the page", async () => {
+    const body = "word ".repeat(400).trim();
+    serve(bucketOf([record("A long one", { body }), record("A short one", { body: "Two words." })]));
+    const section = mount();
+    await loaded(section);
+
+    // By title, not by position: the list opens newest first, which reverses
+    // the order a chunk stores them in.
+    const cardOf = (title: string) =>
+      [...section.querySelectorAll(".activity-card")].find((card) => card.querySelector("h3")?.textContent === title) as HTMLElement;
+    const [longCard, shortCard] = [cardOf("A long one"), cardOf("A short one")];
+    const shown = longCard.querySelector(".activity-body")?.textContent ?? "";
+    expect(shown.endsWith("…")).toBe(true);
+    expect(shown.length).toBeLessThan(body.length);
+    expect(longCard.querySelector(".activity-read-more")?.getAttribute("href")).toBe("/activities/?v=a-long-one");
+
+    // Only the card that was actually cut says there is more to read.
+    expect(shortCard.querySelector(".activity-body")?.textContent).toBe("Two words.");
+    expect(shortCard.querySelector(".activity-read-more")).toBeNull();
+  });
+
+  it("keeps the excerpt when the list is re-sorted", async () => {
+    serve(bucketOf([record("A long one", { body: "word ".repeat(400) })]));
+    const section = mount();
+    await loaded(section);
+
+    (section.querySelector(".activity-sort") as HTMLButtonElement).click();
+
+    expect(section.querySelector(".activity-body")?.textContent?.endsWith("…")).toBe(true);
+  });
+
   it("links every card in the list to that activity's own page", async () => {
     serve(bucketOf([record("Morning run")]));
     const section = mount();
@@ -404,6 +435,16 @@ describe("one activity, by ?v=", () => {
 
     expect(titles(section)).toEqual(["Morning run"]);
     expect(section.querySelector(".activity-body")?.textContent).toBe("Cool air, quiet paths.");
+  });
+
+  it("shows a long note in full, being the page the excerpts link to", async () => {
+    const body = ["word ".repeat(200).trim(), "word ".repeat(200).trim()].join("\n\n");
+    serve(bucketOf([record("A long one", { body })]));
+    const section = mount("?v=a-long-one");
+    await loaded(section);
+
+    expect([...section.querySelectorAll(".activity-body")].map((p) => p.textContent)).toEqual(body.split("\n\n"));
+    expect(section.querySelector(".activity-read-more")).toBeNull();
   });
 
   it("is headed by the activity itself, not by the feed it came from", async () => {
