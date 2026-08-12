@@ -56,6 +56,16 @@ describe("generateRecord", () => {
     expect(input.messages.at(-1)?.content).toContain("2026-08-05");
   });
 
+  it("allows the model enough tokens to fill the schema's longest body", async () => {
+    // The cap covers the whole JSON reply, and schema.ts permits a body of 4000
+    // characters. Too low and a long note can only come back cut off mid-string,
+    // which parses as nothing and burns every attempt.
+    const fake = createFakeAi(aiRecord());
+    await generateRecord({ AI: fake.AI }, NOTE);
+
+    expect((fake.calls[0].input as { max_tokens: number }).max_tokens).toBeGreaterThanOrEqual(2048);
+  });
+
   it("retries malformed output and succeeds on a later attempt", async () => {
     const fake = createFakeAi({ response: "{not json" }, { response: { title: "" } }, aiRecord());
     const result = await generateRecord({ AI: fake.AI }, NOTE);

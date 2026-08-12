@@ -20,13 +20,15 @@ import {
   type MenuAction,
 } from "../telegram/menu";
 import type { TelegramMessage, TelegramUpdate } from "../telegram/types";
-import { applyEditInstruction, sendPreview, type ApprovalEnv } from "./approval";
+import {
+  applyEditInstruction,
+  sendGenerationFailure,
+  sendPreview,
+  type ApprovalEnv,
+} from "./approval";
 import { clearPendingEdit, takePendingEdit } from "./pending";
 import { createDraft, loadDraft, saveDraft } from "./store";
 import type { Draft } from "./types";
-
-/** Spec §23, quoted rather than paraphrased. */
-const AI_UNAVAILABLE_MESSAGE = "The draft has been saved. AI processing can continue later.";
 
 const NOTHING_USABLE_MESSAGE =
   "I could not find anything to publish in that message. Send a note, a photo, or a video — a picture sent as a file works too, and so does a sticker.";
@@ -377,7 +379,8 @@ async function describeAndPreview(env: IntakeEnv, draft: Draft, text: string): P
 
   // Reached whether the model was unavailable or its record could not be
   // stored. Both leave the same recoverable draft, and the author can do the
-  // same thing about either, so they are told the same thing.
-  await sendMessage(env, draft.source.chatId, AI_UNAVAILABLE_MESSAGE);
+  // same thing about either, so they are told the same thing — and given the
+  // button that makes "later" a press rather than retyping the whole note.
+  await sendGenerationFailure(env, draft);
   return { status: "created", draft };
 }

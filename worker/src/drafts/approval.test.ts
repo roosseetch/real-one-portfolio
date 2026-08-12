@@ -5,7 +5,12 @@ import { chunkKey } from "../content/chunks";
 import { createManifest, emptyManifest, readManifest } from "../content/manifest";
 import { createFakeBucket, type FakeBucket } from "../test-support/r2";
 import type { TelegramCallbackQuery } from "../telegram/types";
-import { handlePreviewCallback, parseCallbackData, sendPreview } from "./approval";
+import {
+  handlePreviewCallback,
+  parseCallbackData,
+  sendGenerationFailure,
+  sendPreview,
+} from "./approval";
 import { createDraft, loadDraft, saveDraft } from "./store";
 import type { Draft, DraftRecord } from "./types";
 
@@ -1014,5 +1019,110 @@ describe("Retry outside a failure", () => {
     expect(answers()).toEqual(["Not available yet."]);
     expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
     expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("awaiting_approval");
+  });
+});
+
+describe("trying the generation again", () => {
+  /** A draft the model never described: saved, record-less, buttons offering another go. */
+  async function undescribed(): Promise<Draft> {
+    const created = await createDraft(storage.bucket, { chatId: 99, senderId: 42, messageId: 7 }, "an easy 8k");
+    await sendGenerationFailure(env(), created);
+    return (await loadDraft(storage.bucket, created.draftId)) as Draft;
+  }
+
+  it("offers another attempt rather than leaving the author nothing to press", async () => {
+    // Without the buttons the message is a dead end: no record means no
+    // preview, so none of Regenerate, Edit or Publish is on screen either.
+    const draft = await undescribed();
+    const message = calls.find((c) => c.method === "sendMessage");
+
+    expect(message?.body.text).toBe("The draft has been saved. AI processing can continue later.");
+    expect(buttonsOn(message)).toEqual(["Try again", "Cancel"]);
+    expect(draft.state).toBe("draft");
+    expect(draft.preview?.messageId).toBe(4242);
+    expect(draft.preview?.token).toHaveLength(12);
+  });
+
+  it("generates and previews when the button is pressed", async () => {
+    const draft = await undescribed();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "g"), env(aiRecord()));
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.record?.title).toBe("Morning run by the river");
+    expect(stored?.state).toBe("awaiting_approval");
+    const preview = calls.find((c) => c.method === "sendMessage" && c.body.reply_markup);
+    expect(buttonsOn(preview)).toContain("Publish");
+    // The dead message's keyboard comes off with the draft it described.
+    expect(calls.map((c) => c.method)).toContain("editMessageReplyMarkup");
+  });
+
+  it("answers the button before the model runs", async () => {
+    const draft = await undescribed();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "g"), env());
+
+    expect(calls[0].method).toBe("answerCallbackQuery");
+    expect(answers()).toEqual(["Trying again…"]);
+  });
+
+  it("asks again from the author's note", async () => {
+    const fake = createFakeAi(aiRecord());
+    const draft = await undescribed();
+
+    await handlePreviewCallback(press(draft, "g"), { ...env(), AI: fake.AI });
+
+    const prompt = (fake.calls[0].input as { messages: Array<{ content: string }> }).messages.at(-1)?.content ?? "";
+    expect(prompt).toContain("an easy 8k");
+    // Nothing was produced last time, so there is no rejected version to avoid.
+    expect(prompt).not.toContain("You already suggested this");
+  });
+
+  it("offers the button again, with a fresh token, when the model fails twice", async () => {
+    const draft = await undescribed();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "g"), env(new Error("daily quota exceeded")));
+
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.record).toBeNull();
+    expect(stored?.state).toBe("draft");
+    expect(stored?.preview?.token).not.toBe(draft.preview?.token);
+    expect(buttonsOn(calls.find((c) => c.method === "sendMessage"))).toEqual(["Try again", "Cancel"]);
+  });
+
+  it("refuses a press from a superseded message", async () => {
+    const draft = await undescribed();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "g", "wrongtoken12"), env());
+
+    expect(answers()).toEqual(["This preview has been replaced. Use the newest one."]);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.record).toBeNull();
+  });
+
+  it("cancels from the same message", async () => {
+    const draft = await undescribed();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "c"), env());
+
+    expect(answers()).toEqual(["Cancelled."]);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("cancelled");
+  });
+
+  it("does nothing to a draft that already has a record", async () => {
+    // The button is drawn nowhere but the failure message, so this press is
+    // hand-made — and generating here would discard a record the author may
+    // already be reading.
+    const draft = await awaitingApproval();
+    calls.length = 0;
+
+    await handlePreviewCallback(press(draft, "g"), env(aiRecord({ title: "Something else entirely" })));
+
+    expect(answers()).toEqual(["Not available yet."]);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.record?.title).toBe("Morning run by the river");
   });
 });

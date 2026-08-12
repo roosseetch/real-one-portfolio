@@ -47,6 +47,52 @@ describe("inventedQuotation", () => {
     expect(inventedQuotation(record('It was a "great" morning.'), [NOTE])).toBeNull();
   });
 
+  it("leaves contractions and possessives alone, however many there are", () => {
+    // What actually broke in production: a long note produced a long body, and
+    // pairing its apostrophes read "it's … the team's" as a quotation. Every
+    // attempt was rejected, so the note never came back as a preview at all.
+    const body =
+      "This week I finally got to see the trial site in person, and it's hard to overstate how " +
+      "different it feels from a slide deck. The team's energy was infectious, and it's the kind " +
+      "of detail that never survives a protocol summary. What I don't want to lose is the texture " +
+      "of it, and every patient's first name.";
+
+    expect(inventedQuotation(record(body), [NOTE])).toBeNull();
+  });
+
+  it("leaves typographic apostrophes alone too", () => {
+    const body =
+      "It’s hard to overstate how different it feels, the team’s energy was infectious, and the " +
+      "coordinators’ notes were already on the desk waiting.";
+
+    expect(inventedQuotation(record(body), [NOTE])).toBeNull();
+  });
+
+  it("still catches an invented quotation that contains a contraction", () => {
+    // The boundary rule must not become a way past the check: an apostrophe
+    // inside a word sits within the span rather than ending it.
+    const straight = record("As she put it, 'when the team feels safe, it's far more likely to speak up early'.");
+    const curly = record("As she put it, ‘when the team feels safe, it’s far more likely to speak up early’.");
+
+    expect(inventedQuotation(straight, [NOTE])).toContain("when the team feels safe");
+    expect(inventedQuotation(curly, [NOTE])).toContain("when the team feels safe");
+  });
+
+  it("does not pair a quote mark in one field with one in the next", () => {
+    // Title, summary and body are searched as one string. Without this, an
+    // unbalanced mark in the title would quote the whole summary after it.
+    const r: DraftRecord = {
+      title: 'A morning at the "Novartis Campus',
+      summary: "The coffee was good and the walk over was better than usual.",
+      body: 'Nothing here is a quotation" at all.',
+      eventDate: null,
+      tags: [],
+      media: [],
+    };
+
+    expect(inventedQuotation(r, [NOTE])).toBeNull();
+  });
+
   it("checks the title and summary, not only the body", () => {
     const r: DraftRecord = {
       title: "A Great Start",
