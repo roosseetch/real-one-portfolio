@@ -502,25 +502,56 @@ npm run profile:publish
 gh workflow run deploy-pages.yml --ref main
 ```
 
-## Reposting to LinkedIn
+## The standing buttons
 
-The chat has two standing buttons under the message box, and the same two
+The chat has three standing buttons under the message box, and the same three
 actions in Telegram's `/` menu:
 
 | | |
 | --- | --- |
 | **📝 New site activity** · `/new` | Prompts for the note, photo or video. The flow above is unchanged — this is the affordance it never had. |
+| **✍️ Publish as written** · `/raw` | Takes the next note exactly as typed, with no model involved. |
 | **🔗 Repost to LinkedIn** · `/repost` | Offers the five most recent published activities, newest first and labelled as the default. |
-
-Picking one shows the exact post — truncated to LinkedIn's 3000-character
-ceiling, with the activity's own URL reserved first so it is never what gets cut
-— and asks. Nothing reaches LinkedIn before that **Post** is pressed, for the
-same reason nothing reaches the site before **Publish** is.
 
 `scripts/set-telegram-webhook.ts` registers the commands alongside the webhook,
 from the one list in `worker/src/telegram/commands.ts`, so the `/` menu cannot
 advertise something the Worker does not answer. Re-run `npm --prefix worker run
 webhook` after changing them.
+
+## Publishing your own words
+
+Every other route runs the note through Workers AI, which is the point of the
+bot and also its one hard limit: the author could not publish a sentence they
+wrote and have it appear as they wrote it. Two ways out, both landing on the
+ordinary preview:
+
+- **Before writing.** `/raw`, or the **✍️ Publish as written** button. The next
+  note goes straight to a preview and the model is never called at all.
+- **After seeing what the model did.** **Use my text**, on the preview and on the
+  "AI processing can continue later" message both. It needs nothing from the
+  model, which is why it is offered in the one place where nothing else works.
+
+The first line becomes the title and the rest is the text. `summary`, `eventDate`
+and `tags` stay empty on purpose — every one of them would have to be inferred,
+and inferring is what this route exists to avoid. `worker/src/drafts/verbatim.ts`
+is the whole of it: pure, local, and unable to put anything in a record that it
+was not handed.
+
+Approval is not skipped along with the model. The preview is what makes
+publishing an informed act, and that does not stop being true because nobody
+rewrote the words.
+
+Blank lines survive to the page. The site used to render a body as one `<p>`,
+where HTML collapses newlines, so a note published as written arrived as one
+unbroken block; `renderRecord` now splits on blank lines and the stylesheet
+keeps single ones with `white-space: pre-line`.
+
+## Reposting to LinkedIn
+
+Picking one shows the exact post — truncated to LinkedIn's 3000-character
+ceiling, with the activity's own URL reserved first so it is never what gets cut
+— and asks. Nothing reaches LinkedIn before that **Post** is pressed, for the
+same reason nothing reaches the site before **Publish** is.
 
 **The credential expires, and that is the design.** A LinkedIn member access
 token lasts 60 days, and refresh tokens are only issued to apps LinkedIn has

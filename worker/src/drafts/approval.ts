@@ -23,6 +23,7 @@ import {
 import { publishRecord, type PublishEnv } from "../publishing/publish";
 import { failDraft } from "./failure";
 import { setPendingEdit } from "./pending";
+import { verbatimRecord } from "./verbatim";
 import {
   answerCallback,
   removeKeyboard,
@@ -311,7 +312,8 @@ export async function handlePreviewCallback(
   // drew. The other is a draft the model never described: it has never been
   // previewed, so it is still `draft`, and it carries Try again and Cancel.
   const failedAction = parsed.action === "retry" || parsed.action === "cancel";
-  const undescribedAction = parsed.action === "generate" || parsed.action === "cancel";
+  const undescribedAction =
+    parsed.action === "generate" || parsed.action === "verbatim" || parsed.action === "cancel";
   const actionable =
     draft.state === "awaiting_approval" ||
     (draft.state === "failed" && failedAction) ||
@@ -357,6 +359,23 @@ export async function handlePreviewCallback(
     // and Telegram gives up on an unanswered callback long before that.
     await answerCallback(env, query.id, "Trying again…");
     await generateAgain(env, draft);
+    return;
+  }
+
+  if (parsed.action === "verbatim") {
+    // Reachable from a live preview and from a failed generation both, because
+    // it needs nothing from either: the author's message is on the draft, and
+    // that is the entire input.
+    const record = verbatimRecord(draft.input.text);
+    if (record === null) {
+      // A photo sent with no caption. There are no words to fall back to, so
+      // saying so beats a preview of an empty entry.
+      await answerCallback(env, query.id, "That message had no words to publish.");
+      return;
+    }
+
+    await answerCallback(env, query.id, "Using your words.");
+    await replaceRecord(env, draft, record);
     return;
   }
 

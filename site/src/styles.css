@@ -428,6 +428,15 @@ main {
   margin-top: 0;
 }
 
+/* A note published in the author's own words keeps the line breaks it was
+   written with. HTML would otherwise collapse them into spaces, which turns a
+   list of three things into one long sentence. Blank lines are already separate
+   paragraphs by the time this applies; this is for the single newlines inside
+   one. */
+.activity-body {
+  white-space: pre-line;
+}
+
 /* One record on its own page. The card is as wide as the section, but a line of
    prose that wide is hard to come back to, so the text keeps a reading measure
    while the photographs do not. */

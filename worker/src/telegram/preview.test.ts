@@ -75,12 +75,22 @@ describe("formatPreview", () => {
 });
 
 describe("previewKeyboard", () => {
-  it("offers exactly the five buttons spec §7.2 lists", () => {
+  it("offers the five buttons spec §7.2 lists, and the way out of the model", () => {
     const labels = previewKeyboard("abc123def456ghjk", "tok123456789")
       .inline_keyboard.flat()
       .map((button) => button.text);
 
-    expect(labels).toEqual(["Publish", "Edit text", "Change media", "Regenerate", "Cancel"]);
+    expect(labels).toEqual(["Publish", "Edit text", "Change media", "Regenerate", "Use my text", "Cancel"]);
+  });
+
+  it("keeps Cancel off the row that publishes different words", () => {
+    // Cancel and Regenerate used to share a row; "Use my text" would have taken
+    // that seat, next to the button that throws the draft away.
+    const rows = previewKeyboard("abc123def456ghjk", "tok123456789").inline_keyboard.map((row) =>
+      row.map((button) => button.text),
+    );
+
+    expect(rows).toContainEqual(["Cancel"]);
   });
 
   it("fits callback_data inside Telegram's 64-byte limit", () => {
@@ -104,8 +114,8 @@ describe("previewKeyboard", () => {
 describe("generationKeyboard", () => {
   const keyboard = () => generationKeyboard("abc123def456ghjk", "tok123456789").inline_keyboard.flat();
 
-  it("offers another attempt and nothing that needs a record", () => {
-    expect(keyboard().map((button) => button.text)).toEqual(["Try again", "Cancel"]);
+  it("offers another attempt, the author's own words, and nothing that needs a record", () => {
+    expect(keyboard().map((button) => button.text)).toEqual(["Try again", "Use my text", "Cancel"]);
   });
 
   it("does not carry the code that publishes", () => {

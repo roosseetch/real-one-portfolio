@@ -185,6 +185,28 @@ export interface RecordOptions {
   heading?: "h2" | "h3";
 }
 
+/**
+ * The body, split where the author left a blank line.
+ *
+ * This used to be one `<p>` holding the whole body, which is fine for the
+ * model's output — it writes a paragraph — and wrong for anything else: HTML
+ * collapses newlines, so a note published in the author's own words lost every
+ * paragraph break it had and arrived as one unbroken block. A record whose body
+ * has no blank lines is unchanged by this, which is nearly all of them.
+ *
+ * Single newlines inside a paragraph survive too, via `white-space: pre-line`
+ * in the stylesheet. Splitting on those as well would turn a wrapped line into
+ * paragraphs the author did not write.
+ */
+function paragraphsOf(body: string | null | undefined): string[] {
+  if (!body) return [];
+
+  return body
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph !== "");
+}
+
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
 
@@ -200,7 +222,7 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
 
   if (record.eventDate) card.append(el("p", "activity-date", record.eventDate));
   if (record.summary) card.append(el("p", "activity-summary", record.summary));
-  if (record.body) card.append(el("p", "activity-body", record.body));
+  for (const paragraph of paragraphsOf(record.body)) card.append(el("p", "activity-body", paragraph));
   for (const media of record.media ?? []) {
     if (media.type === "image") {
       const figure = el("figure", "activity-media");
