@@ -92,6 +92,12 @@ variable "worker_name" {
   default     = ""
 }
 
+variable "site_preview_enabled" {
+  description = "Route <site>/activities* through the Worker so a shared ?v= link previews as that activity. Requires worker_enabled, and proxies the site's DNS records, because a Workers route only runs on a hostname Cloudflare proxies."
+  type        = bool
+  default     = false
+}
+
 variable "min_tls" {
   description = "Minimum TLS version for the public R2 custom domains."
   type        = string
