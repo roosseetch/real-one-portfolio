@@ -286,6 +286,33 @@ describe("routing", () => {
     const posted = await worker.fetch(new Request(url, { method: "POST" }), testEnv(), ctx());
     expect(posted.status).toBe(404);
   });
+
+  /**
+   * The activities page, reached through the Cloudflare route on the site's own
+   * hostname. What matters at this altitude is the pair: the site's host gets
+   * the handler, and this Worker's own host does not — which is what keeps the
+   * pass-through `fetch()` from re-entering the Worker and looping, since a
+   * custom domain has no origin behind it to answer.
+   */
+  it("routes the activities page for the site, and for nowhere else", async () => {
+    const env = testEnv({ SITE_BASE_URL: "https://site.example", CONTENT_BUCKET: storage.bucket });
+
+    // The site's host reaches the handler, which passes the request to the
+    // origin — and the origin is the mocked fetch that refuses.
+    const site = await worker.fetch(new Request("https://site.example/activities/"), env, ctx());
+    expect(site.status).toBe(500);
+
+    const own = await worker.fetch(new Request("https://worker.example/activities/"), env, ctx());
+    expect(own.status).toBe(404);
+
+    // GET only, like the callback above.
+    const posted = await worker.fetch(
+      new Request("https://site.example/activities/", { method: "POST" }),
+      env,
+      ctx(),
+    );
+    expect(posted.status).toBe(404);
+  });
 });
 
 /**

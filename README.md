@@ -763,6 +763,53 @@ Setting it up, once, at <https://www.linkedin.com/developers/apps>:
    as a repository secret. Both are optional: with either unset, the Repost
    button says LinkedIn is not set up and nothing else changes.
 
+## What a shared activity link previews as
+
+Every activity has its own URL, `/activities/?v=<slug>`. Pasted into LinkedIn,
+Slack or a message, that link used to preview with the `/activities` page's own
+title — "Recent Activities" — and the profile's opening paragraph, whichever
+activity it named.
+
+The cause was structural rather than a bug in the page. `site/vite.config.ts`
+writes the title and the `og:` tags into each page at build time, and at build
+time no record exists to describe; the record is fetched from the content bucket
+afterwards, by JavaScript a crawler never runs.
+
+**The Worker answers that one page.** A Cloudflare route matching
+`<site>/activities*` — and nothing else — sends those requests through the
+Worker, which fetches the very same static page from Pages and rewrites its
+`<head>`: the record's title, its summary, and its widest photo in place of the
+feed's. `worker/src/share/meta.ts` decides what the tags say and
+`worker/src/share/preview.ts` is the handler.
+
+Three things this deliberately is not. The site is not rebuilt when something is
+published, no page is generated per activity, and **no URL changes** — which is
+the point, because it means the links already published on LinkedIn are the links
+this fixes. Every failure falls back to the origin's own answer: a record that
+cannot be found, a bucket that will not read, a page whose shape has changed, an
+outright throw. The preview is an improvement on a page that already works, and
+it must never be the reason that page does not.
+
+The landing page, `/contact/` and every hashed asset never reach the Worker,
+because the route does not match them.
+
+**Why the site's DNS records are proxied.** A Workers route only runs on a
+hostname Cloudflare proxies, so `infrastructure/main/dns.tf` orange-clouds the
+site's records when `site_preview_enabled` is on. That reverses the reason they
+were DNS-only: GitHub issues and renews the Pages certificate itself, and can
+only do that when it sees the real origin.
+
+What makes it safe is the zone's SSL mode, which Terraform pins to **Full** —
+not Full (strict) — alongside the route. Visitors are served Cloudflare's own
+certificate, and Cloudflare accepts whatever the origin presents on the leg
+behind it, so a GitHub renewal failure cannot take the site down. It is one
+setting, and it is declared rather than left in the dashboard for exactly that
+reason.
+
+Turning the whole thing off is `SITE_PREVIEW_ENABLED=false` and an apply: the
+records go back to DNS-only, the route disappears, and the site is served by
+GitHub Pages directly again.
+
 ## The contact form
 
 `/contact/` is a page in the same static build as everything else — a real
