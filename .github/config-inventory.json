@@ -81,6 +81,11 @@
       "required": true,
       "purpose": "Public origin of the site, used by the Worker when it builds links back to a published record."
     },
+    "SITE_PREVIEW_ENABLED": {
+      "required": false,
+      "purpose": "Whether Terraform routes <site>/activities* through the Worker, so a shared /activities/?v= link previews as that activity rather than as the whole feed. Also proxies the site's DNS records, because a Workers route only runs on a proxied hostname, and pins the zone's SSL mode to full so a failed GitHub Pages certificate renewal cannot reach a visitor.",
+      "whenUnset": "Falls back to false at the reference site. No route exists and the site's records stay DNS-only, which is GitHub Pages serving the site directly; the Worker's handler is simply never reached, and a shared link previews as the feed."
+    },
     "SITE_SUBDOMAIN": {
       "required": false,
       "purpose": "Subdomain for the GitHub Pages site.",

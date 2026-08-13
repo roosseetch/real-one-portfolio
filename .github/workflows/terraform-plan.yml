@@ -74,6 +74,10 @@ jobs:
       TF_VAR_github_pages_owner: ${{ vars.PAGES_OWNER || '' }}
       TF_VAR_worker_enabled: ${{ vars.WORKER_ENABLED || 'false' }}
       TF_VAR_worker_name: ${{ vars.WORKER_NAME }}
+      # Routes <site>/activities* through the Worker so a shared ?v= link
+      # previews as that activity. Off means the site's records stay DNS-only
+      # and no route exists, which is the site exactly as GitHub Pages serves it.
+      TF_VAR_site_preview_enabled: ${{ vars.SITE_PREVIEW_ENABLED || 'false' }}
       # The provider-issued records that let the domain send the contact
       # form's verification codes. Unset leaves all three records out.
       TF_VAR_email_dkim_public_key: ${{ vars.EMAIL_DKIM_PUBLIC_KEY || '' }}

@@ -90,8 +90,14 @@ Zone    | DNS                     | Edit
 Zone    | Cache Rules             | Edit
 Zone    | Workers Routes          | Edit
 Zone    | Zone                    | Read
+Zone    | Zone Settings           | Edit
 Zone    | SSL and Certificates    | Edit
 ```
+
+`Zone Settings | Edit` is only needed with `site_preview_enabled` on: it is what
+lets Terraform pin the zone's SSL mode, which is what makes proxying the Pages
+origin safe. See [what a shared activity link previews
+as](#what-a-shared-activity-link-previews-as).
 
 The Terraform state backend speaks S3 rather than Cloudflare's API, so it needs
 an access key pair as well. Cloudflare lets any R2-capable API token act as one
@@ -207,6 +213,7 @@ may reference and what each name is for. This is where the values come from.
 | `WORKER_BASE_URL` | `https://` + the `worker_hostname` output |
 | `WORKER_NAME` | the Wrangler service name you choose; must match `worker_name` in the tfvars |
 | `WORKER_ENABLED` | leave unset until step 8, then `true` |
+| `SITE_PREVIEW_ENABLED` | optional; `true` routes `/activities*` through the Worker so a shared `?v=` link previews as that activity. Needs `WORKER_ENABLED`, and proxies the site's records. See [what a shared activity link previews as](#what-a-shared-activity-link-previews-as) |
 | `SITE_SUBDOMAIN`, `PAGES_OWNER` | only when the site is not on the apex; set both together |
 | `PAGES_BASE_PATH` | `/` when serving from a custom domain; unset means the `/<repo>/` project-pages subpath |
 | `PAGES_CUSTOM_DOMAIN` | the site hostname, once step 9 has configured it |
@@ -406,7 +413,9 @@ In Settings → Pages:
    for it — A and AAAA records at the apex, or a CNAME to `<owner>.github.io`
    for a subdomain — and left them **DNS-only rather than proxied**, because
    GitHub issues and renews the certificate itself and can only do that when it
-   sees the real origin.
+   sees the real origin. Leave them that way until the certificate has been
+   issued; `SITE_PREVIEW_ENABLED` proxies them later, and [says
+   why](#what-a-shared-activity-link-previews-as) that is safe once it has.
 3. Tick **Enforce HTTPS** once the certificate has been issued.
 
 Then set the `PAGES_CUSTOM_DOMAIN` variable to the same hostname and

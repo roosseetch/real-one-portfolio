@@ -22,3 +22,9 @@ root_domain           = "<example.com>"
 # Flip to true only after Wrangler has deployed the Worker once.
 # worker_enabled = true
 # worker_name    = "<worker-name>"
+
+# Routes <site>/activities* through the Worker so a shared ?v= link previews as
+# that activity rather than as the whole feed. Needs worker_enabled, and proxies
+# the site's DNS records — a Workers route only runs on a proxied hostname — so
+# it also pins the zone's SSL mode to full. See preview.tf.
+# site_preview_enabled = true
