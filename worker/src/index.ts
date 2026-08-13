@@ -16,6 +16,7 @@ import {
   runWithLog,
   trackDeferred,
 } from "./logging/error-log";
+import { handleActivityPreview, isActivitiesPath } from "./share/preview";
 import { handleTelegramWebhook } from "./telegram/webhook";
 
 export interface Env {
@@ -102,15 +103,26 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
     return handleContactVerify(request, env, ctx);
   }
 
+  // The site's own activities page, reached only through the Cloudflare route
+  // on `<site>/activities*`. Everything about the request is the site's — the
+  // hostname, the page, the answer — and this Worker only rewrites the head
+  // tags so a `?v=` link previews as the activity it names. GET alone: a
+  // preview and a visit are both reads, and anything else belongs to the 404.
+  if (request.method === "GET" && isActivitiesPath(pathname)) {
+    return handleActivityPreview(request, env);
+  }
+
   // Anything else is not part of the contract. Say nothing useful about what
   // the Worker is or which routes exist.
   return new Response("Not found", { status: 404 });
 }
 
 /**
- * The Worker handles authoring, the site's analytics fallback relay, and the
- * contact form's intake. Site content and media still come straight from
- * public R2.
+ * The Worker handles authoring, the site's analytics fallback relay, the
+ * contact form's intake, and — through a Cloudflare route on
+ * `<site>/activities*` — the link preview a shared activity URL shows. Site
+ * content and media still come straight from public R2, and the page that route
+ * answers with is still the static one GitHub Pages built.
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
