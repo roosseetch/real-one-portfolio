@@ -238,8 +238,10 @@ describe("the landing page's teaser", () => {
     const section = mount();
     await loaded(section);
 
-    const more = section.querySelector(".activity-more") as HTMLAnchorElement;
-    expect(more.textContent).toBe("See all activities");
+    // Beside the section's heading, where the design puts it, rather than at
+    // the foot of the two cards.
+    const more = section.querySelector(".activity-head .activity-more") as HTMLAnchorElement;
+    expect(more.textContent).toBe("View all activities \u2192");
     expect(more.getAttribute("href")).toBe("/activities/");
   });
 
@@ -278,5 +280,91 @@ describe("the landing page's teaser", () => {
     expect(fetchStub).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
     vi.resetModules();
+  });
+});
+
+/* The photo stack at the head of a listing card. Records vary in how much media
+   they carry, and the figure has to degrade all the way down rather than being
+   drawn for the three-picture case and left broken for the others. */
+describe("the photo stack on a listing card", () => {
+  const image = (n: number) => ({
+    type: "image" as const,
+    src: `https://media.test/media/activity-1/full-${n}.webp`,
+    thumbnail: `https://media.test/media/activity-1/thumb-${n}.webp`,
+    alt: `Picture ${n}`,
+  });
+
+  const listed = (media: unknown[]) =>
+    renderRecord(
+      { id: "rec-1", title: "A note", media: media as never },
+      { href: "/activities/?v=a-note", excerpt: true },
+    );
+
+  const cells = (card: HTMLElement) => card.querySelectorAll(".activity-mosaic-cell");
+
+  it("shows one large plate and two beside it", () => {
+    const card = listed([image(1), image(2), image(3)]);
+
+    expect(cells(card)).toHaveLength(3);
+    expect(card.querySelector(".activity-mosaic-more")).toBeNull();
+  });
+
+  it("counts what did not fit, rather than dropping it silently", () => {
+    const card = listed([image(1), image(2), image(3), image(4), image(5)]);
+
+    expect(cells(card)).toHaveLength(3);
+    expect(card.querySelector(".activity-mosaic-more")?.textContent).toBe("+2");
+  });
+
+  it("falls back to a single plate, and to no figure at all", () => {
+    const one = listed([image(1)]);
+    expect(cells(one)).toHaveLength(1);
+    expect(one.querySelector(".activity-mosaic")?.className).toContain("is-single");
+
+    expect(listed([]).querySelector(".activity-mosaic")).toBeNull();
+  });
+
+  /** A <video> in a 168px cell is a play button over a frame nobody has downloaded. */
+  it("shows a clip as its poster", () => {
+    const card = listed([
+      {
+        type: "video",
+        src: "https://media.test/media/activity-1/clip.mp4",
+        poster: "https://media.test/media/activity-1/poster.webp",
+      },
+    ]);
+
+    expect(card.querySelector("img")?.getAttribute("src")).toBe(
+      "https://media.test/media/activity-1/poster.webp",
+    );
+    expect(card.querySelector("video")).toBeNull();
+  });
+
+  /**
+   * Clickable, because the design makes the whole card one target — but not a
+   * third stop for a keyboard or a screen reader, which already have the title
+   * and "Read more" pointing at the same page.
+   */
+  it("is clickable without becoming a third link to the same page", () => {
+    const link = listed([image(1)]).querySelector<HTMLAnchorElement>(".activity-mosaic-link");
+
+    expect(link?.getAttribute("href")).toBe("/activities/?v=a-note");
+    expect(link?.tabIndex).toBe(-1);
+    expect(link?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  /** The card's title and excerpt say what the record is; three alt texts on the way past do not. */
+  it("leaves the pictures undescribed, since the card already describes the record", () => {
+    const card = listed([image(1), image(2)]);
+
+    expect([...card.querySelectorAll("img")].every((img) => img.alt === "")).toBe(true);
+  });
+
+  /** The page that shows one record shows every image in full, not a stack of three. */
+  it("does not appear on the page that shows the record itself", () => {
+    const single = renderRecord({ id: "rec-1", title: "A note", media: [image(1)] as never }, { heading: "h1" });
+
+    expect(single.querySelector(".activity-mosaic")).toBeNull();
+    expect(single.querySelector(".activity-media")).not.toBeNull();
   });
 });

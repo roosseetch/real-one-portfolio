@@ -284,7 +284,9 @@ describe("what a record renders as", () => {
     const card = section.querySelector(".activity-card") as HTMLElement;
     expect(card.querySelector(".activity-summary")?.textContent).toBe("A short line.");
     expect(card.querySelector(".activity-body")?.textContent).toBe("The longer text.");
-    expect(card.querySelector(".activity-date")?.textContent).toBe("2026-07-30");
+    // Set the way the design sets it: day and month, then the year, which the
+    // stylesheet puts on a second line beside the card.
+    expect(card.querySelector(".activity-date")?.textContent).toBe("30 Jul 2026");
     expect([...card.querySelectorAll(".activity-tag")].map((tag) => tag.textContent)).toEqual([
       "Art",
       "Photography",
@@ -324,6 +326,8 @@ describe("what a record renders as", () => {
     expect(section.querySelectorAll(".activity-body")).toHaveLength(1);
   });
 
+  /* The full figures belong to the page that shows one record. A listing card
+     shows the mosaic instead — see "the photo stack on a listing card" below. */
   it("loads a picture lazily, from its thumbnail, with the caption beside it", async () => {
     serve(
       bucketOf([
@@ -340,7 +344,7 @@ describe("what a record renders as", () => {
         }),
       ]),
     );
-    const section = mount();
+    const section = mount("?v=with-a-photo");
     await loaded(section);
 
     const img = section.querySelector("img") as HTMLImageElement;
@@ -367,7 +371,7 @@ describe("what a record renders as", () => {
         }),
       ]),
     );
-    const section = mount();
+    const section = mount("?v=with-a-clip");
     await loaded(section);
 
     const video = section.querySelector("video") as HTMLVideoElement;

@@ -975,43 +975,153 @@ main {
 
 /* Activity */
 .activity-note {
-  color: var(--muted);
+  color: var(--meta);
+  font-size: var(--size-small);
 }
 
-.activity-sort {
-  background: none;
-  border: 1px solid var(--muted);
-  border-radius: 999px;
-  padding: 0.4rem 1rem;
-  font: inherit;
+/* Heading, a rule filling the space beside it, and the way through to the rest. */
+.activity-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.25rem;
+  margin-bottom: 2.375rem;
+}
+
+.activity-head h2 {
+  margin: 0;
+}
+
+.activity-head-rule {
+  flex: 1;
+  margin-bottom: 0.5625rem;
+}
+
+.activity-more {
+  color: var(--gold-text);
+  text-decoration: none;
+  letter-spacing: 0.2em;
+  white-space: nowrap;
+  margin-bottom: 0.375rem;
+  transition: color 0.18s ease;
+}
+
+.activity-more:hover,
+.activity-more:focus-visible {
   color: var(--text);
-  cursor: pointer;
+}
+
+/* The list's own control, outlined rather than filled — gold is a stroke here. */
+.activity-sort {
   margin-bottom: var(--space);
+  padding: 0.625rem 1.25rem;
+  border: 1px solid var(--gold-line);
+  background: none;
+  font-family: inherit;
+  font-size: var(--size-label);
+  line-height: 1;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold-text);
+  cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease;
+}
+
+.activity-sort:hover,
+.activity-sort:focus-visible {
+  color: var(--text);
+  background: rgb(197 143 30 / 0.08);
 }
 
 .activity-list {
   display: grid;
-  gap: var(--space);
+  gap: 3.25rem;
 }
 
 /* The landing page's two most recent, side by side. minmax(0, 1fr) rather than
    1fr: a grid column's default minimum is its content, so one long unbroken
    word in a title would push the pair wider than the page. */
-.activity-preview {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-@media (max-width: 48rem) {
+@media (min-width: 48rem) {
   .activity-preview {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-.activity-more,
-.activity-back {
-  display: inline-block;
-  margin-top: var(--space);
-  color: var(--text);
+.activity-card {
+  display: grid;
+  gap: 1rem;
+}
+
+/*
+ * The photo stack. One large plate with up to two beside it, in the proportion
+ * each board sets: landscape at 390px, where the card is the width of the
+ * screen, and portrait once two cards sit side by side.
+ */
+.activity-mosaic-link {
+  display: block;
+  text-decoration: none;
+}
+
+.activity-mosaic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem;
+  gap: 5px;
+  aspect-ratio: 1.15;
+}
+
+.activity-mosaic.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.activity-mosaic-stack {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 5px;
+  min-height: 0;
+}
+
+.activity-mosaic-cell {
+  position: relative;
+  min-height: 0;
+}
+
+.activity-mosaic-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: sepia(0.18) saturate(0.88) contrast(1.04);
+}
+
+/* How many pictures the stack could not show, over the last one it could. */
+.activity-mosaic-more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(18 17 16 / 0.44);
+  font-family: var(--font-heading);
+  font-weight: 300;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #fff;
+}
+
+.activity-card-body {
+  display: grid;
+  gap: 0.6875rem;
+}
+
+.activity-date {
+  margin: 0;
+  color: var(--meta);
+  letter-spacing: 0.2em;
+}
+
+.activity-card-text h1,
+.activity-card-text h2,
+.activity-card-text h3 {
+  margin: 0 0 0.5625rem;
+  font-size: clamp(1.5625rem, 1.452rem + 0.449vw, 1.6875rem);
+  line-height: 1.2;
 }
 
 .activity-card-link {
@@ -1022,35 +1132,19 @@ main {
 .activity-card-link:hover,
 .activity-card-link:focus-visible {
   text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 
-.activity-skeleton-card {
-  height: 8rem;
-  border-radius: 1rem;
-  background: color-mix(in srgb, var(--muted) 12%, var(--surface));
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .activity-skeleton-card {
-    animation: skeleton-pulse 1.6s ease-in-out infinite;
-  }
-
-  @keyframes skeleton-pulse {
-    50% {
-      opacity: 0.55;
-    }
-  }
-}
-
-.activity-card {
-  background: var(--surface);
-  border-radius: 1rem;
-  padding: var(--space);
-}
-
-.activity-date {
+.activity-summary,
+.activity-body {
+  margin: 0;
+  font-size: var(--size-small);
+  line-height: 1.7;
   color: var(--muted);
-  margin-top: 0;
+}
+
+.activity-body + .activity-body {
+  margin-top: 0.875rem;
 }
 
 /* A note published in the author's own words keeps the line breaks it was
@@ -1070,18 +1164,33 @@ main {
   max-width: 42rem;
 }
 
+.activity-single .activity-summary {
+  font-size: 1.09375rem;
+  color: var(--ink-prose);
+}
+
+.activity-single .activity-body {
+  text-align: justify;
+  hyphens: auto;
+}
+
 /* The record's title heads that page, so it is an h1 — and the size of an h1
    inside sectioning content is the browser's to decide: current Chrome leaves
    it at 2em, while a browser still applying the old nesting rule shrinks this
    one, two levels deep, to 1.17em, which is smaller than the h2 it used to be.
-   Sized here instead, to the 2rem the heading of every other page renders at. */
+   Sized here instead. */
 .activity-single .activity-card h1 {
-  font-size: 2rem;
+  font-size: var(--size-subhead);
+  margin-bottom: 1.25rem;
 }
 
-.activity-media img,
-.activity-media video {
-  border-radius: 0.75rem;
+.activity-media {
+  margin: 1.75rem 0 0;
+}
+
+.activity-media img {
+  width: 100%;
+  height: auto;
 }
 
 /* A video has no intrinsic size until its metadata loads, and preload="none"
@@ -1097,40 +1206,105 @@ main {
 }
 
 .activity-media figcaption {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin-top: 0.4rem;
+  color: var(--meta);
+  font-size: var(--size-small);
+  margin-top: 0.5rem;
 }
 
 .activity-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 0;
+  margin: 1.25rem 0 0;
+}
+
+/* Outlined, not filled: gold is a stroke in this design. */
+.activity-tag {
+  border: 1px solid var(--gold-line);
+  padding: 0.3125rem 0.75rem;
+  color: var(--gold-text);
+  letter-spacing: 0.16em;
 }
 
 /* The rest of a note whose text a listing card cut. At the foot of the card,
-   where the section's own "See all activities" sits at the foot of the list, and
-   underlined from the start: unlike the title above it, this link is only worth
-   anything if it is seen. */
+   and underlined from the start: unlike the title above it, this link is only
+   worth anything if it is seen. */
 .activity-read-more {
   display: inline-block;
   margin-top: 0.75rem;
-  color: var(--text);
-  text-decoration-color: var(--muted);
+  color: var(--gold-text);
+  text-decoration-color: rgb(197 143 30 / 0.5);
   text-underline-offset: 0.2em;
 }
 
 .activity-read-more:hover,
 .activity-read-more:focus-visible {
+  color: var(--text);
   text-decoration-color: currentcolor;
 }
 
-.activity-tag {
-  background: color-mix(in srgb, var(--accent) 30%, var(--surface));
-  border-radius: 999px;
-  padding: 0.15rem 0.7rem;
-  font-size: 0.85rem;
+.activity-skeleton-card {
+  height: 12rem;
+  background: var(--mat);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .activity-skeleton-card {
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+.activity-back {
+  display: inline-block;
+  margin-top: var(--space);
+  color: var(--gold-text);
+  text-decoration: none;
+  font-size: var(--size-label);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.activity-back:hover,
+.activity-back:focus-visible {
+  color: var(--text);
+}
+
+@media (min-width: 48rem) {
+  .activity-mosaic {
+    grid-template-columns: minmax(0, 1fr) 10.5rem;
+    aspect-ratio: 0.8;
+  }
+
+  .activity-mosaic-more {
+    font-size: 1.5rem;
+  }
+
+  /* Date beside the prose rather than above it, in its own 96px column. */
+  .activity-card-body {
+    grid-template-columns: 6rem minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+    margin-top: 0.5rem;
+  }
+
+  .activity-date-part {
+    display: block;
+  }
+
+  /* One record on its own page has no mosaic and no narrow column beside it. */
+  .activity-single .activity-card-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .activity-single .activity-date-part {
+    display: inline;
+  }
 }
 
 /* Contact */

@@ -290,8 +290,118 @@ function excerptOf(blocks: TextBlock[]): { blocks: TextBlock[]; cut: boolean } {
   return { blocks: kept, cut: true };
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * A record's date, as two parts: "02 Aug" and "2026".
+ *
+ * Two, because the design sets them on two lines beside a card and on one line
+ * under a narrow one, and that is a decision for the stylesheet rather than for
+ * a string built here. A date that is not a plain ISO day is passed through
+ * whole — the field is free text in the record, and a value this cannot read is
+ * still a value the author wrote.
+ */
+function dateParts(value: string): [string, string] | [string] {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return [value];
+  const [, year, month, day] = match;
+  return [`${day} ${MONTHS[Number(month) - 1] ?? month}`, year];
+}
+
+function renderDate(value: string): HTMLElement {
+  const wrapper = el("p", "activity-date label tnum");
+  dateParts(value).forEach((part, index) => {
+    // A space between them even though the stylesheet puts them on two lines:
+    // the two spans are one date, and without it the accessible name reads
+    // "30 Jul2026".
+    if (index > 0) wrapper.append(document.createTextNode(" "));
+    wrapper.append(el("span", "activity-date-part", part));
+  });
+  return wrapper;
+}
+
+/**
+ * One picture from a media item, whatever kind it is.
+ *
+ * A clip contributes its poster: the mosaic is a glance at what a record holds,
+ * and a `<video>` in a 168px cell is a play button over a frame that has not
+ * been downloaded.
+ */
+function mosaicImage(media: ActivityMedia): HTMLElement {
+  const source = media.type === "video" ? (media.poster ?? media.thumbnail) : (media.thumbnail ?? media.src);
+  const cell = el("div", "activity-mosaic-cell plate");
+  if (!source) return cell;
+
+  const img = new Image();
+  img.src = source;
+  // The card's title and excerpt say what the record is. Describing each of
+  // three pictures again on the way past is noise for a reader stepping through
+  // a list; the record's own page gives every image its alt text.
+  img.alt = "";
+  img.loading = "lazy";
+  img.decoding = "async";
+  cell.append(img);
+  return cell;
+}
+
+/**
+ * The photo stack at the head of a listing card: one large plate, up to two
+ * smaller ones beside it, and a count of whatever did not fit.
+ *
+ * Degrades all the way down, because records vary: three or more gives the full
+ * figure, two drops the second thumbnail, one is a single plate, and none
+ * renders nothing at all rather than an empty frame.
+ */
+function mediaMosaic(record: ActivityRecord, href: string): HTMLElement | null {
+  const media = record.media ?? [];
+  if (media.length === 0) return null;
+
+  const mosaic = el("div", `activity-mosaic${media.length === 1 ? " is-single" : ""}`);
+  mosaic.append(mosaicImage(media[0]));
+
+  if (media.length > 1) {
+    const stack = el("div", "activity-mosaic-stack");
+    for (const item of media.slice(1, 3)) stack.append(mosaicImage(item));
+
+    const hidden = media.length - 3;
+    if (hidden > 0) {
+      const overlay = el("div", "activity-mosaic-more tnum", `+${hidden}`);
+      // The card's own link already says where this goes, and "+4" read out
+      // between a title and an excerpt says nothing a reader can act on.
+      overlay.setAttribute("aria-hidden", "true");
+      stack.lastElementChild?.append(overlay);
+    }
+    mosaic.append(stack);
+  }
+
+  // Clickable, because the design makes the whole card one target — but not a
+  // third stop for a keyboard or a screen reader, which already have the title
+  // and "Read more" pointing at the same page.
+  const link = el("a", "activity-mosaic-link") as HTMLAnchorElement;
+  link.href = href;
+  link.tabIndex = -1;
+  link.setAttribute("aria-hidden", "true");
+  link.append(mosaic);
+  return link;
+}
+
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
+
+  // A listing card leads with its pictures and a page showing one record leads
+  // with its title; the mosaic is the listing's own figure and never appears on
+  // the page that shows every image in full.
+  const listing = Boolean(options.href && options.excerpt);
+  if (listing && options.href) {
+    const mosaic = mediaMosaic(record, options.href);
+    if (mosaic) card.append(mosaic);
+  }
+
+  const body = el("div", "activity-card-body");
+
+  if (record.eventDate) body.append(renderDate(record.eventDate));
+
+  const text = el("div", "activity-card-text");
 
   const heading = el(options.heading ?? "h3");
   if (options.href) {
@@ -301,49 +411,50 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
   } else {
     heading.textContent = record.title;
   }
-  card.append(heading);
+  text.append(heading);
 
-  if (record.eventDate) card.append(el("p", "activity-date", record.eventDate));
+  const blocks = textOf(record);
+  const shown = options.excerpt && options.href ? excerptOf(blocks) : { blocks, cut: false };
+  for (const block of shown.blocks) text.append(el("p", block.className, block.text));
 
-  const text = textOf(record);
-  const shown = options.excerpt && options.href ? excerptOf(text) : { blocks: text, cut: false };
-  for (const block of shown.blocks) card.append(el("p", block.className, block.text));
-
-  for (const media of record.media ?? []) {
-    if (media.type === "image") {
-      const figure = el("figure", "activity-media");
-      const img = new Image();
-      img.src = media.thumbnail ?? media.src;
-      img.alt = media.alt ?? "";
-      img.loading = "lazy";
-      figure.append(img);
-      if (media.caption) figure.append(el("figcaption", undefined, media.caption));
-      card.append(figure);
-    } else if (media.type === "video") {
-      const figure = el("figure", "activity-media");
-      const video = document.createElement("video");
-      video.src = media.src;
-      // preload="none" with a poster: the frame is a WebP of a few tens of KB
-      // and shows immediately, while the clip's megabytes are fetched only if
-      // someone presses play. Without the poster the element would be a blank
-      // box, since nothing has been downloaded to draw.
-      const poster = media.poster ?? media.thumbnail;
-      if (poster) video.poster = poster;
-      video.preload = "none";
-      video.controls = true;
-      // Or iOS Safari takes the video fullscreen the moment it starts.
-      video.playsInline = true;
-      // A video has no alt attribute; the same words become its accessible name.
-      if (media.alt) video.setAttribute("aria-label", media.alt);
-      figure.append(video);
-      if (media.caption) figure.append(el("figcaption", undefined, media.caption));
-      card.append(figure);
+  if (!listing) {
+    for (const media of record.media ?? []) {
+      if (media.type === "image") {
+        const figure = el("figure", "activity-media");
+        const img = new Image();
+        img.src = media.thumbnail ?? media.src;
+        img.alt = media.alt ?? "";
+        img.loading = "lazy";
+        figure.append(img);
+        if (media.caption) figure.append(el("figcaption", undefined, media.caption));
+        text.append(figure);
+      } else if (media.type === "video") {
+        const figure = el("figure", "activity-media");
+        const video = document.createElement("video");
+        video.src = media.src;
+        // preload="none" with a poster: the frame is a WebP of a few tens of KB
+        // and shows immediately, while the clip's megabytes are fetched only if
+        // someone presses play. Without the poster the element would be a blank
+        // box, since nothing has been downloaded to draw.
+        const poster = media.poster ?? media.thumbnail;
+        if (poster) video.poster = poster;
+        video.preload = "none";
+        video.controls = true;
+        // Or iOS Safari takes the video fullscreen the moment it starts.
+        video.playsInline = true;
+        // A video has no alt attribute; the same words become its accessible name.
+        if (media.alt) video.setAttribute("aria-label", media.alt);
+        figure.append(video);
+        if (media.caption) figure.append(el("figcaption", undefined, media.caption));
+        text.append(figure);
+      }
     }
   }
+
   if (record.tags?.length) {
     const tags = el("p", "activity-tags");
-    for (const tag of record.tags) tags.append(el("span", "activity-tag", tag));
-    card.append(tags);
+    for (const tag of record.tags) tags.append(el("span", "activity-tag label", tag));
+    text.append(tags);
   }
 
   if (shown.cut && options.href) {
@@ -353,9 +464,11 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
     // ten links reading "Read more" to anyone stepping through them one at a
     // time. This one says which activity it opens.
     more.setAttribute("aria-label", `Read more: ${record.title}`);
-    card.append(more);
+    text.append(more);
   }
 
+  body.append(text);
+  card.append(body);
   return card;
 }
 
@@ -411,7 +524,14 @@ export function mountFeed(
  * has every record has the control instead.
  */
 export function renderActivityPreview(section: HTMLElement, title: string, limit = 2) {
-  section.append(el("h2", undefined, title));
+  // Heading, a rule filling the space beside it, and the way through to the
+  // rest — one line, which is how the design opens this section.
+  const head = el("div", "activity-head");
+  head.append(el("h2", undefined, title));
+  const rule = el("div", "rule activity-head-rule");
+  rule.setAttribute("aria-hidden", "true");
+  head.append(rule);
+  section.append(head);
 
   const list = el("div", "activity-list activity-preview");
   section.append(list);
@@ -422,8 +542,10 @@ export function renderActivityPreview(section: HTMLElement, title: string, limit
       ...newest.map((record) => renderRecord(record, { href: activityHref(record), excerpt: true })),
     );
 
-    const more = el("a", "activity-more", "See all activities") as HTMLAnchorElement;
+    // Added here rather than with the heading, so a feed that is empty or
+    // unreachable does not offer a way through to a list that is not there.
+    const more = el("a", "activity-more label", "View all activities \u2192") as HTMLAnchorElement;
     more.href = activitiesHref();
-    section.append(more);
+    head.append(more);
   });
 }
