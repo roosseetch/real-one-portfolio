@@ -185,6 +185,22 @@ h4 {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Read but not seen. For the word that says which of two lists an entry came
+ * from, where the design says it with a shape instead — clipped rather than
+ * offset, for the same reason .skip-link is.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
 /* A hairline. The design draws these constantly and they are all the same rule. */
 .rule {
   height: 1px;
@@ -638,29 +654,215 @@ main {
 }
 
 /* Experience */
-.experience-list {
-  display: grid;
-  gap: var(--space);
+/*
+ * The legend, which names the two shapes the spine carries. Decorative markers
+ * with their word beside them — the entries themselves say which list they came
+ * from in text, so nothing here is the only statement of anything.
+ */
+.timeline-legend {
+  list-style: none;
+  margin: 2.125rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.experience-card {
-  background: var(--surface);
-  border-radius: 1rem;
-  padding: var(--space);
+.timeline-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6875rem;
 }
 
-.experience-card h3 {
-  margin-bottom: 0.15em;
-}
-
-.experience-meta {
+.timeline-legend-item.is-work .label {
   color: var(--muted);
-  margin-top: 0;
 }
 
-.experience-highlights {
-  margin: 0.5rem 0 0;
-  padding-left: 1.2rem;
+.timeline-legend-item.is-study .label {
+  color: var(--gold-text);
+}
+
+.timeline-legend .timeline-marker {
+  position: static;
+  transform: none;
+  flex: none;
+}
+
+/* Work: a filled ink square. Study: a hollow gold circle, filled with the page
+   so the spine does not show through it. */
+.is-work > .timeline-marker {
+  width: 7px;
+  height: 7px;
+  background: var(--text);
+}
+
+.is-study > .timeline-marker {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--gold-line);
+  border-radius: 50%;
+  background: var(--background);
+}
+
+/*
+ * One rail on a narrow screen. Two 190px columns either side of a spine are not
+ * two columns, so below the breakpoint everything hangs off a single line at
+ * the left and the markers sit on it.
+ */
+.timeline {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.625rem;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.375rem;
+  bottom: 0.375rem;
+  width: 1px;
+  background: var(--rule);
+}
+
+.timeline-entry {
+  position: relative;
+  padding-bottom: 1.75rem;
+}
+
+.timeline-entry > .timeline-marker {
+  position: absolute;
+  top: 0.3125rem;
+}
+
+.timeline-entry.is-work > .timeline-marker {
+  left: -1.625rem;
+}
+
+.timeline-entry.is-study > .timeline-marker {
+  left: -1.65625rem;
+}
+
+.timeline-when {
+  color: var(--meta);
+  letter-spacing: 0.18em;
+}
+
+.timeline-entry.is-study .timeline-when {
+  color: var(--gold-text);
+}
+
+.timeline-card h4 {
+  margin: 0.5rem 0 0.25rem;
+}
+
+.timeline-where {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--sub);
+}
+
+.timeline-summary {
+  margin: 0.75rem 0 0;
+  font-size: var(--size-small);
+  line-height: 1.7;
+  color: var(--muted);
+  max-width: 54ch;
+}
+
+/*
+ * Highlights, marked by a hairline rather than a bullet. Classical has no dots
+ * anywhere, and a disc list under a Garamond heading reads as a different
+ * document that happened to be pasted in.
+ */
+.timeline-highlights {
+  list-style: none;
+  margin: 0.6875rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4375rem;
+  max-width: 54ch;
+}
+
+.timeline-highlights li {
+  position: relative;
+  padding-left: 1.125rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--sub);
+}
+
+.timeline-highlights li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.65em;
+  width: 0.625rem;
+  height: 1px;
+  background: var(--gold-line);
+}
+
+/* Two tracks against a centre spine, once there is room for two. */
+@media (min-width: 48rem) {
+  .timeline {
+    padding-left: 0;
+  }
+
+  .timeline::before {
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    transform: translateX(-0.5px);
+  }
+
+  .timeline-entry {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 3.5rem;
+    padding-bottom: 2.125rem;
+  }
+
+  .timeline-entry > .timeline-marker {
+    top: 0.25rem;
+    left: 50%;
+  }
+
+  .timeline-entry.is-work > .timeline-marker {
+    transform: translateX(-3.5px);
+  }
+
+  .timeline-entry.is-study > .timeline-marker {
+    transform: translateX(-4px);
+  }
+
+  .timeline-entry.is-work .timeline-card {
+    grid-column: 1;
+    text-align: right;
+    padding-right: 2px;
+  }
+
+  .timeline-entry.is-study .timeline-card {
+    grid-column: 2;
+    padding-left: 2px;
+  }
+
+  /* The work column is set ranged-right, so its prose has to run back from the
+     spine rather than out from the page edge. */
+  .timeline-entry.is-work .timeline-summary,
+  .timeline-entry.is-work .timeline-highlights {
+    margin-left: auto;
+  }
+
+  .timeline-entry.is-work .timeline-highlights li {
+    padding-left: 0;
+    padding-right: 1.125rem;
+  }
+
+  .timeline-entry.is-work .timeline-highlights li::before {
+    left: auto;
+    right: 0;
+  }
 }
 
 /* Hobbies carousel */

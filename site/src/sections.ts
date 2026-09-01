@@ -164,24 +164,108 @@ export function renderAbout(section: HTMLElement) {
   section.classList.add("column-section");
 }
 
+/**
+ * One entry on the timeline, whichever of the two lists it came from.
+ *
+ * `sortKey` is what merges them. Work carries `start` as `YYYY-MM` and education
+ * carries `year` alone, and both begin with the same four digits — so a plain
+ * string comparison orders the merged list correctly without either being
+ * padded into a date it does not have.
+ */
+interface Milestone {
+  kind: "work" | "study";
+  sortKey: string;
+  /** Uppercase line above the title: a range for work, a bare year for study. */
+  when: string;
+  title: string;
+  /** Employer, or awarding institution. */
+  where?: string;
+  summary?: string;
+  highlights?: readonly string[];
+}
+
+function milestones(): Milestone[] {
+  const work: Milestone[] = facts.experience.map((job) => ({
+    kind: "work",
+    sortKey: job.start ?? "",
+    when: [formatDate(job.start), formatDate(job.end)].filter(Boolean).join(" \u2014 "),
+    title: job.title,
+    where: job.organization,
+    summary: job.summary,
+    highlights: "highlights" in job ? job.highlights : undefined,
+  }));
+
+  const study: Milestone[] = facts.education.map((award) => ({
+    kind: "study",
+    sortKey: award.year ?? "",
+    // The artboards date these to the month — "December 2018", "April 2013" —
+    // and the profile records the year alone. A month that is not in the data
+    // is not a month this may invent, so a bare year is what is set.
+    when: award.year ?? "",
+    title: award.degree,
+    where: award.institution,
+  }));
+
+  return [...work, ...study].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+}
+
+/**
+ * Work and study against one spine, newest first.
+ *
+ * Two lists in the profile and one chronology in the reader's head: a role
+ * begun the year a doctorate finished says something that two separate lists,
+ * each sorted on its own, cannot. Work sits left of the spine under a filled
+ * ink square, study right of it under a hollow gold circle, and below 48rem the
+ * whole thing folds onto a single left rail because two 190px columns are not
+ * two columns.
+ *
+ * The side of the spine and the shape of the marker are the only things saying
+ * which list an entry came from, and neither reaches a screen reader — so each
+ * entry also carries the word, set where only a reader that cannot see the
+ * shape will meet it.
+ */
 export function renderExperience(section: HTMLElement) {
-  section.append(el("h2", undefined, sectionTitle("experience")));
-  const list = el("div", "experience-list");
-  for (const job of facts.experience) {
-    const card = el("article", "experience-card");
-    card.append(el("h3", undefined, job.title));
-    const meta = [job.organization, [formatDate(job.start), formatDate(job.end)].filter(Boolean).join(" – ")]
-      .filter(Boolean)
-      .join(" · ");
-    card.append(el("p", "experience-meta", meta));
-    if (job.summary) card.append(el("p", undefined, job.summary));
-    const highlights = "highlights" in job ? job.highlights : undefined;
-    if (highlights?.length) {
-      const ul = el("ul", "experience-highlights");
-      for (const h of highlights) ul.append(el("li", undefined, h));
+  section.classList.add("column-section");
+
+  const legend = el("ul", "timeline-legend");
+  for (const [kind, label] of [
+    ["work", "Work"],
+    ["study", "Education \u0026 certification"],
+  ] as const) {
+    const item = el("li", `timeline-legend-item is-${kind}`);
+    const marker = el("span", "timeline-marker");
+    marker.setAttribute("aria-hidden", "true");
+    item.append(marker, el("span", "label", label));
+    legend.append(item);
+  }
+  section.append(sectionHead(sectionTitle("experience"), legend));
+
+  const list = el("ol", "timeline");
+  for (const milestone of milestones()) {
+    const entry = el("li", `timeline-entry is-${milestone.kind}`);
+
+    const marker = el("span", "timeline-marker");
+    marker.setAttribute("aria-hidden", "true");
+    entry.append(marker);
+
+    const card = el("div", "timeline-card");
+    const when = el("div", "timeline-when label tnum");
+    when.append(
+      el("span", "visually-hidden", milestone.kind === "work" ? "Work. " : "Education. "),
+      document.createTextNode(milestone.when),
+    );
+    card.append(when);
+    card.append(el("h4", undefined, milestone.title));
+    if (milestone.where) card.append(el("div", "timeline-where", milestone.where));
+    if (milestone.summary) card.append(el("p", "timeline-summary", milestone.summary));
+    if (milestone.highlights?.length) {
+      const ul = el("ul", "timeline-highlights");
+      for (const highlight of milestone.highlights) ul.append(el("li", undefined, highlight));
       card.append(ul);
     }
-    list.append(card);
+
+    entry.append(card);
+    list.append(entry);
   }
   section.append(list);
 }
