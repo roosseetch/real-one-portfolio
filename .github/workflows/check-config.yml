@@ -12,6 +12,11 @@ name: Check workflow config
 # Separately, process-media.yml's failure report must name steps that exist, and
 # its verification steps must still run before anything is uploaded.
 #
+# And the two font URLs the pages pin. site/src/fonts.ts names a
+# fonts.gstatic.com file per face, used only when the media bucket cannot be
+# reached -- a path nothing exercises, so a family Google re-cuts would break it
+# silently and stay broken until the day it was needed.
+#
 # And the security rules: third-party actions pinned by commit rather than by a
 # tag their owner can move, permissions declared with every write accounted
 # for, and no secret reachable from a pull request that is not guarded against
@@ -35,6 +40,8 @@ on:
       - "scripts/check-workflow-config.ts"
       - "scripts/check-media-workflow.ts"
       - "scripts/check-workflow-security.ts"
+      - "scripts/check-fonts.ts"
+      - "site/src/fonts.ts"
       - "package.json"
       - "package-lock.json"
   push:
@@ -44,6 +51,8 @@ on:
       - "scripts/check-workflow-config.ts"
       - "scripts/check-media-workflow.ts"
       - "scripts/check-workflow-security.ts"
+      - "scripts/check-fonts.ts"
+      - "site/src/fonts.ts"
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:
@@ -86,3 +95,10 @@ jobs:
       # Supply chain and permissions. Its own rules are proved by mutation in
       # scripts/check-workflow-security.test.ts, which tests.yml runs.
       - run: npm run security:check
+      # Reaches the network, unlike everything above it, and last for that
+      # reason: a Google outage should not hide a config mistake. MEDIA_BASE_URL
+      # is a deployment value and is not set here, so this checks the pinned
+      # fallbacks alone -- which are the URLs that rot unobserved. Whether the
+      # bucket's own copies are reachable is answered by the same command run
+      # locally with MEDIA_BASE_URL set.
+      - run: npm run fonts:check
