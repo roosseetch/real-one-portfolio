@@ -33,6 +33,12 @@ function renderContactSection(): HTMLElement {
   heading.textContent = "Contact";
   section.append(heading);
 
+  // The short gold rule the design sets under every page title.
+  const rule = document.createElement("div");
+  rule.className = "rule-accent page-rule";
+  rule.setAttribute("aria-hidden", "true");
+  section.append(rule);
+
   const intro = document.createElement("p");
   intro.className = "contact-intro";
   intro.textContent =

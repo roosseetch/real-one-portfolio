@@ -290,8 +290,325 @@ function excerptOf(blocks: TextBlock[]): { blocks: TextBlock[]; cut: boolean } {
   return { blocks: kept, cut: true };
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * A record's date, as two parts: "02 Aug" and "2026".
+ *
+ * Two, because the design sets them on two lines beside a card and on one line
+ * under a narrow one, and that is a decision for the stylesheet rather than for
+ * a string built here. A date that is not a plain ISO day is passed through
+ * whole — the field is free text in the record, and a value this cannot read is
+ * still a value the author wrote.
+ */
+function dateParts(value: string): [string, string] | [string] {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return [value];
+  const [, year, month, day] = match;
+  return [`${day} ${MONTHS[Number(month) - 1] ?? month}`, year];
+}
+
+function renderDate(value: string): HTMLElement {
+  const wrapper = el("p", "activity-date label tnum");
+  dateParts(value).forEach((part, index) => {
+    // A space between them even though the stylesheet puts them on two lines:
+    // the two spans are one date, and without it the accessible name reads
+    // "30 Jul2026".
+    if (index > 0) wrapper.append(document.createTextNode(" "));
+    wrapper.append(el("span", "activity-date-part", part));
+  });
+  return wrapper;
+}
+
+/**
+ * One picture from a media item, whatever kind it is.
+ *
+ * A clip contributes its poster: the mosaic is a glance at what a record holds,
+ * and a `<video>` in a 168px cell is a play button over a frame that has not
+ * been downloaded.
+ */
+function mosaicImage(media: ActivityMedia): HTMLElement {
+  const source = media.type === "video" ? (media.poster ?? media.thumbnail) : (media.thumbnail ?? media.src);
+  const cell = el("div", "activity-mosaic-cell plate");
+  if (!source) return cell;
+
+  const img = new Image();
+  img.src = source;
+  // The card's title and excerpt say what the record is. Describing each of
+  // three pictures again on the way past is noise for a reader stepping through
+  // a list; the record's own page gives every image its alt text.
+  img.alt = "";
+  img.loading = "lazy";
+  img.decoding = "async";
+  cell.append(img);
+  return cell;
+}
+
+/**
+ * The photo stack at the head of a listing card: one large plate, up to two
+ * smaller ones beside it, and a count of whatever did not fit.
+ *
+ * Degrades all the way down, because records vary: three or more gives the full
+ * figure, two drops the second thumbnail, one is a single plate, and none
+ * renders nothing at all rather than an empty frame.
+ */
+function mediaMosaic(record: ActivityRecord, href: string): HTMLElement | null {
+  const media = record.media ?? [];
+  if (media.length === 0) return null;
+
+  const mosaic = el("div", `activity-mosaic${media.length === 1 ? " is-single" : ""}`);
+  mosaic.append(mosaicImage(media[0]));
+
+  if (media.length > 1) {
+    const stack = el("div", "activity-mosaic-stack");
+    for (const item of media.slice(1, 3)) stack.append(mosaicImage(item));
+
+    const hidden = media.length - 3;
+    if (hidden > 0) {
+      const overlay = el("div", "activity-mosaic-more tnum", `+${hidden}`);
+      // The card's own link already says where this goes, and "+4" read out
+      // between a title and an excerpt says nothing a reader can act on.
+      overlay.setAttribute("aria-hidden", "true");
+      stack.lastElementChild?.append(overlay);
+    }
+    mosaic.append(stack);
+  }
+
+  // Clickable, because the design makes the whole card one target — but not a
+  // third stop for a keyboard or a screen reader, which already have the title
+  // and "Read more" pointing at the same page.
+  const link = el("a", "activity-mosaic-link") as HTMLAnchorElement;
+  link.href = href;
+  link.tabIndex = -1;
+  link.setAttribute("aria-hidden", "true");
+  link.append(mosaic);
+  return link;
+}
+
+/** A long ruled arrow, as the design draws its navigation. Left when `back`. */
+export function longArrow(back: boolean, length = 56): SVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${length} 12`);
+  svg.setAttribute("width", String(Math.round(length * 0.79)));
+  svg.setAttribute("height", "12");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  for (const d of back
+    ? [`M${length} 6H1`, "M7 1 1 6l6 5"]
+    : ["M0 6h" + (length - 1), `m${length - 7} 1 6 5-6 5`]) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+/** "01 / 05" — padded, so the counter does not change width as it counts. */
+function counterText(index: number, total: number): string {
+  const width = String(total).length;
+  return `${String(index + 1).padStart(width, "0")} / ${String(total).padStart(width, "0")}`;
+}
+
+/** What a media item shows in the plate: the picture, or the clip itself. */
+function slideMedia(media: ActivityMedia): HTMLElement {
+  if (media.type === "video") {
+    const video = document.createElement("video");
+    video.src = media.src;
+    // preload="none" with a poster: the frame is a WebP of a few tens of KB and
+    // shows immediately, while the clip's megabytes are fetched only if someone
+    // presses play. Without the poster the element would be a blank box, since
+    // nothing has been downloaded to draw.
+    const poster = media.poster ?? media.thumbnail;
+    if (poster) video.poster = poster;
+    video.preload = "none";
+    video.controls = true;
+    // Or iOS Safari takes the video fullscreen the moment it starts.
+    video.playsInline = true;
+    // A video has no alt attribute; the same words become its accessible name.
+    if (media.alt) video.setAttribute("aria-label", media.alt);
+    return video;
+  }
+
+  const img = new Image();
+  img.src = media.thumbnail ?? media.src;
+  img.alt = media.alt ?? "";
+  img.loading = "lazy";
+  img.decoding = "async";
+  return img;
+}
+
+/**
+ * Every photograph and clip a record carries, one at a time.
+ *
+ * This replaces a column of figures at full width, which on a record with five
+ * pictures was a page of pictures with the text somewhere above it. The design
+ * shows one plate with ruled arrows, a counter, a caption, and a strip of
+ * thumbnails to jump by.
+ *
+ * Scroll snapping does the paging, so a swipe and a trackpad work with no
+ * JavaScript at all; the arrows and the strip drive that same scroll, which
+ * keeps one source of truth for where the carousel is — the same arrangement
+ * the hobbies carousel used before the rail replaced it. A record with one
+ * picture gets the plate and none of the chrome, since there is nothing to
+ * navigate.
+ */
+function mediaCarousel(record: ActivityRecord): HTMLElement | null {
+  const media = record.media ?? [];
+  if (media.length === 0) return null;
+
+  const carousel = el("div", "media-carousel");
+  const single = media.length === 1;
+
+  const track = el("div", "carousel-track");
+  if (!single) {
+    // The track scrolls, so it has to be reachable by keyboard on its own:
+    // someone navigating without a mouse must be able to focus it and use the
+    // arrow keys, which the handler below listens for. A bare div cannot carry
+    // a name, hence the group role.
+    track.tabIndex = 0;
+    track.setAttribute("role", "group");
+    track.setAttribute("aria-roledescription", "carousel");
+    track.setAttribute("aria-label", `${record.title}: ${media.length} items, use arrow keys to browse`);
+  }
+
+  media.forEach((item, index) => {
+    const slide = el("div", "carousel-slide plate");
+    if (!single) {
+      slide.setAttribute("role", "group");
+      slide.setAttribute("aria-roledescription", "slide");
+      slide.setAttribute("aria-label", `${index + 1} of ${media.length}`);
+    }
+    slide.append(slideMedia(item));
+    track.append(slide);
+  });
+  carousel.append(track);
+
+  const caption = el("p", "carousel-caption");
+  const setCaption = (index: number) => {
+    caption.textContent = media[index]?.caption ?? "";
+    caption.hidden = caption.textContent === "";
+  };
+
+  if (single) {
+    setCaption(0);
+    carousel.append(caption);
+    return carousel;
+  }
+
+  const bar = el("div", "carousel-bar");
+  const prev = el("button", "carousel-arrow") as HTMLButtonElement;
+  prev.type = "button";
+  prev.setAttribute("aria-label", "Previous");
+  prev.append(longArrow(true));
+  const next = el("button", "carousel-arrow") as HTMLButtonElement;
+  next.type = "button";
+  next.setAttribute("aria-label", "Next");
+  next.append(longArrow(false));
+
+  const counter = el("span", "carousel-counter label tnum");
+  // Where in the set the reader is, which is the one thing the plate itself
+  // does not say. Polite, so it waits for a gap rather than cutting in.
+  counter.setAttribute("aria-live", "polite");
+
+  bar.append(prev, next, counter);
+  carousel.append(bar, caption);
+
+  const strip = el("div", "carousel-strip");
+  strip.setAttribute("role", "group");
+  strip.setAttribute("aria-label", "Choose an item");
+  const thumbs = media.map((item, index) => {
+    const button = el("button", "carousel-thumb plate") as HTMLButtonElement;
+    button.type = "button";
+    button.setAttribute(
+      "aria-label",
+      item.alt || `${item.type === "video" ? "Clip" : "Photo"} ${index + 1}`,
+    );
+    const source = item.type === "video" ? (item.poster ?? item.thumbnail) : (item.thumbnail ?? item.src);
+    if (source) {
+      const img = new Image();
+      img.src = source;
+      // The button's own label names the item; the picture inside it is the
+      // button's face, not a second thing to describe.
+      img.alt = "";
+      img.loading = "lazy";
+      button.append(img);
+    }
+    button.addEventListener("click", () => scrollToSlide(index));
+    strip.append(button);
+    return button;
+  });
+  carousel.append(strip);
+
+  let current = 0;
+
+  function scrollToSlide(index: number) {
+    const target = track.children[index] as HTMLElement | undefined;
+    if (target) track.scrollTo({ left: target.offsetLeft - track.offsetLeft });
+  }
+
+  function sync() {
+    // Nearest slide to the track's scroll position, rather than tracking
+    // clicks, so swiping and scrolling stay in step with the controls.
+    let nearest = 0;
+    let smallest = Infinity;
+    for (let i = 0; i < track.children.length; i++) {
+      const child = track.children[i] as HTMLElement;
+      const distance = Math.abs(child.offsetLeft - track.offsetLeft - track.scrollLeft);
+      if (distance < smallest) {
+        smallest = distance;
+        nearest = i;
+      }
+    }
+    current = nearest;
+    counter.textContent = counterText(current, media.length);
+    setCaption(current);
+    thumbs.forEach((thumb, i) => {
+      if (i === current) thumb.setAttribute("aria-current", "true");
+      else thumb.removeAttribute("aria-current");
+    });
+    prev.disabled = current === 0;
+    next.disabled = current === media.length - 1;
+  }
+
+  prev.addEventListener("click", () => scrollToSlide(current - 1));
+  next.addEventListener("click", () => scrollToSlide(current + 1));
+  track.addEventListener("scroll", sync, { passive: true });
+  track.addEventListener("keydown", (event) => {
+    const key = (event as KeyboardEvent).key;
+    if (key === "ArrowLeft") scrollToSlide(current - 1);
+    else if (key === "ArrowRight") scrollToSlide(current + 1);
+    else return;
+    event.preventDefault();
+  });
+
+  sync();
+  return carousel;
+}
+
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
+
+  // A listing card leads with its pictures and a page showing one record leads
+  // with its title; the mosaic is the listing's own figure and never appears on
+  // the page that shows every image in full.
+  const listing = Boolean(options.href && options.excerpt);
+  if (listing && options.href) {
+    const mosaic = mediaMosaic(record, options.href);
+    if (mosaic) card.append(mosaic);
+  }
+
+  const body = el("div", "activity-card-body");
+
+  if (record.eventDate) body.append(renderDate(record.eventDate));
+
+  const text = el("div", "activity-card-text");
 
   const heading = el(options.heading ?? "h3");
   if (options.href) {
@@ -301,49 +618,29 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
   } else {
     heading.textContent = record.title;
   }
-  card.append(heading);
+  text.append(heading);
 
-  if (record.eventDate) card.append(el("p", "activity-date", record.eventDate));
-
-  const text = textOf(record);
-  const shown = options.excerpt && options.href ? excerptOf(text) : { blocks: text, cut: false };
-  for (const block of shown.blocks) card.append(el("p", block.className, block.text));
-
-  for (const media of record.media ?? []) {
-    if (media.type === "image") {
-      const figure = el("figure", "activity-media");
-      const img = new Image();
-      img.src = media.thumbnail ?? media.src;
-      img.alt = media.alt ?? "";
-      img.loading = "lazy";
-      figure.append(img);
-      if (media.caption) figure.append(el("figcaption", undefined, media.caption));
-      card.append(figure);
-    } else if (media.type === "video") {
-      const figure = el("figure", "activity-media");
-      const video = document.createElement("video");
-      video.src = media.src;
-      // preload="none" with a poster: the frame is a WebP of a few tens of KB
-      // and shows immediately, while the clip's megabytes are fetched only if
-      // someone presses play. Without the poster the element would be a blank
-      // box, since nothing has been downloaded to draw.
-      const poster = media.poster ?? media.thumbnail;
-      if (poster) video.poster = poster;
-      video.preload = "none";
-      video.controls = true;
-      // Or iOS Safari takes the video fullscreen the moment it starts.
-      video.playsInline = true;
-      // A video has no alt attribute; the same words become its accessible name.
-      if (media.alt) video.setAttribute("aria-label", media.alt);
-      figure.append(video);
-      if (media.caption) figure.append(el("figcaption", undefined, media.caption));
-      card.append(figure);
-    }
+  // The short gold rule the design sets under the title of a record shown on
+  // its own. Not on a listing card, where ten of them would be ten rules.
+  if (options.heading === "h1") {
+    const rule = el("div", "rule-accent activity-rule");
+    rule.setAttribute("aria-hidden", "true");
+    text.append(rule);
   }
+
+  const blocks = textOf(record);
+  const shown = options.excerpt && options.href ? excerptOf(blocks) : { blocks, cut: false };
+  for (const block of shown.blocks) text.append(el("p", block.className, block.text));
+
+  if (!listing) {
+    const carousel = mediaCarousel(record);
+    if (carousel) text.append(carousel);
+  }
+
   if (record.tags?.length) {
     const tags = el("p", "activity-tags");
-    for (const tag of record.tags) tags.append(el("span", "activity-tag", tag));
-    card.append(tags);
+    for (const tag of record.tags) tags.append(el("span", "activity-tag label", tag));
+    text.append(tags);
   }
 
   if (shown.cut && options.href) {
@@ -353,9 +650,11 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
     // ten links reading "Read more" to anyone stepping through them one at a
     // time. This one says which activity it opens.
     more.setAttribute("aria-label", `Read more: ${record.title}`);
-    card.append(more);
+    text.append(more);
   }
 
+  body.append(text);
+  card.append(body);
   return card;
 }
 
@@ -411,7 +710,14 @@ export function mountFeed(
  * has every record has the control instead.
  */
 export function renderActivityPreview(section: HTMLElement, title: string, limit = 2) {
-  section.append(el("h2", undefined, title));
+  // Heading, a rule filling the space beside it, and the way through to the
+  // rest — one line, which is how the design opens this section.
+  const head = el("div", "activity-head");
+  head.append(el("h2", undefined, title));
+  const rule = el("div", "rule activity-head-rule");
+  rule.setAttribute("aria-hidden", "true");
+  head.append(rule);
+  section.append(head);
 
   const list = el("div", "activity-list activity-preview");
   section.append(list);
@@ -422,8 +728,10 @@ export function renderActivityPreview(section: HTMLElement, title: string, limit
       ...newest.map((record) => renderRecord(record, { href: activityHref(record), excerpt: true })),
     );
 
-    const more = el("a", "activity-more", "See all activities") as HTMLAnchorElement;
+    // Added here rather than with the heading, so a feed that is empty or
+    // unreachable does not offer a way through to a list that is not there.
+    const more = el("a", "activity-more label", "View all activities \u2192") as HTMLAnchorElement;
     more.href = activitiesHref();
-    section.append(more);
+    head.append(more);
   });
 }

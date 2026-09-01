@@ -36,6 +36,28 @@ describe("the site icon", () => {
   });
 });
 
+describe("the fonts", () => {
+  it("declare both typefaces before anything a machine reads", () => {
+    const tags = headTags(INPUT);
+
+    expect(tags[0]).toContain('rel="preload"');
+    expect(tags.join("\n")).toContain('font-family: "Cormorant Garamond"');
+    expect(tags.join("\n")).toContain('font-family: "Lora"');
+  });
+
+  /**
+   * The one thing here a missing bucket does not remove. An icon that cannot
+   * load is a blank tab; a face that cannot load is the whole design.
+   */
+  it("are still declared when the build has no media bucket", () => {
+    const tags = headTags({ ...INPUT, mediaBase: undefined }).join("\n");
+
+    expect(tags).toContain("@font-face");
+    expect(tags).toContain("https://fonts.gstatic.com/");
+    expect(tags).not.toContain("undefined/fonts/");
+  });
+});
+
 describe("the social metadata beside it", () => {
   it("still describes the page and its image", () => {
     const tags = headTags(INPUT).join("\n");

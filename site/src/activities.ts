@@ -3,6 +3,7 @@ import {
   activitiesHref,
   activityHref,
   el,
+  longArrow,
   mountFeed,
   note,
   renderRecord,
@@ -41,9 +42,40 @@ export interface ActivitiesOptions {
 const SECTION_TITLE = portfolio.sections.find((s) => s.id === "activity")?.title ?? "Recent Activities";
 
 function backLink(): HTMLAnchorElement {
-  const link = el("a", "activity-back", "← All activities") as HTMLAnchorElement;
+  const link = el("a", "activity-back label") as HTMLAnchorElement;
   link.href = activitiesHref();
+  link.append(longArrow(true, 34), document.createTextNode("All activities"));
   return link;
+}
+
+/**
+ * The record before and after this one, at the foot of its page.
+ *
+ * The list is newest first, so the record after this one in it is the older
+ * one. Either may be missing — at the ends of the feed — and a missing
+ * neighbour is no link rather than a disabled one.
+ */
+function neighbourLinks(records: ActivityRecord[], current: ActivityRecord): HTMLElement | null {
+  const ordered = sortRecords(records, false);
+  const index = ordered.findIndex((candidate) => candidate.id === current.id);
+  if (index === -1) return null;
+
+  const neighbours: Array<[string, ActivityRecord | undefined]> = [
+    ["Older", ordered[index + 1]],
+    ["Newer", ordered[index - 1]],
+  ];
+
+  const nav = el("nav", "activity-neighbours");
+  nav.setAttribute("aria-label", "More activities");
+  for (const [label, record] of neighbours) {
+    if (!record) continue;
+    const link = el("a", "activity-neighbour") as HTMLAnchorElement;
+    link.href = activityHref(record);
+    link.append(el("span", "activity-neighbour-label label", label));
+    link.append(el("span", "activity-neighbour-title", record.title));
+    nav.append(link);
+  }
+  return nav.childElementCount > 0 ? nav : null;
 }
 
 /**
@@ -65,13 +97,20 @@ function renderList(section: HTMLElement, list: HTMLElement, records: ActivityRe
     );
   };
 
-  const toggle = el("button", "activity-sort", "Oldest first") as HTMLButtonElement;
+  const toggle = el("button", "activity-sort label", "Oldest first") as HTMLButtonElement;
   toggle.addEventListener("click", () => {
     ascending = !ascending;
     toggle.textContent = ascending ? "Newest first" : "Oldest first";
     paint();
   });
-  section.insertBefore(toggle, list);
+
+  // A hairline running out from the heading to the control, which is how the
+  // design separates the page's title from its list.
+  const head = el("div", "activity-list-head");
+  const rule = el("div", "rule");
+  rule.setAttribute("aria-hidden", "true");
+  head.append(rule, toggle);
+  section.insertBefore(head, list);
   paint();
 }
 
@@ -94,9 +133,9 @@ function renderSelection(
   if (matches.length === 0) {
     // There is no activity to head this page with, and the feed's own title
     // would say the visitor is looking at a list that is not there either.
+    section.insertBefore(backLink(), list);
     section.insertBefore(el("h1", undefined, "Activity not found"), list);
     note(section, "That activity is not here. It may have been removed since the link was made.");
-    section.append(backLink());
     // Worth its own event: a permalink that resolves to nothing is either a
     // record that was unpublished or a link built wrong, and neither shows up
     // in a page-view count.
@@ -116,11 +155,20 @@ function renderSelection(
     document.title = `${matches[0].title} — ${facts.displayName ?? "Portfolio"}`;
   }
 
+  // At the top, where the design puts it: on a page reached from a link, the
+  // way back to the list is a place to start rather than something to find
+  // after reading everything.
+  section.insertBefore(backLink(), list);
+
   list.classList.add("activity-single");
   // The record's own title is this page's heading. No href on it either: it
   // would link this page to itself.
   list.replaceChildren(...matches.map((record) => renderRecord(record, { heading: "h1" })));
-  section.append(backLink());
+
+  if (matches.length === 1) {
+    const neighbours = neighbourLinks(records, matches[0]);
+    if (neighbours) section.append(neighbours);
+  }
 }
 
 /**

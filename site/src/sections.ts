@@ -1,5 +1,5 @@
-import { activitiesHref } from "./activity";
 import { facts, personality, portfolio, mediaRef, profileLinks } from "./profile";
+import { routeById, routeHref } from "./routes";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -18,6 +18,9 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
 }
 
 const MEDIA_BASE = import.meta.env.VITE_MEDIA_BASE_URL?.replace(/\/$/, "");
+
+/** "/" on a custom domain, "/<repo>/" on a project-pages deployment. */
+const BASE = import.meta.env.BASE_URL;
 
 /** Widths published by the sanitization pipeline for each media reference.
     Sources vary in size and the pipeline never upscales, so the available
@@ -59,168 +62,323 @@ function mediaSlot(refId: string | null, className: string): HTMLElement {
   return slot;
 }
 
+/**
+ * The mark in the masthead, or nothing.
+ *
+ * From the media bucket rather than from `public/`, exactly as head.ts serves
+ * the favicon and for the same reason: a logo is one person's brand mark, and a
+ * repository meant to be reused for someone else carries no images at all
+ * (spec §1). A build with no media base therefore shows the wordmark on its own,
+ * which is a masthead with one element missing rather than a broken one.
+ *
+ * A deployment whose media pipeline has not published a mark yet gets the same
+ * outcome by a different route: the request 404s and the element takes itself
+ * out of the masthead. An `alt=""` image that failed to load is invisible in
+ * most browsers and a broken-image glyph in some, and neither is worth leaving
+ * to chance beside a wordmark that is already complete without it.
+ *
+ * Here rather than in shell.ts because this module is where MEDIA_BASE and the
+ * rules about it already live.
+ */
+export function brandMark(): HTMLImageElement | null {
+  if (!MEDIA_BASE) return null;
+  const img = new Image();
+  img.className = "brand-mark";
+  img.src = `${MEDIA_BASE}/media/profile/mark.png`;
+  // The wordmark beside it says the name, so the mark adds nothing to say.
+  img.alt = "";
+  img.decoding = "async";
+  img.addEventListener("error", () => img.remove(), { once: true });
+  return img;
+}
+
 function sectionTitle(id: string): string {
   return portfolio.sections.find((s) => s.id === id)?.title ?? id;
 }
 
+/**
+ * A section's heading and the short gold rule under it, in the narrow column
+ * the design gives all three of About, Experience and Hobbies.
+ */
+export function sectionHead(title: string, extra?: HTMLElement): HTMLElement {
+  const head = el("div", "column-head");
+  head.append(el("h2", undefined, title));
+  const rule = el("div", "rule-accent");
+  rule.setAttribute("aria-hidden", "true");
+  head.append(rule);
+  if (extra) head.append(extra);
+  return head;
+}
+
+/**
+ * The opening band: warm gradient, the portrait tipped into its left, and the
+ * greeting beside it.
+ *
+ * Full-bleed, so it breaks out of the `.section` frame main.ts gives it and
+ * carries its own inner measure — the gradient is the width of the window in
+ * the design, and a hero inset by the page gutter is a different composition.
+ *
+ * The design has no call-to-action buttons. "Discover my story" and "See recent
+ * activities" pointed at two things the navigation already names one line above,
+ * so they are gone rather than restyled.
+ */
 export function renderHero(section: HTMLElement) {
   section.classList.add("hero");
   const intro = personality.aboutText?.split("\n\n")[0] ?? "";
 
+  const band = el("div", "hero-band");
+  // Two washes of light over the gradient and the grain over both. Decorative
+  // in the strict sense — remove all three and nothing has been said less.
+  for (const layer of ["hero-bloom", "hero-glow", "hero-grain"]) {
+    const node = el("div", layer);
+    node.setAttribute("aria-hidden", "true");
+    band.append(node);
+  }
+
+  const inner = el("div", "hero-inner");
+
+  const plate = el("div", "hero-plate plate");
+  plate.append(mediaSlot("hero", "hero-portrait"));
+
   const text = el("div", "hero-text");
   text.append(el("h1", "hero-title", sectionTitle("hero")));
-  text.append(el("p", "hero-intro", intro));
+  const rule = el("div", "hero-rule");
+  rule.setAttribute("aria-hidden", "true");
+  text.append(rule);
+  text.append(el("p", "hero-intro prose", intro));
 
-  const actions = el("div", "hero-actions");
-  const story = el("a", "button primary", "Discover my story") as HTMLAnchorElement;
-  story.href = "#about";
-  const activities = el("a", "button", "See recent activities") as HTMLAnchorElement;
-  // The page rather than the section below: the section is a teaser of the two
-  // most recent, and this button promises the activities themselves.
-  activities.href = activitiesHref();
-  actions.append(story, activities);
-  text.append(actions);
-
-  section.append(text, mediaSlot("hero", "hero-portrait"));
+  inner.append(plate, text);
+  band.append(inner);
+  section.append(band);
 }
 
+/**
+ * Heading in a narrow left column, prose in a wide right one.
+ *
+ * The first paragraph is set larger than the rest: it is the one that has to be
+ * read, and the design leans on size rather than on a bold weight to say so —
+ * which is just as well, since Lora ships at 400 only.
+ */
 export function renderAbout(section: HTMLElement) {
-  section.append(el("h2", undefined, sectionTitle("about")));
-  for (const paragraph of (personality.aboutText ?? "").split("\n\n")) {
-    section.append(el("p", "about-paragraph", paragraph));
-  }
+  section.append(sectionHead(sectionTitle("about")));
+
+  const body = el("div", "column-body");
+  const paragraphs = (personality.aboutText ?? "").split("\n\n").filter(Boolean);
+  paragraphs.forEach((paragraph, index) => {
+    body.append(el("p", index === 0 ? "about-lead prose" : "about-paragraph prose", paragraph));
+  });
+  section.append(body);
+  section.classList.add("column-section");
 }
 
+/**
+ * One entry on the timeline, whichever of the two lists it came from.
+ *
+ * `sortKey` is what merges them. Work carries `start` as `YYYY-MM` and education
+ * carries `year` alone, and both begin with the same four digits — so a plain
+ * string comparison orders the merged list correctly without either being
+ * padded into a date it does not have.
+ */
+interface Milestone {
+  kind: "work" | "study";
+  sortKey: string;
+  /** Uppercase line above the title: a range for work, a bare year for study. */
+  when: string;
+  title: string;
+  /** Employer, or awarding institution. */
+  where?: string;
+  summary?: string;
+  highlights?: readonly string[];
+}
+
+function milestones(): Milestone[] {
+  const work: Milestone[] = facts.experience.map((job) => ({
+    kind: "work",
+    sortKey: job.start ?? "",
+    when: [formatDate(job.start), formatDate(job.end)].filter(Boolean).join(" \u2014 "),
+    title: job.title,
+    where: job.organization,
+    summary: job.summary,
+    highlights: "highlights" in job ? job.highlights : undefined,
+  }));
+
+  const study: Milestone[] = facts.education.map((award) => ({
+    kind: "study",
+    sortKey: award.year ?? "",
+    // The artboards date these to the month — "December 2018", "April 2013" —
+    // and the profile records the year alone. A month that is not in the data
+    // is not a month this may invent, so a bare year is what is set.
+    when: award.year ?? "",
+    title: award.degree,
+    where: award.institution,
+  }));
+
+  return [...work, ...study].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+}
+
+/**
+ * Work and study against one spine, newest first.
+ *
+ * Two lists in the profile and one chronology in the reader's head: a role
+ * begun the year a doctorate finished says something that two separate lists,
+ * each sorted on its own, cannot. Work sits left of the spine under a filled
+ * ink square, study right of it under a hollow gold circle, and below 48rem the
+ * whole thing folds onto a single left rail because two 190px columns are not
+ * two columns.
+ *
+ * The side of the spine and the shape of the marker are the only things saying
+ * which list an entry came from, and neither reaches a screen reader — so each
+ * entry also carries the word, set where only a reader that cannot see the
+ * shape will meet it.
+ */
 export function renderExperience(section: HTMLElement) {
-  section.append(el("h2", undefined, sectionTitle("experience")));
-  const list = el("div", "experience-list");
-  for (const job of facts.experience) {
-    const card = el("article", "experience-card");
-    card.append(el("h3", undefined, job.title));
-    const meta = [job.organization, [formatDate(job.start), formatDate(job.end)].filter(Boolean).join(" – ")]
-      .filter(Boolean)
-      .join(" · ");
-    card.append(el("p", "experience-meta", meta));
-    if (job.summary) card.append(el("p", undefined, job.summary));
-    const highlights = "highlights" in job ? job.highlights : undefined;
-    if (highlights?.length) {
-      const ul = el("ul", "experience-highlights");
-      for (const h of highlights) ul.append(el("li", undefined, h));
+  section.classList.add("column-section");
+
+  const legend = el("ul", "timeline-legend");
+  for (const [kind, label] of [
+    ["work", "Work"],
+    ["study", "Education \u0026 certification"],
+  ] as const) {
+    const item = el("li", `timeline-legend-item is-${kind}`);
+    const marker = el("span", "timeline-marker");
+    marker.setAttribute("aria-hidden", "true");
+    item.append(marker, el("span", "label", label));
+    legend.append(item);
+  }
+  section.append(sectionHead(sectionTitle("experience"), legend));
+
+  const list = el("ol", "timeline");
+  for (const milestone of milestones()) {
+    const entry = el("li", `timeline-entry is-${milestone.kind}`);
+
+    const marker = el("span", "timeline-marker");
+    marker.setAttribute("aria-hidden", "true");
+    entry.append(marker);
+
+    const card = el("div", "timeline-card");
+    const when = el("div", "timeline-when label tnum");
+    when.append(
+      el("span", "visually-hidden", milestone.kind === "work" ? "Work. " : "Education. "),
+      document.createTextNode(milestone.when),
+    );
+    card.append(when);
+    card.append(el("h4", undefined, milestone.title));
+    if (milestone.where) card.append(el("div", "timeline-where", milestone.where));
+    if (milestone.summary) card.append(el("p", "timeline-summary", milestone.summary));
+    if (milestone.highlights?.length) {
+      const ul = el("ul", "timeline-highlights");
+      for (const highlight of milestone.highlights) ul.append(el("li", undefined, highlight));
       card.append(ul);
     }
-    list.append(card);
+
+    entry.append(card);
+    list.append(entry);
   }
   section.append(list);
 }
 
+/**
+ * One hobby at a time, chosen from a named rail.
+ *
+ * This replaces a scroll-snap carousel with arrows and dots. The carousel asked
+ * the reader to page blindly through four things to find out what they were;
+ * the rail names all four and goes straight to one, which is what a set of four
+ * fixed, unordered items wants. The keyboard contract is the ARIA tabs one:
+ * arrows move between tabs, Home and End jump to the ends, and only the
+ * selected tab is in the tab order, so Tab leaves the rail rather than walking
+ * it.
+ *
+ * The kicker and the display line come apart when the profile gives a hobby a
+ * `headline` — "Ballet" above "At the barre", as the design sets it. Without
+ * one there is no kicker and the title is the heading, because a headline is
+ * someone's own words about their own hobby and is not something to invent.
+ */
 export function renderHobbies(section: HTMLElement) {
   const heading = sectionTitle("hobbies");
-  section.append(el("h2", undefined, heading));
+  section.classList.add("column-section");
+  section.append(sectionHead(heading));
 
   const hobbies = facts.hobbies;
   if (hobbies.length === 0) return;
 
-  const carousel = el("div", "carousel");
-  carousel.setAttribute("role", "group");
-  carousel.setAttribute("aria-roledescription", "carousel");
-  carousel.setAttribute("aria-label", heading);
+  const body = el("div", "column-body hobbies");
 
-  // Scroll snapping does the actual paging, so touch swipe and trackpad
-  // scrolling work without any JavaScript. The buttons below drive the same
-  // scroll, which keeps one source of truth for where the carousel is.
-  const track = el("div", "carousel-track");
-  // The track scrolls, so it must be reachable by keyboard on its own: someone
-  // navigating without a mouse has to be able to focus it and scroll with the
-  // arrow keys, which the handler below listens for.
-  track.tabIndex = 0;
-  // A bare div cannot carry aria-label, so the focus stop is given a group
-  // role; otherwise a screen reader reaches an unnamed scrollable region.
-  track.setAttribute("role", "group");
-  track.setAttribute("aria-label", `${heading}, use arrow keys to browse`);
+  const rail = el("div", "hobby-rail");
+  rail.setAttribute("role", "tablist");
+  rail.setAttribute("aria-label", heading);
+
+  const tabs: HTMLButtonElement[] = [];
+  const panels: HTMLElement[] = [];
 
   hobbies.forEach((hobby, index) => {
-    // A div rather than an article: role="group" is not a valid role for
-    // <article>, and the grouping semantics are what the carousel needs.
-    const slide = el("div", "carousel-slide");
-    slide.setAttribute("role", "group");
-    slide.setAttribute("aria-roledescription", "slide");
-    slide.setAttribute("aria-label", `${index + 1} of ${hobbies.length}: ${hobby.title}`);
+    const tabId = `hobby-tab-${hobby.id}`;
+    const panelId = `hobby-panel-${hobby.id}`;
 
-    slide.append(mediaSlot(hobby.mediaRef, "carousel-photo"));
+    const tab = el("button", "hobby-tab label", hobby.title) as HTMLButtonElement;
+    tab.type = "button";
+    tab.id = tabId;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", panelId);
+    tabs.push(tab);
+    rail.append(tab);
 
-    const body = el("div", "carousel-text");
-    body.append(el("h3", undefined, hobby.title));
-    if (hobby.description) body.append(el("p", "hobby-description", hobby.description));
-    slide.append(body);
+    const panel = el("div", "hobby-panel");
+    panel.id = panelId;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", tabId);
 
-    track.append(slide);
+    const text = el("div", "hobby-text");
+    const headline = (hobby as { headline?: string | null }).headline;
+    if (headline) {
+      text.append(el("div", "hobby-kicker label", hobby.title));
+      text.append(el("h3", undefined, headline));
+    } else {
+      text.append(el("h3", undefined, hobby.title));
+    }
+    if (hobby.description) text.append(el("p", "hobby-description prose", hobby.description));
+
+    const plate = el("div", "hobby-plate plate");
+    plate.append(mediaSlot(hobby.mediaRef, "hobby-photo"));
+
+    panel.append(text, plate);
+    panels.push(panel);
+    body.append(panel);
+
+    tab.addEventListener("click", () => select(index));
   });
-  carousel.append(track);
 
-  const controls = el("div", "carousel-controls");
-  const prev = el("button", "carousel-arrow", "←") as HTMLButtonElement;
-  prev.type = "button";
-  prev.setAttribute("aria-label", "Previous hobby");
-  const next = el("button", "carousel-arrow", "→") as HTMLButtonElement;
-  next.type = "button";
-  next.setAttribute("aria-label", "Next hobby");
-
-  const dots = el("div", "carousel-dots");
-  const dotButtons = hobbies.map((hobby, index) => {
-    const dot = el("button", "carousel-dot") as HTMLButtonElement;
-    dot.type = "button";
-    dot.setAttribute("aria-label", `Show ${hobby.title}`);
-    dot.addEventListener("click", () => scrollTo(index));
-    dots.append(dot);
-    return dot;
-  });
-
-  controls.append(prev, dots, next);
-  carousel.append(controls);
-  section.append(carousel);
+  body.append(rail);
+  section.append(body);
 
   let current = 0;
 
-  function scrollTo(index: number) {
-    const target = track.children[index] as HTMLElement | undefined;
-    if (target) track.scrollTo({ left: target.offsetLeft - track.offsetLeft });
-  }
-
-  function sync() {
-    // Nearest slide to the track's scroll position, rather than tracking
-    // clicks, so swiping and scrolling stay in step with the controls.
-    let nearest = 0;
-    let smallest = Infinity;
-    for (let i = 0; i < track.children.length; i++) {
-      const child = track.children[i] as HTMLElement;
-      const distance = Math.abs(child.offsetLeft - track.offsetLeft - track.scrollLeft);
-      if (distance < smallest) {
-        smallest = distance;
-        nearest = i;
-      }
-    }
-    current = nearest;
-    dotButtons.forEach((dot, i) => {
-      dot.classList.toggle("is-current", i === current);
-      if (i === current) dot.setAttribute("aria-current", "true");
-      else dot.removeAttribute("aria-current");
+  function select(index: number, moveFocus = false) {
+    current = index;
+    tabs.forEach((tab, i) => {
+      const selected = i === index;
+      tab.setAttribute("aria-selected", String(selected));
+      // Roving tabindex: one stop for the whole rail, so Tab moves past it
+      // rather than through every hobby.
+      tab.tabIndex = selected ? 0 : -1;
+      panels[i].hidden = !selected;
     });
-    prev.disabled = current === 0;
-    next.disabled = current === hobbies.length - 1;
+    if (moveFocus) tabs[index].focus();
   }
 
-  prev.addEventListener("click", () => scrollTo(current - 1));
-  next.addEventListener("click", () => scrollTo(current + 1));
-  track.addEventListener("scroll", sync, { passive: true });
-  carousel.addEventListener("keydown", (event) => {
+  rail.addEventListener("keydown", (event) => {
     const key = (event as KeyboardEvent).key;
-    if (key === "ArrowLeft") scrollTo(current - 1);
-    else if (key === "ArrowRight") scrollTo(current + 1);
+    const last = tabs.length - 1;
+    let next: number;
+    if (key === "ArrowRight" || key === "ArrowDown") next = current === last ? 0 : current + 1;
+    else if (key === "ArrowLeft" || key === "ArrowUp") next = current === 0 ? last : current - 1;
+    else if (key === "Home") next = 0;
+    else if (key === "End") next = last;
     else return;
     event.preventDefault();
+    select(next, true);
   });
 
-  sync();
+  select(0);
 }
 
 /**
@@ -290,15 +448,36 @@ export function linkedInLink(handle: string | undefined): HTMLAnchorElement | nu
   return link;
 }
 
+/**
+ * One ranged line: an invitation on the left, the LinkedIn mark beside it, and
+ * the year and place pushed to the right.
+ *
+ * The name and headline that used to sit here are gone. They are the first two
+ * things the page says at full size, and repeating them in 9.5px grey at the
+ * bottom was a summary of a page the reader has just finished.
+ *
+ * The place comes from the profile, which says "Aargau, Switzerland". The
+ * artboards say Basel; that is placeholder text in a mock-up, and the profile is
+ * the one that knows.
+ */
 export function renderFooter(section: HTMLElement) {
   section.classList.add("footer");
-  section.append(el("p", "footer-name", facts.displayName ?? ""));
-  if (facts.headline) section.append(el("p", "footer-headline", facts.headline));
+
+  const row = el("div", "footer-row");
+
+  const contact = routeById("contact");
+  if (contact) {
+    const invite = el("a", "footer-invite label", "Let\u2019s stay connected") as HTMLAnchorElement;
+    invite.href = routeHref(BASE, contact);
+    row.append(invite);
+  }
 
   const linkedin = linkedInLink(profileLinks().linkedin);
-  if (linkedin !== null) {
-    const links = el("p", "footer-links");
-    links.append(linkedin);
-    section.append(links);
-  }
+  if (linkedin !== null) row.append(linkedin);
+
+  const year = new Date().getFullYear();
+  const place = facts.location ? ` \u00b7 ${facts.location}` : "";
+  row.append(el("span", "footer-meta label tnum", `\u00a9 ${year}${place}`));
+
+  section.append(row);
 }

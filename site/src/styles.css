@@ -1,17 +1,91 @@
-/* Design tokens: values come from profile/design.json, applied in main.ts.
-   The fallbacks here mirror that file so the page renders before JS runs. */
+/*
+ * The Classical design's foundation: tokens, base typography, and the chrome
+ * every page shares.
+ *
+ * Five of the tokens below are the profile's, and main.ts overwrites them from
+ * profile/design.json before the first paint is finished — the values here are
+ * a mirror of that file, present so the page is not unstyled in the moment
+ * before the script runs. **The two change together.** A colour edited here and
+ * not there survives for one frame and is then replaced.
+ *
+ * Everything under "derived" is the design's and only the design's. The profile
+ * describes a palette, not a page: it has no vocabulary for the tone a date is
+ * set in or the grey behind a photograph, and adding one would make every
+ * profile responsible for values only this stylesheet can justify.
+ */
 :root {
-  --accent: #e2c25c;
-  --background: #faf7ef;
-  --text: #33312e;
-  --surface: #ffffff;
-  /* Meets WCAG AA (4.5:1) against both the page background and card surfaces;
-     the previous tone measured 3.47:1 and failed for body-sized text. */
-  --muted: #726c5d;
+  /* --- the profile's five, mirrored from profile/design.json --- */
+  --accent: #c58f1e;
+  --background: #f8f4f4;
+  --text: #121110;
+  --surface: #fffefb;
+  --muted: #4a453f;
 
-  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --content-width: 68rem;
-  --space: clamp(1.25rem, 3vw, 2.5rem);
+  /* --- derived: the rest of the design's palette ---
+     Gold appears twice because it does two jobs. #c58f1e is a stroke: 1px
+     rules, borders and underlines, where 2.63:1 against the ground is a visible
+     line and nothing is read from it. #8a6314 is the same hue darkened until it
+     can be read — 4.97:1, over AA — and it is the only one that may set text. */
+  --gold-line: #c58f1e;
+  --gold-text: #8a6314;
+
+  /* Hairlines. Ink at low alpha rather than a flat grey, so a rule sits on
+     whatever is behind it — the warm hero, the paler footer — without banding. */
+  --rule: rgb(18 17 16 / 0.14);
+  --rule-soft: rgb(18 17 16 / 0.1);
+
+  /* The mat a photograph is tipped onto, and what fills a plate with no picture
+     in it yet. Warm, so an image loading late does not flash grey. */
+  --mat: #ece8e1;
+
+  /* Three greys, lightest last, for text of decreasing consequence: a
+     sub-heading, a date, a copyright line. The last two are below AA at the
+     size they are set — see accessibility.minContrast in profile/design.json,
+     which says so rather than claiming otherwise. Nothing set in either states
+     anything that is not also stated in full somewhere at --text. */
+  --sub: #6b6560;
+  --meta: #8a8177;
+  --faint: #a99f92;
+
+  /* Prose sits a shade off the flat ink: the design's paragraphs are long and
+     justified, and full black at that measure reads as harder than it looks. */
+  --ink-prose: #3d3831;
+  --ink-lead: #252220;
+
+  /* --- type ---
+     Both families are fetched, not local: see site/src/fonts.ts for where from
+     and what happens when that fails. The fallbacks are the serifs a machine is
+     likeliest to already have, in the order of how close they sit to the real
+     face — a sans-serif fallback would reflow every justified paragraph.
+
+     Lora is shipped at 400 only. Do not ask it for a heavier weight: the
+     browser answers with a synthesised bold, which in an editorial face is
+     visibly wrong. Cormorant covers 300–700 and is where any real weight goes. */
+  --font-heading: "Cormorant Garamond", "EB Garamond", Garamond, "Times New Roman", serif;
+  --font-body: "Lora", "Iowan Old Style", Georgia, "Times New Roman", serif;
+
+  /* Sizes run between the two artboards — 390px and 1280px — rather than
+     switching at a breakpoint, so nothing jumps at the widths in between. Each
+     clamp is the line through those two points. */
+  --size-display: clamp(3.25rem, 1.99rem + 5.169vw, 6.125rem); /* 52 → 98 */
+  --size-heading: clamp(2.625rem, 2.077rem + 2.247vw, 3.875rem); /* 42 → 62 */
+  --size-subhead: clamp(2rem, 1.781rem + 0.899vw, 2.5rem); /* 32 → 40 */
+  --size-lead: clamp(1.03125rem, 0.963rem + 0.281vw, 1.1875rem); /* 16.5 → 19 */
+  --size-body: clamp(0.9375rem, 0.872rem + 0.27vw, 1.03125rem); /* 15 → 16.5 */
+  --size-small: 0.875rem;
+  --size-label: 0.65625rem; /* 10.5px: every uppercase label, at both widths */
+
+  /* --- layout --- */
+  --content-width: 80rem;
+  /* Side gutter: 24px on the mobile board, 76px on the desktop one. */
+  --space: clamp(1.5rem, 0.076rem + 5.843vw, 4.75rem);
+  /* The air above and below a section: 56px to 104px across the same range. */
+  --space-block: clamp(3.5rem, 2.186rem + 5.393vw, 6.5rem);
+
+  /* Paper. Generated rather than fetched — it is a texture, not brand art, so
+     nothing needs hosting and nothing needs a second request. Two octaves of
+     fractal noise at a high base frequency is grain; more octaves is cloud. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
 }
 
 *,
@@ -23,9 +97,10 @@
 body {
   margin: 0;
   font-family: var(--font-body);
+  font-size: var(--size-body);
   background: var(--background);
-  color: var(--text);
-  line-height: 1.65;
+  color: var(--ink-prose);
+  line-height: 1.72;
   -webkit-font-smoothing: antialiased;
   /* A long unbroken word (a URL, a place name) should wrap rather than push
      the layout wider than the screen. */
@@ -43,9 +118,112 @@ a {
 
 h1,
 h2,
-h3 {
-  line-height: 1.15;
+h3,
+h4 {
+  font-family: var(--font-heading);
+  color: var(--text);
   margin: 0 0 0.5em;
+}
+
+h1 {
+  font-size: var(--size-display);
+  font-weight: 300;
+  line-height: 1.02;
+  letter-spacing: -0.026em;
+}
+
+h2 {
+  font-size: var(--size-heading);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-size: var(--size-subhead);
+  font-weight: 300;
+  line-height: 1.14;
+}
+
+h4 {
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1.24;
+}
+
+/*
+ * Justified prose, which is the design's default rather than an exception.
+ * `hyphens: auto` is what keeps it from opening rivers of whitespace at a
+ * narrow measure — and it does nothing at all without a `lang` on the document,
+ * which is why all three index.html files carry one.
+ */
+.prose {
+  text-align: justify;
+  hyphens: auto;
+}
+
+/*
+ * Every uppercase, widely-tracked line in the design: nav items, kickers,
+ * dates, legends, the copyright. Small caps in spirit, set from the body face
+ * because Lora's real small caps are not in the cut that is shipped.
+ */
+.label {
+  font-size: var(--size-label);
+  line-height: 1;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/*
+ * Lining figures, for anything that stands as a number and has to line up with
+ * the number above it — dates, counters, the `+N` on a photo stack. Never on
+ * running prose: Lora's text figures are what make a year inside a sentence sit
+ * with the sentence rather than shout over it.
+ */
+.tnum {
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Read but not seen. For the word that says which of two lists an entry came
+ * from, where the design says it with a shape instead — clipped rather than
+ * offset, for the same reason .skip-link is.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+/* A hairline. The design draws these constantly and they are all the same rule. */
+.rule {
+  height: 1px;
+  background: var(--rule);
+  border: 0;
+}
+
+/* The short gold rule under a section heading. */
+.rule-accent {
+  width: 3.5rem;
+  height: 1px;
+  background: var(--gold-line);
+  border: 0;
+}
+
+main:focus {
+  outline: none;
+}
+
+/* Classical's focus ring: the accent, at 2px, held 2px off the element. */
+:where(a, button, [role="tab"]):focus-visible {
+  outline: 2px solid var(--gold-line);
+  outline-offset: 2px;
 }
 
 /* Visible only once focused, so keyboard users can jump past the navigation
@@ -61,8 +239,11 @@ h3 {
   background: var(--surface);
   color: var(--text);
   padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
   border: 1px solid var(--text);
+  font-size: var(--size-label);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-decoration: none;
   clip-path: inset(50%);
 }
 
@@ -70,69 +251,172 @@ h3 {
   clip-path: none;
 }
 
+/*
+ * The masthead. Not sticky: the design gives the hero a full 760px band with
+ * the portrait tipped into its top-left corner, and a bar riding over that
+ * covers the one thing the composition is built around.
+ */
 .site-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: color-mix(in srgb, var(--background) 92%, transparent);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid color-mix(in srgb, var(--muted) 22%, transparent);
+  background: var(--background);
 }
 
-.site-header nav {
+.masthead {
   max-width: var(--content-width);
   margin: 0 auto;
-  padding: 0.75rem var(--space);
+  padding: 2.125rem var(--space) 1.5rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 1.25rem;
+  align-items: center;
+  gap: 0.875rem 2rem;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+/* Mark and wordmark together, pushing everything else to the right edge. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  margin-right: auto;
+  flex: none;
+  text-decoration: none;
+  /* 44px of height even where the mark is smaller, so the one link that is
+     always in the masthead is always a finger-sized target. */
+  min-height: 2.75rem;
+}
+
+.brand-mark {
+  width: clamp(2.375rem, 1.75rem + 1.6vw, 3.25rem);
+  height: auto;
+  max-width: none;
+  opacity: 0.92;
+}
+
+.brand-name {
+  font-size: clamp(0.625rem, 0.555rem + 0.281vw, 0.78125rem);
+  line-height: 1;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+/*
+ * The disclosure button exists at every width and the stylesheet takes it away
+ * above the breakpoint, rather than the script adding and removing it on
+ * resize — there is then nothing that can fall out of step with the layout.
+ */
+.nav-toggle {
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-right: -0.625rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+/* Six tracked uppercase items do not fit one 390px line. */
+@media (max-width: 47.999rem) {
+  .site-nav {
+    /* display, not opacity or an offset: an invisible menu is still in the tab
+       order, and a keyboard reaches a control nobody can see. */
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    padding-top: 0.5rem;
+  }
+
+  .site-nav.is-open {
+    display: flex;
+  }
+
+  /* Each item its own 44px row once the menu is a stacked list. */
+  .site-nav .nav-link {
+    width: 100%;
+    padding: 0.875rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+}
+
+@media (min-width: 48rem) {
+  .nav-toggle {
+    display: none;
+  }
 }
 
 .nav-link {
+  font-size: var(--size-label);
+  line-height: 1;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
   color: var(--muted);
   text-decoration: none;
-  font-size: 0.95rem;
-  padding: 0.25rem 0;
+  white-space: nowrap;
+  padding-bottom: 0.375rem;
   border-bottom: 1px solid transparent;
+  transition: color 0.18s ease, border-color 0.18s ease;
 }
 
 .nav-link:hover {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--gold-line);
 }
 
-main:focus {
-  outline: none;
+/* The page the visitor is already on, marked the way the design marks it. */
+.nav-link[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--gold-line);
 }
 
-/* Spacious editorial rhythm */
 main {
   display: block;
-}
-
-/* Sections are jump targets, so keep their headings clear of the sticky bar. */
-.section {
-  scroll-margin-top: 4.5rem;
-}
-
-:where(a, button):focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 3px;
-  border-radius: 0.25rem;
 }
 
 .section {
   max-width: var(--content-width);
   margin: 0 auto;
-  padding: calc(var(--space) * 2) var(--space);
+  padding: var(--space-block) var(--space);
+  /* Sections are jump targets; this keeps a heading clear of the top edge. */
+  scroll-margin-top: 2rem;
 }
 
 .placeholder {
-  color: var(--muted);
-  border: 1px dashed var(--muted);
-  border-radius: 0.75rem;
+  color: var(--meta);
+  border: 1px solid var(--rule);
   padding: var(--space);
   text-align: center;
+  font-size: var(--size-label);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+/*
+ * A photograph, matted. Square corners and a warm ground: the design tips its
+ * pictures onto the page as plates rather than rounding them into cards, and
+ * the mat is what a picture that has not arrived yet shows instead of a hole.
+ */
+.plate {
+  background: var(--mat);
+  overflow: hidden;
+}
+
+/* The print grade the design gives every photograph. Not a filter in the
+   Instagram sense — it is the small pull towards warm paper that lets a digital
+   photo sit on this ground without looking pasted onto it. */
+.plate img,
+.media-photo {
+  filter: sepia(0.2) saturate(0.85) contrast(1.05);
 }
 
 /* Media slots: stand-ins until the sanitization pipeline publishes images */
@@ -140,253 +424,738 @@ main {
    drives it. Forcing height:100% here made images overshoot their card and
    push the caption text outside the card background. */
 .media-photo {
-  border-radius: 1rem;
   width: 100%;
   height: auto;
   object-fit: cover;
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  background: var(--mat);
 }
 
 .media-slot {
-  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
-  border-radius: 1rem;
+  background: var(--mat);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted);
-  font-size: 0.85rem;
+  color: var(--faint);
+  font-size: var(--size-label);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
   padding: 1rem;
   text-align: center;
 }
 
 /* Hero */
-.hero {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space);
-  align-items: center;
-  min-height: 70vh;
+/*
+ * Full-bleed: the gradient is the width of the window in the design, so the
+ * section drops the frame main.ts gives every other one and the band's own
+ * inner element carries the measure instead.
+ */
+.section.hero {
+  max-width: none;
+  padding: 0;
+  scroll-margin-top: 0;
 }
 
-.hero-title {
-  font-size: clamp(2.2rem, 5vw, 3.5rem);
+.hero-band {
+  position: relative;
+  overflow: hidden;
+  /* Left to right on a wide screen, top to bottom on a narrow one: the mobile
+     board turns the same warmth through 90 degrees so the light still falls
+     from the portrait's side of the composition. */
+  background: linear-gradient(
+    176deg,
+    #f6dc93 0 34%,
+    #f8e4ac 52%,
+    #fbeecc 68%,
+    #fdf7e7 82%,
+    #fff 96%
+  );
 }
 
-.hero-intro {
-  font-size: 1.15rem;
-  max-width: 34rem;
+/* Two washes of light and the paper over them. Decorative in the strict
+   sense — remove all three and nothing has been said less. */
+.hero-bloom,
+.hero-glow,
+.hero-grain {
+  position: absolute;
+  pointer-events: none;
 }
 
-.hero-portrait {
-  aspect-ratio: 3 / 4;
-  max-width: 22rem;
-  width: 100%;
-  justify-self: center;
+.hero-bloom {
+  inset: 0 0 auto;
+  height: 420px;
+  background: radial-gradient(58% 46% at 50% 30%, rgb(240 197 90 / 0.42) 0, rgb(246 220 147 / 0) 78%);
 }
 
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 1.5rem;
-}
-
-.button {
-  display: inline-block;
-  padding: 0.7rem 1.4rem;
-  border-radius: 999px;
-  border: 1px solid var(--text);
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-@media (min-width: 48rem) {
-  .hero {
-    grid-template-columns: 3fr 2fr;
-  }
-}
-
-/* About */
-.about-paragraph {
-  max-width: 42rem;
-}
-
-/* Experience */
-.experience-list {
-  display: grid;
-  gap: var(--space);
-}
-
-.experience-card {
-  background: var(--surface);
-  border-radius: 1rem;
-  padding: var(--space);
-}
-
-.experience-card h3 {
-  margin-bottom: 0.15em;
-}
-
-.experience-meta {
-  color: var(--muted);
-  margin-top: 0;
-}
-
-.experience-highlights {
-  margin: 0.5rem 0 0;
-  padding-left: 1.2rem;
-}
-
-/* Hobbies carousel */
-.hobby-description {
-  color: var(--muted);
-  margin: 0;
-}
-
-.carousel-track {
-  display: flex;
-  gap: var(--space);
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
-  scrollbar-width: none;
-}
-
-.carousel-track::-webkit-scrollbar {
+.hero-glow {
   display: none;
 }
 
-.carousel-slide {
-  flex: 0 0 100%;
-  scroll-snap-align: center;
-  display: grid;
-  gap: var(--space);
-  align-content: start;
-  background: var(--surface);
-  border-radius: 1rem;
-  padding: var(--space);
+.hero-grain {
+  inset: 0;
+  background-image: var(--grain);
+  opacity: 0.14;
+  mix-blend-mode: multiply;
 }
 
-/* contain, not cover: a portrait photo in a landscape frame would otherwise
-   lose its top and bottom, which is exactly what cropped the ballet shot. */
-.media-photo.carousel-photo {
-  height: 24rem;
-  object-fit: contain;
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+.hero-inner {
+  position: relative;
+  z-index: 1;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 1.75rem var(--space) 2.75rem;
+  display: grid;
+  gap: 1.875rem;
+  align-items: center;
+}
+
+/* The plate owns the proportion, so the picture inside it fills rather than
+   sets it — which is why this overrides .media-photo's height. */
+.hero-plate {
+  aspect-ratio: 390 / 392;
+}
+
+.hero-plate .media-photo,
+.hero-plate .media-slot {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 18%;
+}
+
+.hero-title {
+  margin: 0;
+}
+
+/*
+ * The 96px gold rule under the greeting. Desktop only: the mobile board sets
+ * the greeting straight against the paragraph, and at 390px a rule between two
+ * elements already one line apart is a third thing in a space with room for
+ * two.
+ */
+.hero-rule {
+  display: none;
+  width: 6rem;
+  height: 1px;
+  background: var(--gold-line);
+  margin: 2.5rem 0 1.875rem;
+}
+
+.hero-intro {
+  margin: 1.375rem 0 0;
+  color: var(--ink-prose);
+  max-width: 42ch;
 }
 
 @media (min-width: 48rem) {
-  .carousel-slide {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-    align-items: center;
+  .hero-band {
+    background: linear-gradient(
+      92deg,
+      #f6dc93 0 40%,
+      #f7dd97 46%,
+      #f8e4ac 58%,
+      #faebc6 69%,
+      #fcf4e0 80%,
+      #fefcf5 90%,
+      #fff 99%
+    );
   }
 
-  .media-photo.carousel-photo {
-    height: 26rem;
+  .hero-bloom {
+    inset: -80px auto auto 26%;
+    width: 48%;
+    height: 960px;
+    background: radial-gradient(58% 52% at 22% 50%, rgb(240 197 90 / 0.5) 0, rgb(246 220 147 / 0.24) 50%, rgb(246 220 147 / 0) 80%);
+  }
+
+  /* The counter-light on the right, which is what stops the pale end of the
+     gradient reading as an unfinished edge. */
+  .hero-glow {
+    display: block;
+    inset: 120px -200px auto auto;
+    width: 620px;
+    height: 620px;
+    background: radial-gradient(50% 50% at 50% 50%, rgb(255 255 255 / 0.85) 0, rgb(255 255 255 / 0) 72%);
+  }
+
+  .hero-inner {
+    grid-template-columns: minmax(0, 43fr) minmax(0, 57fr);
+    gap: clamp(2.5rem, 5vw, 5.5rem);
+    padding: 2.375rem var(--space) 3.5rem;
+    min-height: 42rem;
+  }
+
+  .hero-plate {
+    aspect-ratio: 530 / 614;
+  }
+
+  .hero-plate .media-photo,
+  .hero-plate .media-slot {
+    object-position: 52% 20%;
+  }
+
+  .hero-rule {
+    display: block;
+  }
+
+  .hero-intro {
+    margin-top: 0;
   }
 }
 
-.carousel-text h3 {
-  margin-bottom: 0.35em;
+/*
+ * About, and the two sections after it: a narrow heading column beside a wide
+ * body one. One class, because the design draws the same figure three times.
+ */
+.column-section {
+  display: grid;
+  gap: 1.75rem;
+  align-items: start;
 }
 
-.carousel-controls {
+.column-head h2 {
+  margin: 0;
+}
+
+.column-head .rule-accent {
+  margin-top: 1.25rem;
+}
+
+/* 60rem rather than the 48rem everything else turns at: the sidebar is a fixed
+   300px, and splitting sooner leaves the body column narrower than its own
+   prose wants to be. */
+@media (min-width: 60rem) {
+  .column-section {
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: 5.5rem;
+  }
+
+  .column-head .rule-accent {
+    margin-top: 1.75rem;
+  }
+}
+
+.about-lead {
+  margin: 0;
+  font-size: var(--size-lead);
+  line-height: 1.68;
+  color: var(--ink-lead);
+}
+
+.about-paragraph {
+  margin: 1.5rem 0 0;
+  color: var(--muted);
+  max-width: 64ch;
+}
+
+@media (min-width: 48rem) {
+  .about-paragraph {
+    margin-top: 2.125rem;
+  }
+}
+
+/* Experience */
+/*
+ * The legend, which names the two shapes the spine carries. Decorative markers
+ * with their word beside them — the entries themselves say which list they came
+ * from in text, so nothing here is the only statement of anything.
+ */
+.timeline-legend {
+  list-style: none;
+  margin: 2.125rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.timeline-legend-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  margin-top: var(--space);
+  gap: 0.6875rem;
 }
 
-.carousel-arrow {
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--text);
-  /* Stated explicitly rather than left transparent, so contrast is verifiable
-     rather than depending on whatever happens to sit behind the control. */
+.timeline-legend-item.is-work .label {
+  color: var(--muted);
+}
+
+.timeline-legend-item.is-study .label {
+  color: var(--gold-text);
+}
+
+.timeline-legend .timeline-marker {
+  position: static;
+  transform: none;
+  flex: none;
+}
+
+/* Work: a filled ink square. Study: a hollow gold circle, filled with the page
+   so the spine does not show through it. */
+.is-work > .timeline-marker {
+  width: 7px;
+  height: 7px;
+  background: var(--text);
+}
+
+.is-study > .timeline-marker {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--gold-line);
+  border-radius: 50%;
   background: var(--background);
-  color: var(--text);
-  font: inherit;
-  font-size: 1.1rem;
-  cursor: pointer;
 }
 
-.carousel-arrow:disabled {
-  opacity: 0.3;
-  cursor: default;
+/*
+ * One rail on a narrow screen. Two 190px columns either side of a spine are not
+ * two columns, so below the breakpoint everything hangs off a single line at
+ * the left and the markers sit on it.
+ */
+.timeline {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.625rem;
 }
 
-.carousel-dots {
-  display: flex;
-  gap: 0.5rem;
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.375rem;
+  bottom: 0.375rem;
+  width: 1px;
+  background: var(--rule);
 }
 
-.carousel-dot {
-  width: 0.65rem;
-  height: 0.65rem;
+.timeline-entry {
+  position: relative;
+  padding-bottom: 1.75rem;
+}
+
+.timeline-entry > .timeline-marker {
+  position: absolute;
+  top: 0.3125rem;
+}
+
+.timeline-entry.is-work > .timeline-marker {
+  left: -1.625rem;
+}
+
+.timeline-entry.is-study > .timeline-marker {
+  left: -1.65625rem;
+}
+
+.timeline-when {
+  color: var(--meta);
+  letter-spacing: 0.18em;
+}
+
+.timeline-entry.is-study .timeline-when {
+  color: var(--gold-text);
+}
+
+.timeline-card h4 {
+  margin: 0.5rem 0 0.25rem;
+}
+
+.timeline-where {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--sub);
+}
+
+.timeline-summary {
+  margin: 0.75rem 0 0;
+  font-size: var(--size-small);
+  line-height: 1.7;
+  color: var(--muted);
+  max-width: 54ch;
+}
+
+/*
+ * Highlights, marked by a hairline rather than a bullet. Classical has no dots
+ * anywhere, and a disc list under a Garamond heading reads as a different
+ * document that happened to be pasted in.
+ */
+.timeline-highlights {
+  list-style: none;
+  margin: 0.6875rem 0 0;
   padding: 0;
-  border-radius: 999px;
-  border: 1px solid var(--muted);
+  display: grid;
+  gap: 0.4375rem;
+  max-width: 54ch;
+}
+
+.timeline-highlights li {
+  position: relative;
+  padding-left: 1.125rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--sub);
+}
+
+.timeline-highlights li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.65em;
+  width: 0.625rem;
+  height: 1px;
+  background: var(--gold-line);
+}
+
+/* Two tracks against a centre spine, once there is room for two. */
+@media (min-width: 48rem) {
+  .timeline {
+    padding-left: 0;
+  }
+
+  .timeline::before {
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    transform: translateX(-0.5px);
+  }
+
+  .timeline-entry {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 3.5rem;
+    padding-bottom: 2.125rem;
+  }
+
+  .timeline-entry > .timeline-marker {
+    top: 0.25rem;
+    left: 50%;
+  }
+
+  .timeline-entry.is-work > .timeline-marker {
+    transform: translateX(-3.5px);
+  }
+
+  .timeline-entry.is-study > .timeline-marker {
+    transform: translateX(-4px);
+  }
+
+  .timeline-entry.is-work .timeline-card {
+    grid-column: 1;
+    text-align: right;
+    padding-right: 2px;
+  }
+
+  .timeline-entry.is-study .timeline-card {
+    grid-column: 2;
+    padding-left: 2px;
+  }
+
+  /* The work column is set ranged-right, so its prose has to run back from the
+     spine rather than out from the page edge. */
+  .timeline-entry.is-work .timeline-summary,
+  .timeline-entry.is-work .timeline-highlights {
+    margin-left: auto;
+  }
+
+  .timeline-entry.is-work .timeline-highlights li {
+    padding-left: 0;
+    padding-right: 1.125rem;
+  }
+
+  .timeline-entry.is-work .timeline-highlights li::before {
+    left: auto;
+    right: 0;
+  }
+}
+
+/* Hobbies */
+.hobbies {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.hobby-panel {
+  display: grid;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+/*
+ * The panel sets `display`, so the browser's own `[hidden] { display: none }`
+ * from the user-agent stylesheet loses to it — the same way `.form-field` once
+ * left the contact form's code field visible on the live page while every DOM
+ * test passed. Kept strictly more specific than the rule it has to beat.
+ */
+.hobby-panel[hidden] {
+  display: none;
+}
+
+.hobby-kicker {
+  color: var(--gold-text);
+  letter-spacing: 0.24em;
+}
+
+.hobby-text h3 {
+  margin: 0.8125rem 0 1rem;
+}
+
+.hobby-description {
+  margin: 0;
+  color: var(--muted);
+}
+
+/*
+ * contain, not cover: a portrait photo in a landscape frame would otherwise
+ * lose its top and bottom, which is exactly what cropped the ballet shot. The
+ * plate's mat is what fills the space either side.
+ */
+.hobby-plate {
+  height: clamp(22.5rem, 16.6rem + 24.2vw, 29.375rem);
+}
+
+.hobby-plate .media-photo,
+.hobby-plate .media-slot {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/*
+ * The rail. Horizontally scrollable at 390px, where four tracked uppercase
+ * words do not fit, and a plain row once they do.
+ */
+.hobby-rail {
+  display: flex;
+  gap: 1.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hobby-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.hobby-tab {
+  flex: none;
+  padding: 0.75rem 0 0.375rem;
+  border: 0;
+  border-bottom: 1px solid transparent;
   background: none;
+  font-family: inherit;
+  font-size: var(--size-label);
+  line-height: 1;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
   cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease;
 }
 
-.carousel-dot.is-current {
-  background: var(--accent);
-  border-color: var(--accent);
+.hobby-tab:hover {
+  color: var(--text);
 }
 
-.carousel-arrow:focus-visible,
-.carousel-dot:focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 2px;
+.hobby-tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--gold-line);
+}
+
+@media (min-width: 48rem) {
+  .hobbies {
+    gap: 2.375rem;
+  }
+
+  .hobby-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 3.25rem;
+  }
+
+  .hobby-rail {
+    gap: 1.25rem;
+  }
 }
 
 /* Activity */
 .activity-note {
-  color: var(--muted);
+  color: var(--meta);
+  font-size: var(--size-small);
 }
 
-.activity-sort {
-  background: none;
-  border: 1px solid var(--muted);
-  border-radius: 999px;
-  padding: 0.4rem 1rem;
-  font: inherit;
+/* Heading, a rule filling the space beside it, and the way through to the rest. */
+.activity-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1.25rem;
+  margin-bottom: 2.375rem;
+}
+
+/* At 390px "View all activities →" does not fit on the line the heading is on,
+   and it may not shrink — it is one tracked uppercase phrase. So it takes a row
+   of its own rather than pushing the page 3px wider than the screen. */
+@media (max-width: 47.999rem) {
+  .activity-head .activity-more {
+    width: 100%;
+    margin: 0.25rem 0 0;
+  }
+}
+
+.activity-head h2 {
+  margin: 0;
+}
+
+.activity-head-rule {
+  flex: 1;
+  margin-bottom: 0.5625rem;
+}
+
+.activity-more {
+  color: var(--gold-text);
+  text-decoration: none;
+  letter-spacing: 0.2em;
+  white-space: nowrap;
+  margin-bottom: 0.375rem;
+  transition: color 0.18s ease;
+}
+
+.activity-more:hover,
+.activity-more:focus-visible {
   color: var(--text);
+}
+
+/* The short gold rule under a page title. */
+.page-rule {
+  margin: 1.25rem 0 1.5rem;
+}
+
+/* Title, a hairline running out from it, and the list's own control. */
+.activity-list-head {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  margin: 1.25rem 0 2.125rem;
+}
+
+.activity-list-head .rule {
+  flex: 1;
+}
+
+/* Underlined rather than boxed: it changes the order of the list rather than
+   doing something to it, and a bordered control reads as the more final of the
+   two. */
+.activity-sort {
+  flex: none;
+  display: inline-flex;
+  align-items: flex-end;
+  min-height: 2.75rem;
+  padding: 0 0 0.375rem;
+  border: 0;
+  border-bottom: 1px solid rgb(197 143 30 / 0.5);
+  background: none;
+  font-family: inherit;
+  font-size: var(--size-label);
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gold-text);
   cursor: pointer;
-  margin-bottom: var(--space);
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.activity-sort:hover,
+.activity-sort:focus-visible {
+  color: var(--text);
+  border-bottom-color: var(--gold-line);
 }
 
 .activity-list {
   display: grid;
-  gap: var(--space);
+  gap: 3.25rem;
 }
 
 /* The landing page's two most recent, side by side. minmax(0, 1fr) rather than
    1fr: a grid column's default minimum is its content, so one long unbroken
    word in a title would push the pair wider than the page. */
-.activity-preview {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-@media (max-width: 48rem) {
+@media (min-width: 48rem) {
   .activity-preview {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-.activity-more,
-.activity-back {
-  display: inline-block;
-  margin-top: var(--space);
-  color: var(--text);
+.activity-card {
+  display: grid;
+  gap: 1rem;
+}
+
+/*
+ * The photo stack. One large plate with up to two beside it, in the proportion
+ * each board sets: landscape at 390px, where the card is the width of the
+ * screen, and portrait once two cards sit side by side.
+ */
+.activity-mosaic-link {
+  display: block;
+  text-decoration: none;
+}
+
+.activity-mosaic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem;
+  gap: 5px;
+  aspect-ratio: 1.15;
+}
+
+.activity-mosaic.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.activity-mosaic-stack {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 5px;
+  min-height: 0;
+}
+
+.activity-mosaic-cell {
+  position: relative;
+  min-height: 0;
+}
+
+.activity-mosaic-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: sepia(0.18) saturate(0.88) contrast(1.04);
+}
+
+/* How many pictures the stack could not show, over the last one it could. */
+.activity-mosaic-more {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(18 17 16 / 0.44);
+  font-family: var(--font-heading);
+  font-weight: 300;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #fff;
+}
+
+.activity-card-body {
+  display: grid;
+  gap: 0.6875rem;
+}
+
+.activity-date {
+  margin: 0;
+  color: var(--meta);
+  letter-spacing: 0.2em;
+}
+
+.activity-card-text h1,
+.activity-card-text h2,
+.activity-card-text h3 {
+  margin: 0 0 0.5625rem;
+  font-size: clamp(1.5625rem, 1.452rem + 0.449vw, 1.6875rem);
+  line-height: 1.2;
 }
 
 .activity-card-link {
@@ -397,35 +1166,19 @@ main {
 .activity-card-link:hover,
 .activity-card-link:focus-visible {
   text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 
-.activity-skeleton-card {
-  height: 8rem;
-  border-radius: 1rem;
-  background: color-mix(in srgb, var(--muted) 12%, var(--surface));
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .activity-skeleton-card {
-    animation: skeleton-pulse 1.6s ease-in-out infinite;
-  }
-
-  @keyframes skeleton-pulse {
-    50% {
-      opacity: 0.55;
-    }
-  }
-}
-
-.activity-card {
-  background: var(--surface);
-  border-radius: 1rem;
-  padding: var(--space);
-}
-
-.activity-date {
+.activity-summary,
+.activity-body {
+  margin: 0;
+  font-size: var(--size-small);
+  line-height: 1.7;
   color: var(--muted);
-  margin-top: 0;
+}
+
+.activity-body + .activity-body {
+  margin-top: 0.875rem;
 }
 
 /* A note published in the author's own words keeps the line breaks it was
@@ -445,18 +1198,33 @@ main {
   max-width: 42rem;
 }
 
+.activity-single .activity-summary {
+  font-size: 1.09375rem;
+  color: var(--ink-prose);
+}
+
+.activity-single .activity-body {
+  text-align: justify;
+  hyphens: auto;
+}
+
 /* The record's title heads that page, so it is an h1 — and the size of an h1
    inside sectioning content is the browser's to decide: current Chrome leaves
    it at 2em, while a browser still applying the old nesting rule shrinks this
    one, two levels deep, to 1.17em, which is smaller than the h2 it used to be.
-   Sized here instead, to the 2rem the heading of every other page renders at. */
+   Sized here instead. */
 .activity-single .activity-card h1 {
-  font-size: 2rem;
+  font-size: var(--size-subhead);
+  margin-bottom: 1.25rem;
 }
 
-.activity-media img,
-.activity-media video {
-  border-radius: 0.75rem;
+.activity-media {
+  margin: 1.75rem 0 0;
+}
+
+.activity-media img {
+  width: 100%;
+  height: auto;
 }
 
 /* A video has no intrinsic size until its metadata loads, and preload="none"
@@ -472,58 +1240,334 @@ main {
 }
 
 .activity-media figcaption {
+  color: var(--meta);
+  font-size: var(--size-small);
+  margin-top: 0.5rem;
+}
+
+/* The record's own title, and the short gold rule the design sets under it. */
+.activity-rule {
+  margin: 1.375rem 0 1.5rem;
+}
+
+/*
+ * The media carousel on a record's own page. Scroll snapping does the paging,
+ * so a swipe and a trackpad work with no script at all; the arrows and the
+ * strip drive the same scroll.
+ */
+.media-carousel {
+  margin-top: 1.875rem;
+}
+
+.carousel-track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.carousel-track::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .carousel-track {
+    scroll-behavior: smooth;
+  }
+}
+
+.carousel-slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  height: clamp(18.75rem, 12.9rem + 24vw, 26rem);
+  display: grid;
+  place-items: center;
+}
+
+/* contain, not cover: a portrait photograph in a landscape plate would lose its
+   top and bottom, which is exactly what cropped the ballet shot. */
+.carousel-slide img,
+.carousel-slide video {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.carousel-slide video {
+  width: 100%;
+  /* Behind the poster and behind any letterboxing, so a portrait clip sits on
+     something deliberate rather than on the browser's black. */
+  background: var(--text);
+}
+
+.carousel-bar {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgb(18 17 16 / 0.12);
+}
+
+/* Long ruled arrows, drawn rather than typed. The padding is the tap target:
+   a 12px-tall rule is nothing to hit. */
+.carousel-arrow {
+  display: flex;
+  align-items: center;
+  padding: 1rem 0;
+  border: 0;
+  background: transparent;
   color: var(--muted);
-  font-size: 0.9rem;
-  margin-top: 0.4rem;
+  cursor: pointer;
+  transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.carousel-arrow:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.carousel-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.carousel-counter {
+  margin-left: auto;
+  color: var(--meta);
+  letter-spacing: 0.2em;
+}
+
+.carousel-caption {
+  margin: 0.75rem 0 0;
+  font-size: var(--size-small);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.carousel-caption[hidden] {
+  display: none;
+}
+
+/* The filmstrip: a horizontal scroller at every width, since a record can carry
+   more thumbnails than any column is wide. */
+.carousel-strip {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  margin-top: 1.125rem;
+  padding-bottom: 0.375rem;
+  scrollbar-width: thin;
+}
+
+.carousel-thumb {
+  position: relative;
+  flex: none;
+  width: 6rem;
+  height: 4rem;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  opacity: 0.72;
+  transition: opacity 0.18s ease, box-shadow 0.18s ease;
+}
+
+.carousel-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.carousel-thumb:hover {
+  opacity: 1;
+}
+
+/* The current one, underscored from the inside so the strip keeps its rhythm. */
+.carousel-thumb[aria-current="true"] {
+  opacity: 1;
+  box-shadow: inset 0 -2px 0 var(--gold-line);
 }
 
 .activity-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-bottom: 0;
+  margin: 1.25rem 0 0;
+}
+
+/* Outlined, not filled: gold is a stroke in this design. */
+.activity-tag {
+  border: 1px solid var(--gold-line);
+  padding: 0.3125rem 0.75rem;
+  color: var(--gold-text);
+  letter-spacing: 0.16em;
 }
 
 /* The rest of a note whose text a listing card cut. At the foot of the card,
-   where the section's own "See all activities" sits at the foot of the list, and
-   underlined from the start: unlike the title above it, this link is only worth
-   anything if it is seen. */
+   and underlined from the start: unlike the title above it, this link is only
+   worth anything if it is seen. */
 .activity-read-more {
   display: inline-block;
   margin-top: 0.75rem;
-  color: var(--text);
-  text-decoration-color: var(--muted);
+  color: var(--gold-text);
+  text-decoration-color: rgb(197 143 30 / 0.5);
   text-underline-offset: 0.2em;
 }
 
 .activity-read-more:hover,
 .activity-read-more:focus-visible {
+  color: var(--text);
   text-decoration-color: currentcolor;
 }
 
-.activity-tag {
-  background: color-mix(in srgb, var(--accent) 30%, var(--surface));
-  border-radius: 999px;
-  padding: 0.15rem 0.7rem;
-  font-size: 0.85rem;
+.activity-skeleton-card {
+  height: 12rem;
+  background: var(--mat);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .activity-skeleton-card {
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+/* At the head of a record's page, not the foot: on a page reached from a link,
+   the way back to the list is a place to start. */
+.activity-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.75rem;
+  margin-bottom: 0.75rem;
+  color: var(--gold-text);
+  text-decoration: none;
+  letter-spacing: 0.18em;
+  transition: color 0.18s ease;
+}
+
+.activity-back:hover,
+.activity-back:focus-visible {
+  color: var(--text);
+}
+
+/* The records either side of this one. A missing neighbour is no link at all
+   rather than a disabled one — there is nothing at the end of the feed to
+   offer. */
+.activity-neighbours {
+  display: grid;
+  gap: 1.25rem;
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgb(18 17 16 / 0.12);
+}
+
+.activity-neighbour {
+  display: block;
+  min-height: 2.75rem;
+  padding: 0.1875rem 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.activity-neighbour-label {
+  display: block;
+  margin-bottom: 0.4375rem;
+  color: var(--faint);
+}
+
+.activity-neighbour-title {
+  font-family: var(--font-heading);
+  font-size: 1.0625rem;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+.activity-neighbour:hover .activity-neighbour-title,
+.activity-neighbour:focus-visible .activity-neighbour-title {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+@media (min-width: 40rem) {
+  .activity-neighbours {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Newer to the right, which is the direction the list runs. */
+  .activity-neighbour:last-child:nth-child(2),
+  .activity-neighbours .activity-neighbour + .activity-neighbour {
+    text-align: right;
+  }
+}
+
+@media (min-width: 48rem) {
+  .activity-mosaic {
+    grid-template-columns: minmax(0, 1fr) 10.5rem;
+    aspect-ratio: 0.8;
+  }
+
+  .activity-mosaic-more {
+    font-size: 1.5rem;
+  }
+
+  /* Date beside the prose rather than above it, in its own 96px column. */
+  .activity-card-body {
+    grid-template-columns: 6rem minmax(0, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+    margin-top: 0.5rem;
+  }
+
+  /* Named rather than left to source order: a record with no date renders no
+     date element, and the prose would otherwise fall into the 96px column and
+     set itself one word wide. The empty column stays, because it is the gutter
+     the design gives every card whether or not this one is dated. */
+  .activity-card-text {
+    grid-column: 2;
+  }
+
+  .activity-date-part {
+    display: block;
+  }
+
+  /* One record on its own page has no mosaic and no narrow column beside it. */
+  .activity-single .activity-card-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .activity-single .activity-card-text {
+    grid-column: 1;
+  }
+
+  .activity-single .activity-date-part {
+    display: inline;
+  }
 }
 
 /* Contact */
 .contact-intro {
-  max-width: 34rem;
+  max-width: 54ch;
   color: var(--muted);
+  text-align: justify;
+  hyphens: auto;
 }
 
 .contact-form {
   display: grid;
-  gap: 1.25rem;
+  gap: 1.5rem;
   max-width: 34rem;
-  margin-top: var(--space);
+  margin-top: 2.25rem;
 }
 
 .form-field {
   display: grid;
-  gap: 0.35rem;
 }
 
 /* Without this the rule above wins and a hidden field is shown anyway: the
@@ -534,71 +1578,169 @@ main {
   display: none;
 }
 
+.form-field-head {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 0.5625rem;
+}
+
 .form-field label {
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: var(--size-label);
+  line-height: 1;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 /* Part of the label, so it is read out with it, but not part of its emphasis. */
 .field-optional {
-  color: var(--muted);
-  font-weight: 400;
+  color: var(--faint);
+  letter-spacing: 0.14em;
+}
+
+/* How much of the message allowance is used. Right of the label, and silent —
+   a live region reading a number after every letter typed is unusable. */
+.field-count {
+  margin-left: auto;
+  font-size: 0.5625rem;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+}
+
+/*
+ * Underlined rather than boxed. One rule under a field is the design's whole
+ * treatment of an input; a border on four sides turns a page of prose into a
+ * page of boxes.
+ */
+.form-field input {
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgb(18 17 16 / 0.22);
+  padding: 0.75rem 0;
+  max-width: 100%;
+}
+
+/* The one exception: a textarea has a size of its own, and an underline under
+   something six lines tall reads as a rule between paragraphs. */
+.form-field textarea {
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid rgb(18 17 16 / 0.18);
+  padding: 0.8125rem;
+  /* Without this a textarea can be dragged wider than the column it sits in. */
+  max-width: 100%;
+  resize: vertical;
+  min-height: 8.25rem;
+}
+
+.form-field input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--gold-line);
+}
+
+.form-field textarea:focus-visible {
+  outline: none;
+  border-color: var(--gold-line);
+}
+
+/*
+ * The code step. It appears mid-form after a Send that did not send, so it has
+ * to read as a step rather than as a field that was there all along — which is
+ * what the rule down its left edge says.
+ */
+.form-code {
+  border-left: 1px solid var(--gold-line);
+  background: #fffefa;
+  padding: 1.125rem 0 1.125rem 1.125rem;
+}
+
+.form-code input {
+  width: 9.375rem;
+  font-size: 1.375rem;
+  letter-spacing: 0.28em;
+  border-bottom-color: var(--gold-line);
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
 }
 
 /* "Send a new code": a real button, because it acts rather than navigates, but
    it should not compete with Send for attention. */
 .link-button {
   justify-self: start;
-  padding: 0;
-  font: inherit;
-  font-size: 0.9rem;
-  color: var(--muted);
+  margin-top: 0.5rem;
+  padding: 0 0 0.375rem;
+  font-family: inherit;
+  font-size: var(--size-label);
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gold-text);
   background: none;
   border: 0;
-  text-decoration: underline;
+  border-bottom: 1px solid rgb(197 143 30 / 0.5);
   cursor: pointer;
+  /* Reachable by a finger without the rule under it growing to match. */
+  display: inline-flex;
+  align-items: flex-end;
+  min-height: 2.75rem;
+}
+
+.link-button[hidden] {
+  display: none;
 }
 
 .link-button:hover,
 .link-button:focus-visible {
   color: var(--text);
+  border-bottom-color: var(--gold-line);
 }
 
-.form-field input,
-.form-field textarea {
-  font: inherit;
-  color: inherit;
-  background: var(--surface);
-  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
-  border-radius: 0.5rem;
-  padding: 0.65rem 0.8rem;
-  /* Without this a textarea can be dragged wider than the column it sits in. */
-  max-width: 100%;
-}
-
-.form-field textarea {
-  resize: vertical;
-}
-
-.form-field input:focus-visible,
-.form-field textarea:focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 1px;
-}
-
-/* The submit control is a <button>, so it needs the parts .button assumes an
-   <a> already has. */
-.contact-form .button {
-  justify-self: start;
-  font: inherit;
-  font-weight: 500;
-  color: inherit;
+/*
+ * Send: outlined, never filled. Gold is a stroke in this design, and a solid
+ * gold button is the one place the whole page would stop being made of lines.
+ */
+.button {
+  display: block;
+  width: 100%;
+  padding: 1.0625rem 0;
+  border: 1px solid var(--gold-line);
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.6875rem;
+  line-height: 1;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold-text);
+  text-align: center;
+  text-decoration: none;
   cursor: pointer;
+  transition: color 0.18s ease, background-color 0.18s ease;
 }
 
-.contact-form .button:disabled {
+.button:hover:not(:disabled),
+.button:focus-visible:not(:disabled) {
+  color: var(--text);
+  background: rgb(197 143 30 / 0.08);
+}
+
+.button:disabled {
   opacity: 0.55;
   cursor: progress;
+}
+
+/* Send and whatever the last attempt said, under a rule that separates the act
+   from the fields above it. */
+.contact-form .button {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--gold-line);
 }
 
 /* Empty until something has happened, and it must not leave a gap until then. */
@@ -608,44 +1750,75 @@ main {
 
 .form-status {
   margin: 0;
-  padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--muted);
 }
 
 /* Colour is not the only signal — the sentence itself says what went wrong —
-   so this stays a tint rather than the sole carrier of the outcome. */
+   so this stays a rule rather than the sole carrier of the outcome. */
 .form-status.is-error {
-  background: color-mix(in srgb, var(--muted) 18%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border-left: 1px solid var(--rule);
+  padding-left: 0.875rem;
 }
 
 .form-unavailable {
-  color: var(--muted);
-  border: 1px dashed var(--muted);
-  border-radius: 0.75rem;
+  color: var(--meta);
+  border: 1px solid var(--rule);
   padding: var(--space);
   max-width: 34rem;
 }
 
 /* Footer */
-.footer {
-  text-align: center;
-  color: var(--muted);
+/*
+ * Full-bleed like the hero, so the paler ground runs edge to edge; the rule
+ * above it stays inset to the content measure, which is where the design draws
+ * it. A border on the padded box would have run the rule out into the gutters.
+ */
+.section.footer {
+  max-width: none;
+  padding: 0;
+  background: var(--surface);
 }
 
-.footer-name {
-  font-weight: 600;
+.footer-row {
+  position: relative;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 2.75rem var(--space) 2.125rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.875rem 1.25rem;
+}
+
+.footer-row::before {
+  content: "";
+  position: absolute;
+  left: var(--space);
+  right: var(--space);
+  top: 0;
+  height: 1px;
+  background: rgb(18 17 16 / 0.12);
+}
+
+.footer-invite {
+  color: var(--gold-text);
+  text-decoration: none;
+  letter-spacing: 0.18em;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgb(197 143 30 / 0.5);
+  transition: color 0.18s ease, border-color 0.18s ease;
+  /* Reachable by a finger without the line under it growing to match. */
+  display: inline-flex;
+  align-items: flex-end;
+  min-height: 2.75rem;
+}
+
+.footer-invite:hover,
+.footer-invite:focus-visible {
   color: var(--text);
-  margin-bottom: 0.2em;
-}
-
-.footer-headline {
-  margin-top: 0;
-}
-
-.footer-links {
-  margin-top: 0.9em;
+  border-bottom-color: var(--gold-line);
 }
 
 /*
@@ -660,19 +1833,32 @@ main {
   align-items: center;
   justify-content: center;
   padding: 0.65rem;
-  border-radius: 50%;
-  color: var(--muted);
-  transition: color 0.2s ease, background-color 0.2s ease;
+  color: var(--meta);
+  transition: color 0.2s ease;
 }
 
 .footer-social:hover,
 .footer-social:focus-visible {
-  color: var(--accent);
-  background-color: var(--surface, rgba(0, 0, 0, 0.04));
+  color: var(--gold-text);
 }
 
 .footer-social svg {
   display: block;
+}
+
+.footer-meta {
+  margin-left: auto;
+  color: var(--faint);
+  letter-spacing: 0.2em;
+}
+
+/* At 390px the year and place take their own line under the two links, as the
+   mobile board sets them. */
+@media (max-width: 30rem) {
+  .footer-meta {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
 /* Subtle motion, disabled entirely for users who ask for less */

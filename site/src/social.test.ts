@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { facts } from "./profile";
 import { linkedInLink, renderFooter } from "./sections";
 
 describe("linkedInLink", () => {
@@ -65,15 +66,51 @@ describe("linkedInLink", () => {
 });
 
 describe("the footer", () => {
-  it("shows the icon under the name, given a profile that has one", () => {
+  function footer(): HTMLElement {
     const section = document.createElement("section");
     renderFooter(section);
+    return section;
+  }
 
-    // The fixture profile carries a LinkedIn URL, which is what CI runs against.
-    const link = section.querySelector("a.footer-social");
-    expect(link?.getAttribute("aria-label")).toBe("LinkedIn");
+  /**
+   * One ranged line, which is the whole footer in this design. The name and
+   * headline that used to sit here are the first two things the page says at
+   * full size; repeating them in grey at the bottom summarised a page the
+   * reader had just finished.
+   */
+  it("is one row: the invitation, the mark, then the year and place", () => {
+    const row = footer().querySelector(".footer-row");
 
-    const order = [...section.children].map((child) => child.className);
-    expect(order).toEqual(["footer-name", "footer-headline", "footer-links"]);
+    expect([...(row?.children ?? [])].map((child) => child.className)).toEqual([
+      "footer-invite label",
+      "footer-social",
+      "footer-meta label tnum",
+    ]);
+  });
+
+  it("shows the icon, given a profile that has one", () => {
+    // The fixture profile carries a LinkedIn handle, which is what CI runs against.
+    expect(footer().querySelector("a.footer-social")?.getAttribute("aria-label")).toBe("LinkedIn");
+  });
+
+  /** The invitation goes to the contact page, not to a section of this one. */
+  it("points the invitation at the contact page", () => {
+    const invite = footer().querySelector<HTMLAnchorElement>(".footer-invite");
+
+    expect(invite?.textContent).toBe("Let\u2019s stay connected");
+    expect(invite?.getAttribute("href")).toMatch(/contact\/$/);
+  });
+
+  /**
+   * The place comes from the profile rather than from here — the artboards say
+   * Basel, which is placeholder text in a mock-up, and CI runs against a
+   * fixture profile that says somewhere else again. Read against the profile
+   * for that reason: what is asserted is the shape of the line and where the
+   * place in it comes from, not which place it happens to be today.
+   */
+  it("sets the year beside the profile's own location", () => {
+    expect(footer().querySelector(".footer-meta")?.textContent).toBe(
+      `\u00a9 ${new Date().getFullYear()} \u00b7 ${facts.location}`,
+    );
   });
 });

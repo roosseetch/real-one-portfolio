@@ -9,8 +9,13 @@
  * test run needs no profile (see vitest.config.ts), and nothing here reads one.
  *
  * Every tag is optional in the same way: a value the deployment did not
- * configure produces no tag rather than a tag pointing at nothing.
+ * configure produces no tag rather than a tag pointing at nothing. The fonts
+ * are the one exception, and only half an exception: with no media bucket
+ * configured they are still declared, pointing at the Google-hosted originals
+ * alone, because a build with no bucket is a local `npm run dev` and the design
+ * has to be legible there too.
  */
+import { fontFaceStyle, fontPreloadLinks } from "./fonts";
 
 /** HTML-escapes an attribute value. Profile text is prose, and prose contains quotes. */
 export function escape(value: string): string {
@@ -35,7 +40,13 @@ export interface HeadInput {
 }
 
 /**
- * The social metadata and the site icon, in the order they are written.
+ * The fonts, the social metadata and the site icon, in the order they are
+ * written.
+ *
+ * Fonts first, and deliberately: everything below is metadata for a machine,
+ * while these two lines are the first thing the browser can act on. See
+ * fonts.ts for why the `@font-face` block is built here rather than living in
+ * styles.css.
  *
  * The icon lives in the media bucket rather than in `public/`, beside the
  * portrait and for the same reason: a logo is one person's brand mark, and a
@@ -45,6 +56,8 @@ export interface HeadInput {
  */
 export function headTags({ pageTitle, description, mediaBase }: HeadInput): string[] {
   return [
+    ...fontPreloadLinks(mediaBase),
+    fontFaceStyle(mediaBase),
     `<meta name="description" content="${escape(description)}">`,
     `<meta property="og:type" content="profile">`,
     `<meta property="og:title" content="${escape(pageTitle)}">`,

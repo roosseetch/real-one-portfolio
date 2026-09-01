@@ -7,6 +7,8 @@
     "config:check": "tsx scripts/check-workflow-config.ts",
     "media:check": "tsx scripts/check-media-workflow.ts",
     "security:check": "tsx scripts/check-workflow-security.ts",
+    "fonts:check": "tsx scripts/check-fonts.ts",
+    "fonts:upload": "tsx scripts/upload-fonts.ts",
     "typecheck": "tsc --noEmit",
     "profile:publish": "tsx scripts/publish-profile.ts",
     "profile:fetch": "tsx scripts/fetch-profile.ts",

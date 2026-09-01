@@ -45,6 +45,11 @@ const ALLOWED = new Set([
   "docs.github.com",
   // Where LinkedIn's API reference lives, cited by the version pin in post.ts.
   "learn.microsoft.com",
+  // Where the two typefaces come from when the media bucket cannot be
+  // reached. site/src/fonts.ts pins one URL per face and
+  // scripts/check-fonts.ts asks whether they still answer; see the module
+  // header for what the fallback costs.
+  "fonts.gstatic.com",
   "json-schema.org",
   "registry.npmjs.org",
   // Not a host this addresses at all: `http://www.w3.org/2000/svg` is the XML
