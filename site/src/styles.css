@@ -982,9 +982,20 @@ main {
 /* Heading, a rule filling the space beside it, and the way through to the rest. */
 .activity-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 1.25rem;
   margin-bottom: 2.375rem;
+}
+
+/* At 390px "View all activities →" does not fit on the line the heading is on,
+   and it may not shrink — it is one tracked uppercase phrase. So it takes a row
+   of its own rather than pushing the page 3px wider than the screen. */
+@media (max-width: 47.999rem) {
+  .activity-head .activity-more {
+    width: 100%;
+    margin: 0.25rem 0 0;
+  }
 }
 
 .activity-head h2 {
@@ -1514,6 +1525,14 @@ main {
     margin-top: 0.5rem;
   }
 
+  /* Named rather than left to source order: a record with no date renders no
+     date element, and the prose would otherwise fall into the 96px column and
+     set itself one word wide. The empty column stays, because it is the gutter
+     the design gives every card whether or not this one is dated. */
+  .activity-card-text {
+    grid-column: 2;
+  }
+
   .activity-date-part {
     display: block;
   }
@@ -1521,6 +1540,10 @@ main {
   /* One record on its own page has no mosaic and no narrow column beside it. */
   .activity-single .activity-card-body {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .activity-single .activity-card-text {
+    grid-column: 1;
   }
 
   .activity-single .activity-date-part {

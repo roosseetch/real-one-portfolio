@@ -71,6 +71,12 @@ function mediaSlot(refId: string | null, className: string): HTMLElement {
  * (spec §1). A build with no media base therefore shows the wordmark on its own,
  * which is a masthead with one element missing rather than a broken one.
  *
+ * A deployment whose media pipeline has not published a mark yet gets the same
+ * outcome by a different route: the request 404s and the element takes itself
+ * out of the masthead. An `alt=""` image that failed to load is invisible in
+ * most browsers and a broken-image glyph in some, and neither is worth leaving
+ * to chance beside a wordmark that is already complete without it.
+ *
  * Here rather than in shell.ts because this module is where MEDIA_BASE and the
  * rules about it already live.
  */
@@ -82,6 +88,7 @@ export function brandMark(): HTMLImageElement | null {
   // The wordmark beside it says the name, so the mark adds nothing to say.
   img.alt = "";
   img.decoding = "async";
+  img.addEventListener("error", () => img.remove(), { once: true });
   return img;
 }
 
