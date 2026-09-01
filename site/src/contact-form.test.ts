@@ -12,7 +12,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isValidPhone, renderContactForm, type ContactFormOptions } from "./contact-form";
+import { isValidPhone, LIMITS, renderContactForm, type ContactFormOptions } from "./contact-form";
 import { recall, remember } from "./verified-store";
 
 const ENDPOINT = "https://worker.test/contact";
@@ -848,5 +848,42 @@ describe("telling the Worker who is here", () => {
     await submit(form);
 
     expect(identify).not.toHaveBeenCalled();
+  });
+});
+
+describe("the message allowance", () => {
+  /**
+   * The design puts "0 / 300" beside the Message label. It is a visual aid and
+   * deliberately not a live region: it changes on every keystroke, and a reader
+   * announcing a number after each letter typed would be unusable.
+   */
+  it("counts what has been typed against the limit", () => {
+    const { section } = mount();
+    const form = formOf(section);
+    const message = control(form, "message");
+    const count = () => section.querySelector(".field-count");
+
+    expect(count()?.textContent).toBe(`0 / ${LIMITS.message.max}`);
+
+    message.value = "Hello.";
+    message.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(count()?.textContent).toBe(`6 / ${LIMITS.message.max}`);
+    expect(count()?.getAttribute("aria-live")).toBeNull();
+  });
+
+  /** Only the field with a limit worth watching — four counters is four distractions. */
+  it("counts the message and nothing else", () => {
+    expect(mount().section.querySelectorAll(".field-count")).toHaveLength(1);
+  });
+
+  /** Shortened from "Your message": every label was about the person filling it in. */
+  it("labels the fields as the design labels them", () => {
+    const section = mount().section;
+    const labels = [...section.querySelectorAll("label")].map((label) =>
+      label.firstChild?.textContent,
+    );
+
+    expect(labels).toEqual(["Name", "Email", "Company", "Telephone", "Message", "Code"]);
   });
 });

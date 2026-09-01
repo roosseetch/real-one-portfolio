@@ -97,13 +97,20 @@ function renderList(section: HTMLElement, list: HTMLElement, records: ActivityRe
     );
   };
 
-  const toggle = el("button", "activity-sort", "Oldest first") as HTMLButtonElement;
+  const toggle = el("button", "activity-sort label", "Oldest first") as HTMLButtonElement;
   toggle.addEventListener("click", () => {
     ascending = !ascending;
     toggle.textContent = ascending ? "Newest first" : "Oldest first";
     paint();
   });
-  section.insertBefore(toggle, list);
+
+  // A hairline running out from the heading to the control, which is how the
+  // design separates the page's title from its list.
+  const head = el("div", "activity-list-head");
+  const rule = el("div", "rule");
+  rule.setAttribute("aria-hidden", "true");
+  head.append(rule, toggle);
+  section.insertBefore(head, list);
   paint();
 }
 

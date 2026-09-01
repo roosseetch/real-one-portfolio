@@ -123,7 +123,11 @@ function field(
   id: string,
   label: string,
   control: HTMLInputElement | HTMLTextAreaElement,
-  { required = true, hidden = false }: { required?: boolean; hidden?: boolean } = {},
+  {
+    required = true,
+    hidden = false,
+    counter = false,
+  }: { required?: boolean; hidden?: boolean; counter?: boolean } = {},
 ): HTMLElement {
   const wrapper = document.createElement("div");
   wrapper.className = "form-field";
@@ -149,7 +153,27 @@ function field(
   control.name = id;
   control.required = required;
 
-  wrapper.append(labelEl, control);
+  // Label on the left, and on the one field with a limit worth watching, how
+  // much of it is used on the right.
+  const head = document.createElement("div");
+  head.className = "form-field-head";
+  head.append(labelEl);
+
+  if (counter && control.maxLength > 0) {
+    const count = document.createElement("span");
+    count.className = "field-count tnum";
+    const update = () => {
+      count.textContent = `${control.value.length} / ${control.maxLength}`;
+    };
+    update();
+    // Not announced. It changes on every keystroke, and a live region that
+    // reads out a number after each letter typed is unusable; the limit itself
+    // is enforced by maxLength and stated by the field's own attributes.
+    control.addEventListener("input", update);
+    head.append(count);
+  }
+
+  wrapper.append(head, control);
   form.append(wrapper);
   return wrapper;
 }
@@ -222,11 +246,13 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   message.minLength = LIMITS.message.min;
   message.maxLength = LIMITS.message.max;
 
-  field(form, "name", "Your name", name);
-  field(form, "email", "Your email", email);
-  field(form, "company", "Your company", company, { required: false });
-  field(form, "phone", "Your telephone", phone, { required: false });
-  field(form, "message", "Your message", message);
+  // "Name" rather than "Your name": every label on this form was about the
+  // person filling it in, and saying so five times is five words nobody reads.
+  field(form, "name", "Name", name);
+  field(form, "email", "Email", email);
+  field(form, "company", "Company", company, { required: false });
+  field(form, "phone", "Telephone", phone, { required: false });
+  field(form, "message", "Message", message, { counter: true });
 
   // Turnstile finds this by class once its script loads, renders the challenge
   // into it, and puts the token in a hidden input inside this form.
@@ -244,7 +270,11 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
   code.pattern = "\\d{6}";
   code.maxLength = CODE_LENGTH;
 
-  const codeField = field(form, "code", "Code from your email", code, { required: false, hidden: true });
+  const codeField = field(form, "code", "Code", code, { required: false, hidden: true });
+  // Set apart by a gold rule down its left edge: it appears mid-form, after a
+  // Send that did not send, and it has to read as a step rather than as a
+  // field that was there all along.
+  codeField.classList.add("form-code");
 
   const resend = document.createElement("button");
   resend.type = "button";
@@ -255,7 +285,7 @@ export function renderContactForm(section: HTMLElement, options: ContactFormOpti
 
   const submit = document.createElement("button");
   submit.type = "submit";
-  submit.className = "button primary";
+  submit.className = "button";
   submit.textContent = "Send";
   form.append(submit);
 

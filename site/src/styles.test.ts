@@ -35,10 +35,12 @@ function selectorsSettingDisplay(): string[] {
 
 /**
  * Every class that both sets `display` and is hidden with the attribute.
- * `.form-field` is where the bug was found; `.hobby-panel` is the same shape —
- * a grid whose siblings are hidden one at a time — and would fail the same way.
+ * `.form-field` is where the bug was found. `.hobby-panel` is the same shape —
+ * a grid whose siblings are hidden one at a time — and `.link-button` is "Send
+ * a new code", which is hidden until a code has been sent and is laid out as a
+ * flex box so it can carry a 44px tap target. All three would fail the same way.
  */
-const GUARDED = [".form-field", ".hobby-panel"];
+const GUARDED = [".form-field", ".hobby-panel", ".link-button"];
 
 describe("hidden elements", () => {
   it.each(GUARDED)("stay hidden even though %s sets display", (rule) => {
