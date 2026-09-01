@@ -362,6 +362,13 @@ export function renderHobbies(section: HTMLElement) {
       tab.tabIndex = selected ? 0 : -1;
       panels[i].hidden = !selected;
     });
+    // A lazy image inside a panel that was `display: none` when it was parsed
+    // is never fetched, and revealing the panel does not start it — three of
+    // the four hobbies showed an empty plate on the live site for exactly this
+    // reason. Asking for it eagerly at the moment it is shown is what starts
+    // the request, and it keeps the other three unfetched until they are asked
+    // for, which is what lazy was there for.
+    panels[index].querySelector("img")?.setAttribute("loading", "eager");
     if (moveFocus) tabs[index].focus();
   }
 
