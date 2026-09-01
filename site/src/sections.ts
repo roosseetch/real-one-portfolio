@@ -1,5 +1,5 @@
-import { activitiesHref } from "./activity";
 import { facts, personality, portfolio, mediaRef, profileLinks } from "./profile";
+import { routeById, routeHref } from "./routes";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -18,6 +18,9 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
 }
 
 const MEDIA_BASE = import.meta.env.VITE_MEDIA_BASE_URL?.replace(/\/$/, "");
+
+/** "/" on a custom domain, "/<repo>/" on a project-pages deployment. */
+const BASE = import.meta.env.BASE_URL;
 
 /** Widths published by the sanitization pipeline for each media reference.
     Sources vary in size and the pipeline never upscales, so the available
@@ -59,36 +62,106 @@ function mediaSlot(refId: string | null, className: string): HTMLElement {
   return slot;
 }
 
+/**
+ * The mark in the masthead, or nothing.
+ *
+ * From the media bucket rather than from `public/`, exactly as head.ts serves
+ * the favicon and for the same reason: a logo is one person's brand mark, and a
+ * repository meant to be reused for someone else carries no images at all
+ * (spec §1). A build with no media base therefore shows the wordmark on its own,
+ * which is a masthead with one element missing rather than a broken one.
+ *
+ * Here rather than in shell.ts because this module is where MEDIA_BASE and the
+ * rules about it already live.
+ */
+export function brandMark(): HTMLImageElement | null {
+  if (!MEDIA_BASE) return null;
+  const img = new Image();
+  img.className = "brand-mark";
+  img.src = `${MEDIA_BASE}/media/profile/mark.png`;
+  // The wordmark beside it says the name, so the mark adds nothing to say.
+  img.alt = "";
+  img.decoding = "async";
+  return img;
+}
+
 function sectionTitle(id: string): string {
   return portfolio.sections.find((s) => s.id === id)?.title ?? id;
 }
 
+/**
+ * A section's heading and the short gold rule under it, in the narrow column
+ * the design gives all three of About, Experience and Hobbies.
+ */
+export function sectionHead(title: string, extra?: HTMLElement): HTMLElement {
+  const head = el("div", "column-head");
+  head.append(el("h2", undefined, title));
+  const rule = el("div", "rule-accent");
+  rule.setAttribute("aria-hidden", "true");
+  head.append(rule);
+  if (extra) head.append(extra);
+  return head;
+}
+
+/**
+ * The opening band: warm gradient, the portrait tipped into its left, and the
+ * greeting beside it.
+ *
+ * Full-bleed, so it breaks out of the `.section` frame main.ts gives it and
+ * carries its own inner measure — the gradient is the width of the window in
+ * the design, and a hero inset by the page gutter is a different composition.
+ *
+ * The design has no call-to-action buttons. "Discover my story" and "See recent
+ * activities" pointed at two things the navigation already names one line above,
+ * so they are gone rather than restyled.
+ */
 export function renderHero(section: HTMLElement) {
   section.classList.add("hero");
   const intro = personality.aboutText?.split("\n\n")[0] ?? "";
 
+  const band = el("div", "hero-band");
+  // Two washes of light over the gradient and the grain over both. Decorative
+  // in the strict sense — remove all three and nothing has been said less.
+  for (const layer of ["hero-bloom", "hero-glow", "hero-grain"]) {
+    const node = el("div", layer);
+    node.setAttribute("aria-hidden", "true");
+    band.append(node);
+  }
+
+  const inner = el("div", "hero-inner");
+
+  const plate = el("div", "hero-plate plate");
+  plate.append(mediaSlot("hero", "hero-portrait"));
+
   const text = el("div", "hero-text");
   text.append(el("h1", "hero-title", sectionTitle("hero")));
-  text.append(el("p", "hero-intro", intro));
+  const rule = el("div", "hero-rule");
+  rule.setAttribute("aria-hidden", "true");
+  text.append(rule);
+  text.append(el("p", "hero-intro prose", intro));
 
-  const actions = el("div", "hero-actions");
-  const story = el("a", "button primary", "Discover my story") as HTMLAnchorElement;
-  story.href = "#about";
-  const activities = el("a", "button", "See recent activities") as HTMLAnchorElement;
-  // The page rather than the section below: the section is a teaser of the two
-  // most recent, and this button promises the activities themselves.
-  activities.href = activitiesHref();
-  actions.append(story, activities);
-  text.append(actions);
-
-  section.append(text, mediaSlot("hero", "hero-portrait"));
+  inner.append(plate, text);
+  band.append(inner);
+  section.append(band);
 }
 
+/**
+ * Heading in a narrow left column, prose in a wide right one.
+ *
+ * The first paragraph is set larger than the rest: it is the one that has to be
+ * read, and the design leans on size rather than on a bold weight to say so —
+ * which is just as well, since Lora ships at 400 only.
+ */
 export function renderAbout(section: HTMLElement) {
-  section.append(el("h2", undefined, sectionTitle("about")));
-  for (const paragraph of (personality.aboutText ?? "").split("\n\n")) {
-    section.append(el("p", "about-paragraph", paragraph));
-  }
+  section.append(sectionHead(sectionTitle("about")));
+
+  const body = el("div", "column-body");
+  const paragraphs = (personality.aboutText ?? "").split("\n\n").filter(Boolean);
+  paragraphs.forEach((paragraph, index) => {
+    body.append(el("p", index === 0 ? "about-lead prose" : "about-paragraph prose", paragraph));
+  });
+  section.append(body);
+  section.classList.add("column-section");
 }
 
 export function renderExperience(section: HTMLElement) {
@@ -290,15 +363,36 @@ export function linkedInLink(handle: string | undefined): HTMLAnchorElement | nu
   return link;
 }
 
+/**
+ * One ranged line: an invitation on the left, the LinkedIn mark beside it, and
+ * the year and place pushed to the right.
+ *
+ * The name and headline that used to sit here are gone. They are the first two
+ * things the page says at full size, and repeating them in 9.5px grey at the
+ * bottom was a summary of a page the reader has just finished.
+ *
+ * The place comes from the profile, which says "Aargau, Switzerland". The
+ * artboards say Basel; that is placeholder text in a mock-up, and the profile is
+ * the one that knows.
+ */
 export function renderFooter(section: HTMLElement) {
   section.classList.add("footer");
-  section.append(el("p", "footer-name", facts.displayName ?? ""));
-  if (facts.headline) section.append(el("p", "footer-headline", facts.headline));
+
+  const row = el("div", "footer-row");
+
+  const contact = routeById("contact");
+  if (contact) {
+    const invite = el("a", "footer-invite label", "Let\u2019s stay connected") as HTMLAnchorElement;
+    invite.href = routeHref(BASE, contact);
+    row.append(invite);
+  }
 
   const linkedin = linkedInLink(profileLinks().linkedin);
-  if (linkedin !== null) {
-    const links = el("p", "footer-links");
-    links.append(linkedin);
-    section.append(links);
-  }
+  if (linkedin !== null) row.append(linkedin);
+
+  const year = new Date().getFullYear();
+  const place = facts.location ? ` \u00b7 ${facts.location}` : "";
+  row.append(el("span", "footer-meta label tnum", `\u00a9 ${year}${place}`));
+
+  section.append(row);
 }

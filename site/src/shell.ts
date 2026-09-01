@@ -6,9 +6,9 @@
  * own copy of the header is a second place for a navigation change to be
  * forgotten, and the two would only diverge somewhere nobody looks.
  */
-import { design, portfolio } from "./profile";
+import { design, facts, portfolio } from "./profile";
 import { ROUTES, routeById, routeHref } from "./routes";
-import { renderFooter } from "./sections";
+import { brandMark, renderFooter } from "./sections";
 
 /** "/" on a custom domain, "/<repo>/" on a project-pages deployment. Vite fixes it at build time. */
 const BASE = import.meta.env.BASE_URL;
@@ -52,10 +52,26 @@ export function renderNav(current: string): HTMLElement {
   skip.textContent = "Skip to content";
   header.append(skip);
 
-  const nav = document.createElement("nav");
-  nav.setAttribute("aria-label", "Primary");
+  const masthead = document.createElement("div");
+  masthead.className = "masthead";
 
   const home = routeHref(BASE, HOME);
+
+  // Mark and wordmark, as one link back to the top. The mark is decorative and
+  // the wordmark carries the name, so the link reads as the name alone.
+  const brand = document.createElement("a");
+  brand.className = "brand";
+  brand.href = home;
+  const mark = brandMark();
+  if (mark) brand.append(mark);
+  brand.append(spanWith("brand-name", facts.displayName ?? ""));
+  masthead.append(brand);
+
+  const nav = document.createElement("nav");
+  nav.id = "primary-nav";
+  nav.className = "site-nav";
+  nav.setAttribute("aria-label", "Primary");
+
   const targets = portfolio.landingPageOrder.filter((id) => id !== "footer");
   targets.forEach((id, index) => {
     const label = portfolio.navigation[index] ?? portfolio.sections.find((s) => s.id === id)?.title ?? id;
@@ -76,8 +92,88 @@ export function renderNav(current: string): HTMLElement {
     nav.append(link);
   }
 
-  header.append(nav);
+  masthead.append(navToggle(nav), nav);
+  header.append(masthead);
   return header;
+}
+
+function spanWith(className: string, text: string): HTMLSpanElement {
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = text;
+  return span;
+}
+
+/**
+ * The narrow-screen disclosure.
+ *
+ * Six uppercase items do not fit one 390px line, so below the breakpoint the
+ * menu collapses behind this and the stylesheet hides the panel. Hidden with
+ * `display`, not with opacity or an offset: a menu that is merely invisible is
+ * still in the tab order, and a keyboard reaches a control nobody can see.
+ *
+ * The button itself is the reverse — it exists in the markup at every width and
+ * the stylesheet removes it above the breakpoint, so there is no resize handler
+ * and nothing to get out of step with the layout.
+ */
+function navToggle(nav: HTMLElement): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "nav-toggle";
+  button.setAttribute("aria-controls", nav.id);
+  button.setAttribute("aria-expanded", "false");
+  button.setAttribute("aria-label", "Menu");
+  button.append(hamburger());
+
+  const setOpen = (open: boolean) => {
+    button.setAttribute("aria-expanded", String(open));
+    nav.classList.toggle("is-open", open);
+  };
+
+  button.addEventListener("click", () => {
+    setOpen(button.getAttribute("aria-expanded") !== "true");
+  });
+
+  // Escape closes it and hands focus back to the control that opened it —
+  // otherwise focus is left inside an element that has just been hidden, and
+  // the next Tab starts again from the top of the document.
+  nav.addEventListener("keydown", (event) => {
+    if ((event as KeyboardEvent).key !== "Escape") return;
+    setOpen(false);
+    button.focus();
+  });
+  button.addEventListener("keydown", (event) => {
+    if ((event as KeyboardEvent).key !== "Escape") return;
+    setOpen(false);
+  });
+
+  // A link that jumps to a section on this same page leaves the panel covering
+  // the thing it just jumped to.
+  nav.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("a")) setOpen(false);
+  });
+
+  return button;
+}
+
+/** Three rules. Drawn rather than typed, because "☰" is a character a font may not have. */
+function hamburger(): SVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "22");
+  svg.setAttribute("height", "22");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.1");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M3 7h18M3 12h18M3 17h18");
+  svg.append(path);
+  return svg;
 }
 
 function navLink(href: string, label: string): HTMLAnchorElement {
