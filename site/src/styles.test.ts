@@ -33,17 +33,23 @@ function selectorsSettingDisplay(): string[] {
   return found;
 }
 
+/**
+ * Every class that both sets `display` and is hidden with the attribute.
+ * `.form-field` is where the bug was found; `.hobby-panel` is the same shape —
+ * a grid whose siblings are hidden one at a time — and would fail the same way.
+ */
+const GUARDED = [".form-field", ".hobby-panel"];
+
 describe("hidden elements", () => {
-  it("stay hidden even though .form-field sets display", () => {
-    expect(selectorsSettingDisplay()).toContain(".form-field[hidden]");
+  it.each(GUARDED)("stay hidden even though %s sets display", (rule) => {
+    expect(selectorsSettingDisplay()).toContain(`${rule}[hidden]`);
   });
 
-  it("the guard is not weaker than the rule it has to beat", () => {
+  it.each(GUARDED)("the guard on %s is not weaker than the rule it has to beat", (rule) => {
     // Same specificity would be a coin toss decided by source order, and a
     // reordering of the file would silently bring the bug back. `[hidden]` adds
     // an attribute selector, so the guard is strictly the more specific rule.
-    const guard = ".form-field[hidden]";
-    const rule = ".form-field";
+    const guard = `${rule}[hidden]`;
     expect(guard.startsWith(rule) && guard.length > rule.length).toBe(true);
   });
 });

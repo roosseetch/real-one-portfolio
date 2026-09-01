@@ -270,114 +270,108 @@ export function renderExperience(section: HTMLElement) {
   section.append(list);
 }
 
+/**
+ * One hobby at a time, chosen from a named rail.
+ *
+ * This replaces a scroll-snap carousel with arrows and dots. The carousel asked
+ * the reader to page blindly through four things to find out what they were;
+ * the rail names all four and goes straight to one, which is what a set of four
+ * fixed, unordered items wants. The keyboard contract is the ARIA tabs one:
+ * arrows move between tabs, Home and End jump to the ends, and only the
+ * selected tab is in the tab order, so Tab leaves the rail rather than walking
+ * it.
+ *
+ * The kicker and the display line come apart when the profile gives a hobby a
+ * `headline` — "Ballet" above "At the barre", as the design sets it. Without
+ * one there is no kicker and the title is the heading, because a headline is
+ * someone's own words about their own hobby and is not something to invent.
+ */
 export function renderHobbies(section: HTMLElement) {
   const heading = sectionTitle("hobbies");
-  section.append(el("h2", undefined, heading));
+  section.classList.add("column-section");
+  section.append(sectionHead(heading));
 
   const hobbies = facts.hobbies;
   if (hobbies.length === 0) return;
 
-  const carousel = el("div", "carousel");
-  carousel.setAttribute("role", "group");
-  carousel.setAttribute("aria-roledescription", "carousel");
-  carousel.setAttribute("aria-label", heading);
+  const body = el("div", "column-body hobbies");
 
-  // Scroll snapping does the actual paging, so touch swipe and trackpad
-  // scrolling work without any JavaScript. The buttons below drive the same
-  // scroll, which keeps one source of truth for where the carousel is.
-  const track = el("div", "carousel-track");
-  // The track scrolls, so it must be reachable by keyboard on its own: someone
-  // navigating without a mouse has to be able to focus it and scroll with the
-  // arrow keys, which the handler below listens for.
-  track.tabIndex = 0;
-  // A bare div cannot carry aria-label, so the focus stop is given a group
-  // role; otherwise a screen reader reaches an unnamed scrollable region.
-  track.setAttribute("role", "group");
-  track.setAttribute("aria-label", `${heading}, use arrow keys to browse`);
+  const rail = el("div", "hobby-rail");
+  rail.setAttribute("role", "tablist");
+  rail.setAttribute("aria-label", heading);
+
+  const tabs: HTMLButtonElement[] = [];
+  const panels: HTMLElement[] = [];
 
   hobbies.forEach((hobby, index) => {
-    // A div rather than an article: role="group" is not a valid role for
-    // <article>, and the grouping semantics are what the carousel needs.
-    const slide = el("div", "carousel-slide");
-    slide.setAttribute("role", "group");
-    slide.setAttribute("aria-roledescription", "slide");
-    slide.setAttribute("aria-label", `${index + 1} of ${hobbies.length}: ${hobby.title}`);
+    const tabId = `hobby-tab-${hobby.id}`;
+    const panelId = `hobby-panel-${hobby.id}`;
 
-    slide.append(mediaSlot(hobby.mediaRef, "carousel-photo"));
+    const tab = el("button", "hobby-tab label", hobby.title) as HTMLButtonElement;
+    tab.type = "button";
+    tab.id = tabId;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", panelId);
+    tabs.push(tab);
+    rail.append(tab);
 
-    const body = el("div", "carousel-text");
-    body.append(el("h3", undefined, hobby.title));
-    if (hobby.description) body.append(el("p", "hobby-description", hobby.description));
-    slide.append(body);
+    const panel = el("div", "hobby-panel");
+    panel.id = panelId;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", tabId);
 
-    track.append(slide);
+    const text = el("div", "hobby-text");
+    const headline = (hobby as { headline?: string | null }).headline;
+    if (headline) {
+      text.append(el("div", "hobby-kicker label", hobby.title));
+      text.append(el("h3", undefined, headline));
+    } else {
+      text.append(el("h3", undefined, hobby.title));
+    }
+    if (hobby.description) text.append(el("p", "hobby-description prose", hobby.description));
+
+    const plate = el("div", "hobby-plate plate");
+    plate.append(mediaSlot(hobby.mediaRef, "hobby-photo"));
+
+    panel.append(text, plate);
+    panels.push(panel);
+    body.append(panel);
+
+    tab.addEventListener("click", () => select(index));
   });
-  carousel.append(track);
 
-  const controls = el("div", "carousel-controls");
-  const prev = el("button", "carousel-arrow", "←") as HTMLButtonElement;
-  prev.type = "button";
-  prev.setAttribute("aria-label", "Previous hobby");
-  const next = el("button", "carousel-arrow", "→") as HTMLButtonElement;
-  next.type = "button";
-  next.setAttribute("aria-label", "Next hobby");
-
-  const dots = el("div", "carousel-dots");
-  const dotButtons = hobbies.map((hobby, index) => {
-    const dot = el("button", "carousel-dot") as HTMLButtonElement;
-    dot.type = "button";
-    dot.setAttribute("aria-label", `Show ${hobby.title}`);
-    dot.addEventListener("click", () => scrollTo(index));
-    dots.append(dot);
-    return dot;
-  });
-
-  controls.append(prev, dots, next);
-  carousel.append(controls);
-  section.append(carousel);
+  body.append(rail);
+  section.append(body);
 
   let current = 0;
 
-  function scrollTo(index: number) {
-    const target = track.children[index] as HTMLElement | undefined;
-    if (target) track.scrollTo({ left: target.offsetLeft - track.offsetLeft });
-  }
-
-  function sync() {
-    // Nearest slide to the track's scroll position, rather than tracking
-    // clicks, so swiping and scrolling stay in step with the controls.
-    let nearest = 0;
-    let smallest = Infinity;
-    for (let i = 0; i < track.children.length; i++) {
-      const child = track.children[i] as HTMLElement;
-      const distance = Math.abs(child.offsetLeft - track.offsetLeft - track.scrollLeft);
-      if (distance < smallest) {
-        smallest = distance;
-        nearest = i;
-      }
-    }
-    current = nearest;
-    dotButtons.forEach((dot, i) => {
-      dot.classList.toggle("is-current", i === current);
-      if (i === current) dot.setAttribute("aria-current", "true");
-      else dot.removeAttribute("aria-current");
+  function select(index: number, moveFocus = false) {
+    current = index;
+    tabs.forEach((tab, i) => {
+      const selected = i === index;
+      tab.setAttribute("aria-selected", String(selected));
+      // Roving tabindex: one stop for the whole rail, so Tab moves past it
+      // rather than through every hobby.
+      tab.tabIndex = selected ? 0 : -1;
+      panels[i].hidden = !selected;
     });
-    prev.disabled = current === 0;
-    next.disabled = current === hobbies.length - 1;
+    if (moveFocus) tabs[index].focus();
   }
 
-  prev.addEventListener("click", () => scrollTo(current - 1));
-  next.addEventListener("click", () => scrollTo(current + 1));
-  track.addEventListener("scroll", sync, { passive: true });
-  carousel.addEventListener("keydown", (event) => {
+  rail.addEventListener("keydown", (event) => {
     const key = (event as KeyboardEvent).key;
-    if (key === "ArrowLeft") scrollTo(current - 1);
-    else if (key === "ArrowRight") scrollTo(current + 1);
+    const last = tabs.length - 1;
+    let next: number;
+    if (key === "ArrowRight" || key === "ArrowDown") next = current === last ? 0 : current + 1;
+    else if (key === "ArrowLeft" || key === "ArrowUp") next = current === 0 ? last : current - 1;
+    else if (key === "Home") next = 0;
+    else if (key === "End") next = last;
     else return;
     event.preventDefault();
+    select(next, true);
   });
 
-  sync();
+  select(0);
 }
 
 /**
