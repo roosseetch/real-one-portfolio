@@ -54,20 +54,31 @@ describe("the hobby rail", () => {
     expect(tabs[last].getAttribute("aria-selected")).toBe("true");
   });
 
-  /** The ARIA tabs contract: arrows move between tabs and wrap at the ends. */
+  /**
+   * The ARIA tabs contract: arrows move between tabs and wrap at the ends.
+   *
+   * Written against the profile's own length rather than against index 1: CI
+   * runs this with a fixture profile carrying a single hobby, where every one
+   * of these moves lands back on the same tab — which is the wrap working, not
+   * a case to skip.
+   */
   it("moves with the arrow keys and wraps around", () => {
     const { tabs, rail } = hobbies();
     const last = tabs.length - 1;
+    const selected = () => tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
 
     press(rail, "ArrowRight");
-    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+    expect(selected()).toBe(last === 0 ? 0 : 1);
 
     press(rail, "ArrowLeft");
+    expect(selected()).toBe(0);
+
+    // Backwards off the front, which is where it wraps.
     press(rail, "ArrowLeft");
-    expect(tabs[last].getAttribute("aria-selected")).toBe("true");
+    expect(selected()).toBe(last);
 
     press(rail, "ArrowRight");
-    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    expect(selected()).toBe(0);
   });
 
   it("jumps to the ends with Home and End", () => {
