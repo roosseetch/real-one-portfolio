@@ -101,6 +101,27 @@ describe("the hobby rail", () => {
   });
 
   /**
+   * A lazy image inside a panel that was `display: none` when it was parsed is
+   * never fetched, and revealing the panel does not start it — which left three
+   * of the four hobbies showing an empty plate on the live site. Asking for it
+   * eagerly at the moment it is shown is what starts the request; the panels
+   * nobody has opened keep theirs unfetched, which is what lazy was for.
+   */
+  it("asks for a photograph only once its hobby is opened", () => {
+    const { tabs, panels } = hobbies();
+    const loadingOf = (panel: HTMLElement) => panel.querySelector("img")?.getAttribute("loading");
+    // Every panel has a real <img> now that the suite is given a media base.
+    expect(panels.every((panel) => panel.querySelector("img"))).toBe(true);
+
+    expect(loadingOf(panels[0])).toBe("eager");
+    for (const panel of panels.slice(1)) expect(loadingOf(panel)).toBe("lazy");
+
+    const last = tabs.length - 1;
+    tabs[last].click();
+    expect(loadingOf(panels[last])).toBe("eager");
+  });
+
+  /**
    * A headline is someone's own words about their own hobby. Where the profile
    * has none the title is the heading and there is no kicker above it, rather
    * than a line invented to fill the space the design leaves for one.
