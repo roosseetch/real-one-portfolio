@@ -365,6 +365,104 @@ describe("the photo stack on a listing card", () => {
     const single = renderRecord({ id: "rec-1", title: "A note", media: [image(1)] as never }, { heading: "h1" });
 
     expect(single.querySelector(".activity-mosaic")).toBeNull();
-    expect(single.querySelector(".activity-media")).not.toBeNull();
+    expect(single.querySelector(".media-carousel")).not.toBeNull();
+  });
+});
+
+/* The carousel on a record's own page. Scroll position is the source of truth
+   for where it is, and happy-dom has no layout — every offset is zero — so what
+   is exercised here is the structure and the initial state. Paging itself is a
+   browser check (the plan's step 4), like every other scroll-snap behaviour. */
+describe("the media carousel", () => {
+  const image = (n: number, extra: Record<string, unknown> = {}) => ({
+    type: "image" as const,
+    src: `https://media.test/media/activity-1/full-${n}.webp`,
+    thumbnail: `https://media.test/media/activity-1/thumb-${n}.webp`,
+    alt: `Picture ${n}`,
+    ...extra,
+  });
+
+  const single = (media: unknown[]) =>
+    renderRecord({ id: "rec-1", title: "A note", media: media as never }, { heading: "h1" });
+
+  it("shows every item once in the track and once in the strip", () => {
+    const card = single([image(1), image(2), image(3), image(4), image(5)]);
+
+    expect(card.querySelectorAll(".carousel-slide")).toHaveLength(5);
+    expect(card.querySelectorAll(".carousel-thumb")).toHaveLength(5);
+  });
+
+  /** Padded, so the counter does not change width as it counts. */
+  it("says where in the set the reader is", () => {
+    const counter = single([image(1), image(2), image(3)]).querySelector(".carousel-counter");
+
+    expect(counter?.textContent).toBe("1 / 3");
+    expect(counter?.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("marks the item the strip is showing", () => {
+    const thumbs = [...single([image(1), image(2)]).querySelectorAll(".carousel-thumb")];
+
+    expect(thumbs[0].getAttribute("aria-current")).toBe("true");
+    expect(thumbs[1].getAttribute("aria-current")).toBeNull();
+  });
+
+  /** Nothing before the first item, so the arrow says so rather than doing nothing. */
+  it("disables the arrow that has nowhere to go", () => {
+    const arrows = [...single([image(1), image(2)]).querySelectorAll<HTMLButtonElement>(".carousel-arrow")];
+
+    expect(arrows.map((arrow) => arrow.getAttribute("aria-label"))).toEqual(["Previous", "Next"]);
+    expect(arrows[0].disabled).toBe(true);
+    expect(arrows[1].disabled).toBe(false);
+  });
+
+  /** One picture is not a set, so there is nothing to navigate and no chrome for it. */
+  it("drops the controls for a record carrying one item", () => {
+    const card = single([image(1, { caption: "Just the one" })]);
+
+    expect(card.querySelectorAll(".carousel-slide")).toHaveLength(1);
+    expect(card.querySelector(".carousel-bar")).toBeNull();
+    expect(card.querySelector(".carousel-strip")).toBeNull();
+    expect(card.querySelector(".carousel-caption")?.textContent).toBe("Just the one");
+  });
+
+  it("renders nothing at all for a record carrying none", () => {
+    expect(single([]).querySelector(".media-carousel")).toBeNull();
+  });
+
+  /** An item with no caption must not leave an empty line under the plate. */
+  it("hides the caption a record does not have", () => {
+    const caption = single([image(1)]).querySelector<HTMLElement>(".carousel-caption");
+
+    expect(caption?.hidden).toBe(true);
+  });
+
+  it("keeps a clip a clip, poster and all", () => {
+    const card = single([
+      image(1),
+      {
+        type: "video",
+        src: "https://media.test/media/activity-1/clip.mp4",
+        poster: "https://media.test/media/activity-1/poster.webp",
+        alt: "A clip of something",
+      },
+    ]);
+    const video = card.querySelector("video") as HTMLVideoElement;
+
+    expect(video.poster).toBe("https://media.test/media/activity-1/poster.webp");
+    expect(video.preload).toBe("none");
+    expect(video.controls).toBe(true);
+    expect(video.playsInline).toBe(true);
+    expect(video.getAttribute("aria-label")).toBe("A clip of something");
+    // And its thumbnail in the strip is the poster, not a second <video>.
+    expect(card.querySelectorAll("video")).toHaveLength(1);
+  });
+
+  /** The track scrolls, so it has to be a focus stop with a name of its own. */
+  it("lets a keyboard reach the track", () => {
+    const track = single([image(1), image(2)]).querySelector<HTMLElement>(".carousel-track");
+
+    expect(track?.tabIndex).toBe(0);
+    expect(track?.getAttribute("aria-label")).toContain("arrow keys");
   });
 });

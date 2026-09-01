@@ -326,8 +326,9 @@ describe("what a record renders as", () => {
     expect(section.querySelectorAll(".activity-body")).toHaveLength(1);
   });
 
-  /* The full figures belong to the page that shows one record. A listing card
-     shows the mosaic instead — see "the photo stack on a listing card" below. */
+  /* Media belongs to the page that shows one record, where it is a carousel. A
+     listing card shows the mosaic instead — see "the photo stack on a listing
+     card" in activity.test.ts. */
   it("loads a picture lazily, from its thumbnail, with the caption beside it", async () => {
     serve(
       bucketOf([
@@ -351,7 +352,7 @@ describe("what a record renders as", () => {
     expect(img.getAttribute("src")).toBe("https://media.test/media/activity-1/thumb.webp");
     expect(img.alt).toBe("A description");
     expect(img.loading).toBe("lazy");
-    expect(section.querySelector("figcaption")?.textContent).toBe("A caption");
+    expect(section.querySelector(".carousel-caption")?.textContent).toBe("A caption");
   });
 
   it("shows a video as its poster until someone presses play", async () => {
@@ -551,5 +552,82 @@ describe("one activity, by ?v=", () => {
     await loaded(section);
 
     expect(track).not.toHaveBeenCalled();
+  });
+});
+
+describe("a record's own page", () => {
+  const feed = () =>
+    bucketOf([
+      record("oldest", { publishedAt: "2026-08-01T09:00:00.000Z" }),
+      record("middle", { publishedAt: "2026-08-02T09:00:00.000Z" }),
+      record("newest", { publishedAt: "2026-08-03T09:00:00.000Z" }),
+    ]);
+
+  const neighbours = (section: HTMLElement) =>
+    [...section.querySelectorAll(".activity-neighbour")].map((link) => [
+      link.querySelector(".activity-neighbour-label")?.textContent,
+      link.querySelector(".activity-neighbour-title")?.textContent,
+    ]);
+
+  /**
+   * On a page reached from a link — which is what a permalink is for — the way
+   * back to the list is a place to start rather than something to find after
+   * reading everything.
+   */
+  it("offers the way back before the record, not after it", async () => {
+    serve(feed());
+    const section = mount("?v=middle");
+    await loaded(section);
+
+    const children = [...section.children].map((child) => child.className);
+    expect(children.indexOf("activity-back label")).toBeLessThan(children.indexOf("activity-list activity-single"));
+    expect(section.querySelector(".activity-back")?.textContent).toBe("All activities");
+  });
+
+  it("points at the records either side of this one", async () => {
+    serve(feed());
+    const section = mount("?v=middle");
+    await loaded(section);
+
+    // The list is newest first, so the record after this one in it is the older.
+    expect(neighbours(section)).toEqual([
+      ["Older", "oldest"],
+      ["Newer", "newest"],
+    ]);
+    expect(section.querySelector(".activity-neighbour")?.getAttribute("href")).toBe("/activities/?v=oldest");
+  });
+
+  /** Nothing beyond the end of the feed, so there is no link rather than a dead one. */
+  it("offers only the side that exists at either end", async () => {
+    serve(feed());
+    const newest = mount("?v=newest");
+    await loaded(newest);
+    expect(neighbours(newest)).toEqual([["Older", "middle"]]);
+
+    document.body.replaceChildren();
+    serve(feed());
+    const oldest = mount("?v=oldest");
+    await loaded(oldest);
+    expect(neighbours(oldest)).toEqual([["Newer", "middle"]]);
+  });
+
+  it("offers none at all when the feed holds this record alone", async () => {
+    serve(bucketOf([record("only")]));
+    const section = mount("?v=only");
+    await loaded(section);
+
+    expect(section.querySelector(".activity-neighbours")).toBeNull();
+  });
+
+  /**
+   * Two records can share a slug, and the page shows both. Which one the
+   * neighbours would belong to has no answer, so it does not offer any.
+   */
+  it("offers none when the slug named more than one record", async () => {
+    serve(bucketOf([record("twice", { id: "one" }), record("twice", { id: "two" })]));
+    const section = mount("?v=twice");
+    await loaded(section);
+
+    expect(section.querySelector(".activity-neighbours")).toBeNull();
   });
 });

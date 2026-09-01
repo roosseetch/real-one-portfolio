@@ -385,6 +385,213 @@ function mediaMosaic(record: ActivityRecord, href: string): HTMLElement | null {
   return link;
 }
 
+/** A long ruled arrow, as the design draws its navigation. Left when `back`. */
+export function longArrow(back: boolean, length = 56): SVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${length} 12`);
+  svg.setAttribute("width", String(Math.round(length * 0.79)));
+  svg.setAttribute("height", "12");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  for (const d of back
+    ? [`M${length} 6H1`, "M7 1 1 6l6 5"]
+    : ["M0 6h" + (length - 1), `m${length - 7} 1 6 5-6 5`]) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+/** "01 / 05" — padded, so the counter does not change width as it counts. */
+function counterText(index: number, total: number): string {
+  const width = String(total).length;
+  return `${String(index + 1).padStart(width, "0")} / ${String(total).padStart(width, "0")}`;
+}
+
+/** What a media item shows in the plate: the picture, or the clip itself. */
+function slideMedia(media: ActivityMedia): HTMLElement {
+  if (media.type === "video") {
+    const video = document.createElement("video");
+    video.src = media.src;
+    // preload="none" with a poster: the frame is a WebP of a few tens of KB and
+    // shows immediately, while the clip's megabytes are fetched only if someone
+    // presses play. Without the poster the element would be a blank box, since
+    // nothing has been downloaded to draw.
+    const poster = media.poster ?? media.thumbnail;
+    if (poster) video.poster = poster;
+    video.preload = "none";
+    video.controls = true;
+    // Or iOS Safari takes the video fullscreen the moment it starts.
+    video.playsInline = true;
+    // A video has no alt attribute; the same words become its accessible name.
+    if (media.alt) video.setAttribute("aria-label", media.alt);
+    return video;
+  }
+
+  const img = new Image();
+  img.src = media.thumbnail ?? media.src;
+  img.alt = media.alt ?? "";
+  img.loading = "lazy";
+  img.decoding = "async";
+  return img;
+}
+
+/**
+ * Every photograph and clip a record carries, one at a time.
+ *
+ * This replaces a column of figures at full width, which on a record with five
+ * pictures was a page of pictures with the text somewhere above it. The design
+ * shows one plate with ruled arrows, a counter, a caption, and a strip of
+ * thumbnails to jump by.
+ *
+ * Scroll snapping does the paging, so a swipe and a trackpad work with no
+ * JavaScript at all; the arrows and the strip drive that same scroll, which
+ * keeps one source of truth for where the carousel is — the same arrangement
+ * the hobbies carousel used before the rail replaced it. A record with one
+ * picture gets the plate and none of the chrome, since there is nothing to
+ * navigate.
+ */
+function mediaCarousel(record: ActivityRecord): HTMLElement | null {
+  const media = record.media ?? [];
+  if (media.length === 0) return null;
+
+  const carousel = el("div", "media-carousel");
+  const single = media.length === 1;
+
+  const track = el("div", "carousel-track");
+  if (!single) {
+    // The track scrolls, so it has to be reachable by keyboard on its own:
+    // someone navigating without a mouse must be able to focus it and use the
+    // arrow keys, which the handler below listens for. A bare div cannot carry
+    // a name, hence the group role.
+    track.tabIndex = 0;
+    track.setAttribute("role", "group");
+    track.setAttribute("aria-roledescription", "carousel");
+    track.setAttribute("aria-label", `${record.title}: ${media.length} items, use arrow keys to browse`);
+  }
+
+  media.forEach((item, index) => {
+    const slide = el("div", "carousel-slide plate");
+    if (!single) {
+      slide.setAttribute("role", "group");
+      slide.setAttribute("aria-roledescription", "slide");
+      slide.setAttribute("aria-label", `${index + 1} of ${media.length}`);
+    }
+    slide.append(slideMedia(item));
+    track.append(slide);
+  });
+  carousel.append(track);
+
+  const caption = el("p", "carousel-caption");
+  const setCaption = (index: number) => {
+    caption.textContent = media[index]?.caption ?? "";
+    caption.hidden = caption.textContent === "";
+  };
+
+  if (single) {
+    setCaption(0);
+    carousel.append(caption);
+    return carousel;
+  }
+
+  const bar = el("div", "carousel-bar");
+  const prev = el("button", "carousel-arrow") as HTMLButtonElement;
+  prev.type = "button";
+  prev.setAttribute("aria-label", "Previous");
+  prev.append(longArrow(true));
+  const next = el("button", "carousel-arrow") as HTMLButtonElement;
+  next.type = "button";
+  next.setAttribute("aria-label", "Next");
+  next.append(longArrow(false));
+
+  const counter = el("span", "carousel-counter label tnum");
+  // Where in the set the reader is, which is the one thing the plate itself
+  // does not say. Polite, so it waits for a gap rather than cutting in.
+  counter.setAttribute("aria-live", "polite");
+
+  bar.append(prev, next, counter);
+  carousel.append(bar, caption);
+
+  const strip = el("div", "carousel-strip");
+  strip.setAttribute("role", "group");
+  strip.setAttribute("aria-label", "Choose an item");
+  const thumbs = media.map((item, index) => {
+    const button = el("button", "carousel-thumb plate") as HTMLButtonElement;
+    button.type = "button";
+    button.setAttribute(
+      "aria-label",
+      item.alt || `${item.type === "video" ? "Clip" : "Photo"} ${index + 1}`,
+    );
+    const source = item.type === "video" ? (item.poster ?? item.thumbnail) : (item.thumbnail ?? item.src);
+    if (source) {
+      const img = new Image();
+      img.src = source;
+      // The button's own label names the item; the picture inside it is the
+      // button's face, not a second thing to describe.
+      img.alt = "";
+      img.loading = "lazy";
+      button.append(img);
+    }
+    button.addEventListener("click", () => scrollToSlide(index));
+    strip.append(button);
+    return button;
+  });
+  carousel.append(strip);
+
+  let current = 0;
+
+  function scrollToSlide(index: number) {
+    const target = track.children[index] as HTMLElement | undefined;
+    if (target) track.scrollTo({ left: target.offsetLeft - track.offsetLeft });
+  }
+
+  function sync() {
+    // Nearest slide to the track's scroll position, rather than tracking
+    // clicks, so swiping and scrolling stay in step with the controls.
+    let nearest = 0;
+    let smallest = Infinity;
+    for (let i = 0; i < track.children.length; i++) {
+      const child = track.children[i] as HTMLElement;
+      const distance = Math.abs(child.offsetLeft - track.offsetLeft - track.scrollLeft);
+      if (distance < smallest) {
+        smallest = distance;
+        nearest = i;
+      }
+    }
+    current = nearest;
+    counter.textContent = counterText(current, media.length);
+    setCaption(current);
+    thumbs.forEach((thumb, i) => {
+      if (i === current) thumb.setAttribute("aria-current", "true");
+      else thumb.removeAttribute("aria-current");
+    });
+    prev.disabled = current === 0;
+    next.disabled = current === media.length - 1;
+  }
+
+  prev.addEventListener("click", () => scrollToSlide(current - 1));
+  next.addEventListener("click", () => scrollToSlide(current + 1));
+  track.addEventListener("scroll", sync, { passive: true });
+  track.addEventListener("keydown", (event) => {
+    const key = (event as KeyboardEvent).key;
+    if (key === "ArrowLeft") scrollToSlide(current - 1);
+    else if (key === "ArrowRight") scrollToSlide(current + 1);
+    else return;
+    event.preventDefault();
+  });
+
+  sync();
+  return carousel;
+}
+
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
 
@@ -413,42 +620,21 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
   }
   text.append(heading);
 
+  // The short gold rule the design sets under the title of a record shown on
+  // its own. Not on a listing card, where ten of them would be ten rules.
+  if (options.heading === "h1") {
+    const rule = el("div", "rule-accent activity-rule");
+    rule.setAttribute("aria-hidden", "true");
+    text.append(rule);
+  }
+
   const blocks = textOf(record);
   const shown = options.excerpt && options.href ? excerptOf(blocks) : { blocks, cut: false };
   for (const block of shown.blocks) text.append(el("p", block.className, block.text));
 
   if (!listing) {
-    for (const media of record.media ?? []) {
-      if (media.type === "image") {
-        const figure = el("figure", "activity-media");
-        const img = new Image();
-        img.src = media.thumbnail ?? media.src;
-        img.alt = media.alt ?? "";
-        img.loading = "lazy";
-        figure.append(img);
-        if (media.caption) figure.append(el("figcaption", undefined, media.caption));
-        text.append(figure);
-      } else if (media.type === "video") {
-        const figure = el("figure", "activity-media");
-        const video = document.createElement("video");
-        video.src = media.src;
-        // preload="none" with a poster: the frame is a WebP of a few tens of KB
-        // and shows immediately, while the clip's megabytes are fetched only if
-        // someone presses play. Without the poster the element would be a blank
-        // box, since nothing has been downloaded to draw.
-        const poster = media.poster ?? media.thumbnail;
-        if (poster) video.poster = poster;
-        video.preload = "none";
-        video.controls = true;
-        // Or iOS Safari takes the video fullscreen the moment it starts.
-        video.playsInline = true;
-        // A video has no alt attribute; the same words become its accessible name.
-        if (media.alt) video.setAttribute("aria-label", media.alt);
-        figure.append(video);
-        if (media.caption) figure.append(el("figcaption", undefined, media.caption));
-        text.append(figure);
-      }
-    }
+    const carousel = mediaCarousel(record);
+    if (carousel) text.append(carousel);
   }
 
   if (record.tags?.length) {
