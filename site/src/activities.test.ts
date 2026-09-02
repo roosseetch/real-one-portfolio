@@ -206,11 +206,11 @@ describe("sort order", () => {
     await loaded(section);
 
     const toggle = sortToggle(section);
-    expect(toggle.textContent).toBe("Oldest first");
+    expect(toggle.textContent).toBe("Sorted: Newest first");
     toggle.click();
 
     expect(titles(section)).toEqual(["oldest", "middle", "newest"]);
-    expect(toggle.textContent).toBe("Newest first");
+    expect(toggle.textContent).toBe("Sorted: Oldest first");
   });
 
   it("goes back again on a second press", async () => {
@@ -223,7 +223,29 @@ describe("sort order", () => {
     toggle.click();
 
     expect(titles(section)).toEqual(["newest", "middle", "oldest"]);
-    expect(toggle.textContent).toBe("Oldest first");
+    expect(toggle.textContent).toBe("Sorted: Newest first");
+  });
+
+  /* The label names the order on screen, so on its own it does not say what a
+     press would do. The accessible name has to say both, or a reader who cannot
+     see the list has no way to find out. */
+  it("names both the order it is in and the order a press would give", async () => {
+    serve(dated());
+    const section = mount();
+    await loaded(section);
+
+    const toggle = sortToggle(section);
+    expect(toggle.getAttribute("aria-label")).toBe(
+      "Sorted: Newest first. Press to sort oldest first.",
+    );
+    expect(toggle.dataset.order).toBe("descending");
+
+    toggle.click();
+
+    expect(toggle.getAttribute("aria-label")).toBe(
+      "Sorted: Oldest first. Press to sort newest first.",
+    );
+    expect(toggle.dataset.order).toBe("ascending");
   });
 
   it("ignores the date the note mentioned", async () => {
