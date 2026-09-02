@@ -79,6 +79,32 @@ function neighbourLinks(records: ActivityRecord[], current: ActivityRecord): HTM
 }
 
 /**
+ * The sort control's direction mark. It is drawn pointing down, for newest
+ * first, and turned over by CSS when the order is; the outermost `<svg>` is the
+ * one element a `transform` attribute does not reliably move.
+ */
+function sortArrow(): SVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "activity-sort-arrow");
+  svg.setAttribute("viewBox", "0 0 12 12");
+  svg.setAttribute("width", "9");
+  svg.setAttribute("height", "9");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.1");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M6 1v10M2 7l4 4 4-4");
+  svg.append(path);
+  return svg;
+}
+
+/**
  * Every record, newest first, each title a link to its own page.
  *
  * The text is cut to an excerpt here. A list is for finding the activity you
@@ -97,12 +123,33 @@ function renderList(section: HTMLElement, list: HTMLElement, records: ActivityRe
     );
   };
 
-  const toggle = el("button", "activity-sort label", "Oldest first") as HTMLButtonElement;
+  const toggle = el("button", "activity-sort label") as HTMLButtonElement;
+  toggle.type = "button";
+  const state = el("span", "activity-sort-state");
+  toggle.append(state, sortArrow());
+
+  // The label names the order on screen rather than the one a press would
+  // produce. Naming the press was shorter, but it left the reader deciding
+  // which of the two the words meant, and the list itself is the only place
+  // that answer was written down.
+  const describe = () => {
+    state.textContent = ascending ? "Sorted: Oldest first" : "Sorted: Newest first";
+    toggle.dataset.order = ascending ? "ascending" : "descending";
+    // The visible words open the accessible name, so a reader who speaks them
+    // to a voice control names the same button (WCAG 2.5.3), and what the press
+    // does is said out loud rather than left to the arrow.
+    toggle.setAttribute(
+      "aria-label",
+      `${state.textContent}. Press to sort ${ascending ? "newest" : "oldest"} first.`,
+    );
+  };
+
   toggle.addEventListener("click", () => {
     ascending = !ascending;
-    toggle.textContent = ascending ? "Newest first" : "Oldest first";
+    describe();
     paint();
   });
+  describe();
 
   // A hairline running out from the heading to the control, which is how the
   // design separates the page's title from its list.

@@ -1028,12 +1028,15 @@ main {
   margin: 1.25rem 0 1.5rem;
 }
 
-/* Title, a hairline running out from it, and the list's own control. */
+/* Title, a hairline running out from it, and the list's own control.
+   Aligned to the bottom so the hairline and the control's gold underline land
+   on the same row: one line, with the label sitting on it. Centred, the
+   control's 44px tap target pushed its text half that far below the rule. */
 .activity-list-head {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 0.875rem;
-  margin: 1.25rem 0 2.125rem;
+  margin: 0 0 2.125rem;
 }
 
 .activity-list-head .rule {
@@ -1047,6 +1050,7 @@ main {
   flex: none;
   display: inline-flex;
   align-items: flex-end;
+  gap: 0.5rem;
   min-height: 2.75rem;
   padding: 0 0 0.375rem;
   border: 0;
@@ -1066,6 +1070,18 @@ main {
 .activity-sort:focus-visible {
   color: var(--text);
   border-bottom-color: var(--gold-line);
+}
+
+/* Down for newest first, over for oldest. The words say the same thing; this
+   is for the reader who takes in the shape before the sentence. */
+.activity-sort-arrow {
+  flex: none;
+  margin-bottom: 0.0625rem;
+  transition: transform 0.18s ease;
+}
+
+.activity-sort[data-order="ascending"] .activity-sort-arrow {
+  transform: rotate(180deg);
 }
 
 .activity-list {
