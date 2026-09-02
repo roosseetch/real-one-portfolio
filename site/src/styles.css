@@ -643,7 +643,9 @@ main {
 
 .about-paragraph {
   margin: 1.5rem 0 0;
-  color: var(--muted);
+  font-size: var(--size-lead);
+  line-height: 1.68;
+  color: var(--ink-lead);
   max-width: 64ch;
 }
 
@@ -758,15 +760,15 @@ main {
 }
 
 .timeline-where {
-  font-size: 0.8125rem;
+  font-size: var(--size-body);
   line-height: 1.5;
   color: var(--sub);
 }
 
 .timeline-summary {
   margin: 0.75rem 0 0;
-  font-size: var(--size-small);
-  line-height: 1.7;
+  font-size: var(--size-lead);
+  line-height: 1.68;
   color: var(--muted);
   max-width: 54ch;
 }
@@ -788,8 +790,8 @@ main {
 .timeline-highlights li {
   position: relative;
   padding-left: 1.125rem;
-  font-size: 0.8125rem;
-  line-height: 1.6;
+  font-size: var(--size-body);
+  line-height: 1.65;
   color: var(--sub);
 }
 
@@ -1172,8 +1174,8 @@ main {
 .activity-summary,
 .activity-body {
   margin: 0;
-  font-size: var(--size-small);
-  line-height: 1.7;
+  font-size: var(--size-lead);
+  line-height: 1.68;
   color: var(--muted);
 }
 
@@ -1199,7 +1201,6 @@ main {
 }
 
 .activity-single .activity-summary {
-  font-size: 1.09375rem;
   color: var(--ink-prose);
 }
 
