@@ -333,6 +333,13 @@ function mosaicImage(media: ActivityMedia): HTMLElement {
   const source = media.type === "video" ? (media.poster ?? media.thumbnail) : (media.thumbnail ?? media.src);
   const cell = el("div", "activity-mosaic-cell plate");
   if (!source) return cell;
+  // A clip's picture is its poster, and the sanitiser writes no poster AVIF --
+  // a <video> names its poster in an attribute that takes one URL and can
+  // never be given a <picture> to choose from, so encoding one would be four
+  // rav1e passes for a file nothing could request. Offering an AVIF here
+  // anyway would point a <source> at a file that was never written, which a
+  // browser renders as nothing rather than falling back to the <img>.
+  const avif = media.type === "video" ? null : avifFrom(source);
 
   const img = new Image();
   img.src = source;
@@ -344,7 +351,7 @@ function mosaicImage(media: ActivityMedia): HTMLElement {
   img.decoding = "async";
   // One URL rather than a ladder, because the cell is fixed by the mosaic's
   // grid and always shows the 320px derivative.
-  cell.append(pictureFor(img, avifFrom(source)));
+  cell.append(pictureFor(img, avif));
   return cell;
 }
 
@@ -639,7 +646,9 @@ function mediaCarousel(record: ActivityRecord): HTMLElement | null {
       img.loading = "lazy";
       // No ladder here either: a 6rem button shows the 320px derivative and
       // nothing else, which is why the <img> carries no srcset of its own.
-      button.append(pictureFor(img, avifFrom(source)));
+      // And no AVIF for a clip, for the reason mosaicImage gives: what stands
+      // in for a video is its poster, and posters are WebP only.
+      button.append(pictureFor(img, item.type === "video" ? null : avifFrom(source)));
     }
     button.addEventListener("click", () => scrollToSlide(index));
     strip.append(button);

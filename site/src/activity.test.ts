@@ -367,6 +367,21 @@ describe("the photo stack on a listing card", () => {
     expect([...card.querySelectorAll("img")].every((img) => img.alt === "")).toBe(true);
   });
 
+  /* The same poster rule as the filmstrip's, for the same reason: a clip in a
+     mosaic shows its poster, and posters are WebP only. */
+  it("offers a clip's cell no AVIF", () => {
+    const cell = listed([
+      {
+        type: "video",
+        src: "https://media.test/media/activity-1/c.mp4",
+        poster: "https://media.test/media/activity-1/c-poster-1600.webp",
+      },
+    ]).querySelector(".activity-mosaic-cell") as HTMLElement;
+
+    expect(cell.querySelector("img")?.getAttribute("src")).toContain("c-poster-1600.webp");
+    expect(cell.querySelector("source")).toBeNull();
+  });
+
   /* Three cells on a card that a reader is scrolling past: the smallest files
      on the page, and the ones there are most of. */
   it("offers each mosaic cell its AVIF", () => {
@@ -643,6 +658,27 @@ describe("the way into the full-screen view", () => {
     const source = thumb.querySelector("source") as HTMLSourceElement;
 
     expect(source.getAttribute("srcset")).toBe("https://media.test/media/activity-1/p1-320.avif");
+  });
+
+  /* Caught in a browser, not by a test: the sanitiser writes no poster AVIF,
+     because a <video> names its poster in an attribute that takes one URL and
+     can never be given a <picture>. Offering one anyway pointed a <source> at a
+     file that was never written, and a browser that has chosen a source renders
+     nothing rather than falling back to the <img> — so every clip came out
+     blank. */
+  it("offers the filmstrip no AVIF for a clip, whose picture is a poster", () => {
+    const clip = {
+      type: "video",
+      src: "https://media.test/media/activity-1/c.mp4",
+      poster: "https://media.test/media/activity-1/c-poster-1600.webp",
+      thumbnail: "https://media.test/media/activity-1/c-poster-320.webp",
+    };
+    const thumb = single([clip, image(1)]).querySelector(".carousel-thumb") as HTMLElement;
+
+    // The widest poster rather than the 320px one, which is what the filmstrip
+    // has always done for a clip. What matters here is the absent <source>.
+    expect(thumb.querySelector("img")?.getAttribute("src")).toContain("c-poster-1600.webp");
+    expect(thumb.querySelector("source")).toBeNull();
   });
 
   it("puts the source ahead of the image in every plate", () => {
