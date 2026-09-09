@@ -84,7 +84,12 @@ export function brandMark(): HTMLImageElement | null {
   if (!MEDIA_BASE) return null;
   const img = new Image();
   img.className = "brand-mark";
-  img.src = `${MEDIA_BASE}/media/profile/mark.png`;
+  // Named for its width, as the other profile media is, and that is what makes
+  // it safe to redraw: the objects here are uploaded to a stable key with a
+  // week of cache behind them, so replacing mark.png in place left the CDN
+  // serving the old one and no token to hand could purge it. A new width is a
+  // new name is a new object, which every reader gets at once.
+  img.src = `${MEDIA_BASE}/media/profile/mark-730.png`;
   // The wordmark beside it says the name, so the mark adds nothing to say.
   img.alt = "";
   img.decoding = "async";
