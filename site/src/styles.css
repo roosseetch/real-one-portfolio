@@ -1284,9 +1284,15 @@ main {
 }
 
 .carousel-slide {
+  /* Named, because the picture inside has to be bounded by the same number and
+     cannot get there through a percentage: the zoom button between them has an
+     auto height, and a percentage max-height against an auto height resolves to
+     none — which let a portrait photograph render at its full 1412px and push
+     the caption off the plate. */
+  --plate-height: clamp(18.75rem, 12.9rem + 24vw, 26rem);
   flex: 0 0 100%;
   scroll-snap-align: center;
-  height: clamp(18.75rem, 12.9rem + 24vw, 26rem);
+  height: var(--plate-height);
   display: grid;
   place-items: center;
 }
@@ -1296,7 +1302,7 @@ main {
 .carousel-slide img,
 .carousel-slide video {
   max-width: 100%;
-  max-height: 100%;
+  max-height: var(--plate-height);
   width: auto;
   height: auto;
   object-fit: contain;
@@ -1399,23 +1405,21 @@ main {
 /* The way into the full-screen view. A button rather than a click handler on
    the picture, so a keyboard reaches it — and one that takes the plate's whole
    box, so the target is the photograph and not a rectangle beside it. */
+/* Stretched across the plate rather than shrink-wrapped around the picture.
+   Shrink-wrapping looks tidier and does not work: an <img> that has not loaded
+   has no intrinsic size, so the button around it is 0x0, and a lazy image with
+   no area is one Chrome never gets round to fetching. A button with the plate's
+   own box breaks that circle, and the larger target is no loss. */
 .carousel-zoom {
   display: grid;
   place-items: center;
-  width: 100%;
-  height: 100%;
+  place-self: stretch;
+  min-width: 0;
+  min-height: 0;
   padding: 0;
   border: 0;
   background: none;
   cursor: zoom-in;
-}
-
-.carousel-zoom img {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
-  height: auto;
-  object-fit: contain;
 }
 
 /*
@@ -1434,8 +1438,15 @@ main {
   background: #000;
   color: #f4f1ec;
   display: grid;
-  grid-template-rows: 1fr auto;
-  place-items: center;
+  /* minmax(0, …) rather than a bare 1fr, and stretch rather than centre: a
+     centred row is sized by its content, which makes the figure's height auto,
+     which makes the picture's max-height:100% resolve to none — and a 1280px
+     photograph then runs off the bottom of the screen. Stretching the figure
+     into a track that may shrink below its content is what gives the picture a
+     definite box to be contained by. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  align-items: stretch;
   overscroll-behavior: contain;
 }
 
@@ -1445,8 +1456,9 @@ main {
 
 .lightbox-figure {
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   justify-items: center;
+  align-items: center;
   gap: 0.875rem;
   margin: 0;
   padding: clamp(1rem, 0.5rem + 2vw, 2.5rem);
@@ -1469,7 +1481,9 @@ main {
   font-size: var(--size-small);
   line-height: 1.6;
   text-align: center;
-  max-width: 60ch;
+  /* min(), not a bare 60ch: 60ch is wider than a phone, and a caption that long
+     would push the black ground sideways. */
+  max-width: min(60ch, 100%);
   /* Legible on black without competing with the picture for attention. */
   color: rgb(244 241 236 / 0.72);
 }

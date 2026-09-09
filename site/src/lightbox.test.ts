@@ -80,6 +80,50 @@ describe("the full-screen view", () => {
     expect(document.body.contains(dialog!)).toBe(false);
   });
 
+  /* The cleanup used to hang off the `close` event alone, and that event did not
+     fire in the browser this was tested in: the scroll lock stayed on and the
+     article underneath could not be scrolled again. Every route out goes through
+     the same idempotent teardown now. */
+  it("gives the page back its scrolling however it is dismissed", () => {
+    for (const dismiss of [
+      (d: HTMLDialogElement) => (d.querySelector(".lightbox-close") as HTMLButtonElement).click(),
+      (d: HTMLDialogElement) => d.click(),
+      (d: HTMLDialogElement) =>
+        d.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+      (d: HTMLDialogElement) => d.close(),
+    ]) {
+      document.documentElement.style.overflow = "";
+      const dialog = openLightbox([photo(1)], 0)!;
+
+      dismiss(dialog);
+
+      expect(document.documentElement.style.overflow).toBe("");
+      expect(document.body.contains(dialog)).toBe(false);
+    }
+  });
+
+  /* Two routes arriving — a click that closes and the `close` event behind it —
+     must not be two teardowns. */
+  it("tears down once even when several routes fire", () => {
+    document.documentElement.style.overflow = "";
+    const dialog = openLightbox([photo(1)], 0)!;
+
+    (dialog.querySelector(".lightbox-close") as HTMLButtonElement).click();
+    dialog.dispatchEvent(new Event("close"));
+    dialog.click();
+
+    expect(document.documentElement.style.overflow).toBe("");
+    expect(document.querySelectorAll("dialog.lightbox")).toHaveLength(0);
+  });
+
+  it("does not leave a press on the picture closing it", () => {
+    const dialog = openLightbox([photo(1)], 0)!;
+
+    (dialog.querySelector("img") as HTMLImageElement).click();
+
+    expect(document.body.contains(dialog)).toBe(true);
+  });
+
   it("renders nothing for a record with no photographs", () => {
     expect(openLightbox([], 0)).toBeNull();
     expect(document.body.children).toHaveLength(0);

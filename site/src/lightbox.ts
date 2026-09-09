@@ -129,9 +129,36 @@ export function openLightbox(photos: ActivityMedia[], index: number): HTMLDialog
     }
   }
 
+  // showModal makes the page behind inert but does not stop it scrolling, so a
+  // wheel over the black ground would move the article underneath it.
+  const scrollLock = document.documentElement.style.overflow;
+  let dismissed = false;
+
+  /**
+   * Undoes everything opening did, once, however the dialog was dismissed.
+   *
+   * Not hung off the `close` event, which is where this started and where it
+   * went wrong: the event did not fire in the browser it was tested in, so the
+   * scroll lock stayed on and the article underneath could not be scrolled
+   * again — a worse bug than the one the lightbox was written to fix. Every
+   * route out now calls this instead, `close` included, and it is idempotent so
+   * that two of them arriving is not two cleanups.
+   */
+  function dismiss() {
+    if (dismissed) return;
+    dismissed = true;
+
+    document.documentElement.style.overflow = scrollLock;
+    if (dialog.open) dialog.close();
+    dialog.remove();
+    // Browsers return focus to the opener on their own; doing it explicitly
+    // covers the ones that do not, and costs nothing where they do.
+    opener?.focus?.();
+  }
+
   prev.addEventListener("click", () => show(current - 1));
   next.addEventListener("click", () => show(current + 1));
-  close.addEventListener("click", () => dialog.close());
+  close.addEventListener("click", dismiss);
 
   // A press anywhere that is not the picture, its caption or a control closes.
   // Tested against the target rather than against the dialog itself, because a
@@ -139,11 +166,18 @@ export function openLightbox(photos: ActivityMedia[], index: number): HTMLDialog
   // photograph belongs to the figure, not to the backdrop.
   dialog.addEventListener("click", (event) => {
     const target = event.target as Element | null;
-    if (!target?.closest("img, button, figcaption")) dialog.close();
+    if (!target?.closest("img, button, figcaption")) dismiss();
   });
 
   dialog.addEventListener("keydown", (event) => {
     const key = (event as KeyboardEvent).key;
+    // Taken here rather than left to the browser, so that Escape and a press on
+    // the close button follow the same path out.
+    if (key === "Escape") {
+      event.preventDefault();
+      dismiss();
+      return;
+    }
     if (single) return;
     if (key === "ArrowLeft") show(current - 1);
     else if (key === "ArrowRight") show(current + 1);
@@ -151,16 +185,14 @@ export function openLightbox(photos: ActivityMedia[], index: number): HTMLDialog
     event.preventDefault();
   });
 
-  // showModal makes the page behind inert but does not stop it scrolling, so a
-  // wheel over the black ground would move the article underneath it.
-  const scrollLock = document.documentElement.style.overflow;
-  dialog.addEventListener("close", () => {
-    document.documentElement.style.overflow = scrollLock;
-    dialog.remove();
-    // Browsers return focus here on their own; doing it explicitly covers the
-    // ones that do not, and costs nothing where they do.
-    opener?.focus?.();
+  // The two native routes: `cancel` precedes the browser's own Escape handling,
+  // and `close` is whatever is left — a form submission, or a caller holding the
+  // element. Both land in the same place.
+  dialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    dismiss();
   });
+  dialog.addEventListener("close", dismiss);
 
   show(current);
   document.body.append(dialog);

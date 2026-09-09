@@ -351,7 +351,7 @@ describe("what a record renders as", () => {
   /* Media belongs to the page that shows one record, where it is a carousel. A
      listing card shows the mosaic instead — see "the photo stack on a listing
      card" in activity.test.ts. */
-  it("loads a picture lazily, at full size, with the caption beside it", async () => {
+  it("loads the first picture eagerly, at full size, with the caption beside it", async () => {
     serve(
       bucketOf([
         record("with a photo", {
@@ -376,7 +376,10 @@ describe("what a record renders as", () => {
     // past 500px.
     expect(img.getAttribute("src")).toBe("https://media.test/media/activity-1/full.webp");
     expect(img.alt).toBe("A description");
-    expect(img.loading).toBe("lazy");
+    // The plate opens on this one, so it is not left to an observer. The rest of
+    // a set stays lazy — see "the way into the full-screen view" in
+    // activity.test.ts.
+    expect(img.loading).toBe("eager");
     expect(section.querySelector(".carousel-caption")?.textContent).toBe("A caption");
   });
 

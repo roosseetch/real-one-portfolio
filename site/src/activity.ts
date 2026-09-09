@@ -453,8 +453,15 @@ export function derivativeSrcset(src: string): string | null {
   return widths.map((width) => `${stem}-${width}${extension} ${width}w`).join(", ");
 }
 
-/** What a media item shows in the plate: the picture, or the clip itself. */
-function slideMedia(media: ActivityMedia): HTMLElement {
+/**
+ * What a media item shows in the plate: the picture, or the clip itself.
+ *
+ * `first` is the one the plate opens on. It loads eagerly, because it is the
+ * picture the reader came for and deferring it means an empty plate for as long
+ * as the observer takes to notice; the rest are off to the side of a scroller
+ * and lazy is right for them.
+ */
+function slideMedia(media: ActivityMedia, first = false): HTMLElement {
   if (media.type === "video") {
     const video = document.createElement("video");
     video.src = media.src;
@@ -486,7 +493,7 @@ function slideMedia(media: ActivityMedia): HTMLElement {
     img.sizes = "(max-width: 48rem) 100vw, 46rem";
   }
   img.alt = media.alt ?? "";
-  img.loading = "lazy";
+  img.loading = first ? "eager" : "lazy";
   img.decoding = "async";
   return img;
 }
@@ -497,8 +504,13 @@ function slideMedia(media: ActivityMedia): HTMLElement {
  * Only a photograph gets the button. A clip carries its own controls, and a
  * button laid over them would swallow the press meant for play.
  */
-function slideZoom(photos: ActivityMedia[], item: ActivityMedia, position: number): HTMLElement {
-  const content = slideMedia(item);
+function slideZoom(
+  photos: ActivityMedia[],
+  item: ActivityMedia,
+  position: number,
+  first: boolean,
+): HTMLElement {
+  const content = slideMedia(item, first);
   if (item.type === "video") return content;
 
   const button = el("button", "carousel-zoom") as HTMLButtonElement;
@@ -556,7 +568,7 @@ function mediaCarousel(record: ActivityRecord): HTMLElement | null {
       slide.setAttribute("aria-roledescription", "slide");
       slide.setAttribute("aria-label", `${index + 1} of ${media.length}`);
     }
-    slide.append(slideZoom(photos, item, photos.indexOf(item)));
+    slide.append(slideZoom(photos, item, photos.indexOf(item), index === 0));
     track.append(slide);
   });
   carousel.append(track);

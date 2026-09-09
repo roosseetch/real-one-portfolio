@@ -579,6 +579,17 @@ describe("the way into the full-screen view", () => {
     expect(dialog?.querySelector("img")?.getAttribute("src")).toContain("p2-1600");
   });
 
+  /* The plate opens on the first photograph, so it must not wait on an
+     intersection observer — and the ones off to the side of the scroller must
+     not all be fetched at once. */
+  it("loads the photograph on show eagerly and the rest lazily", () => {
+    const imgs = single([image(1), image(2), image(3)]).querySelectorAll<HTMLImageElement>(
+      ".carousel-slide img",
+    );
+
+    expect([...imgs].map((img) => img.loading)).toEqual(["eager", "lazy", "lazy"]);
+  });
+
   it("asks the plate for the wider derivatives too", () => {
     const img = single([image(1)]).querySelector(".carousel-slide img") as HTMLImageElement;
 
