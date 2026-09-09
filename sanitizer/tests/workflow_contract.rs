@@ -29,6 +29,16 @@ fn build_workflow() -> String {
     .expect("build-sanitizer.yml")
 }
 
+/// The uploader's invocation block, read the same way.
+fn upload_invocation(text: &str) -> String {
+    let start = text
+        .find("upload-media \"$WORK/public\"")
+        .expect("the upload invocation");
+    let rest = &text[start..];
+    let end = rest.find("\n\n").unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
 /// The invocation block: from the binary's name to the end of the run step.
 fn invocation(text: &str) -> String {
     let start = text
@@ -44,7 +54,11 @@ fn invocation(text: &str) -> String {
 /// of the list. Parsing the source would be checking the parser against a
 /// transcription of itself.
 fn defined_flags() -> BTreeSet<String> {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_sanitize-media"))
+    flags_of(env!("CARGO_BIN_EXE_sanitize-media"))
+}
+
+fn flags_of(binary: &str) -> BTreeSet<String> {
+    let out = std::process::Command::new(binary)
         .arg("--help")
         .output()
         .expect("the binary must run");
@@ -117,6 +131,62 @@ fn every_flag_the_workflow_passes_is_one_the_binary_defines() {
         unknown.is_empty(),
         "the workflow passes flags the binary does not define: {unknown:?} (defined: {defined:?})"
     );
+}
+
+/// The uploader is the only thing that writes to a public bucket, so a flag it
+/// does not define is a job that dies with the derivatives already produced and
+/// the author already told their record is on its way.
+#[test]
+fn every_flag_the_workflow_passes_the_uploader_is_one_it_defines() {
+    let passed = passed_flags(&upload_invocation(&workflow()));
+    assert!(
+        !passed.is_empty(),
+        "the upload invocation passes no flags at all"
+    );
+
+    let defined = flags_of(env!("CARGO_BIN_EXE_upload-media"));
+    let unknown: Vec<_> = passed.difference(&defined).collect();
+    assert!(
+        unknown.is_empty(),
+        "the workflow passes flags upload-media does not define: {unknown:?} (defined: {defined:?})"
+    );
+}
+
+/// The AWS CLI was three sequential passes and one content type each. Nothing
+/// in this job should reach for it again, and nothing should reach for the
+/// Python that published profile media by a different set of rules.
+#[test]
+fn the_workflow_uploads_through_the_binary_and_not_the_cli() {
+    let text = workflow();
+    assert!(
+        text.contains("upload-media"),
+        "the workflow must name the uploader"
+    );
+    assert!(
+        !text.contains("aws s3 cp \"$WORK/public\""),
+        "the derivatives are uploaded by upload-media now, not by the AWS CLI"
+    );
+    assert!(
+        !text.contains("upload-media.py"),
+        "the Python uploader is gone; something still calls it"
+    );
+}
+
+/// Both binaries come out of one crate and one build, so publishing has to
+/// name both or process-media.yml fetches two halves of different builds.
+#[test]
+fn the_release_carries_both_binaries() {
+    let build = build_workflow();
+    for name in ["sanitize-media", "upload-media"] {
+        assert!(
+            build.contains(&format!("sanitizer/target/release/{name}")),
+            "build-sanitizer.yml must publish {name}"
+        );
+        assert!(
+            workflow().contains(name),
+            "process-media.yml must fetch {name}"
+        );
+    }
 }
 
 #[test]

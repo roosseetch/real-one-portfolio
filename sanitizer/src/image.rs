@@ -186,7 +186,7 @@ const FORBIDDEN: &[(exif::Tag, &str)] = &[
 /// pixels and an EXIF block from this process -- there is no path by which
 /// source metadata could be in it. The check earns its place against the
 /// opposite mistake, a future edit that starts copying something across.
-fn identifying_tags(path: &Path) -> Vec<String> {
+pub fn identifying_tags(path: &Path) -> Vec<String> {
     let Ok(bytes) = std::fs::read(path) else {
         return Vec::new();
     };

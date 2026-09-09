@@ -9,6 +9,13 @@ license = "MIT"
 name = "sanitize-media"
 path = "src/main.rs"
 
+# The uploader. In this crate rather than beside it because it shares the
+# reader that decides whether a file still carries identifying metadata, and
+# one definition of that is the point -- see src/bin/upload-media.rs.
+[[bin]]
+name = "upload-media"
+path = "src/bin/upload-media.rs"
+
 [lib]
 name = "sanitize_media"
 path = "src/lib.rs"
@@ -44,6 +51,13 @@ imgref = "1"
 # Nothing here writes EXIF -- exif.rs does that, so there is one definition of
 # what the decoy bytes are.
 kamadak-exif = "0.5"
+
+# The uploader's HTTP, and the signing R2's S3 endpoint wants. Blocking on
+# purpose: this is a CLI that uploads a handful of files and exits, and rayon
+# already gives it the concurrency it needs without an async runtime under it.
+ureq = { version = "2", features = ["json"] }
+hmac = "0.12"
+sha2 = "0.10"
 
 # rav1e is unusable unoptimised -- an AVIF derivative that takes under a second
 # in release takes the better part of a minute in a debug build, which turns the

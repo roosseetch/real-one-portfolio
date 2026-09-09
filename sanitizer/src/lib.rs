@@ -17,6 +17,7 @@ pub mod decoy;
 pub mod exif;
 pub mod image;
 pub mod manifest;
+pub mod upload;
 pub mod video;
 
 use anyhow::Result;

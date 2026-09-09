@@ -71,24 +71,32 @@ jobs:
         working-directory: sanitizer
         run: cargo build --release --locked
 
-      - name: Publish the binary
+      - name: Publish the binaries
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(grep -m1 '^version' sanitizer/Cargo.toml | cut -d'"' -f2)
           tag="sanitizer-v${version}"
-          binary=sanitizer/target/release/sanitize-media
 
-          "$binary" --help >/dev/null || { echo "::error::the built binary does not run"; exit 1; }
+          # Both binaries the crate produces. They share a version because they
+          # share a source tree -- the uploader reuses the sanitiser's own
+          # reader for identifying metadata -- so publishing them separately
+          # would let process-media.yml fetch two halves of different builds.
+          binaries=(sanitizer/target/release/sanitize-media sanitizer/target/release/upload-media)
+
+          for binary in "${binaries[@]}"; do
+            "$binary" --help >/dev/null \
+              || { echo "::error::$(basename "$binary") does not run"; exit 1; }
+          done
 
           # One release per version, replaced in place. A version bump makes a
           # new one; an edit that does not bump overwrites the asset, which is
           # what makes "latest" mean "current main" rather than "whenever
           # someone last remembered to bump".
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$binary" --clobber
+            gh release upload "$tag" "${binaries[@]}" --clobber
           else
-            gh release create "$tag" "$binary" \
+            gh release create "$tag" "${binaries[@]}" \
               --title "Media sanitiser ${version}" \
               --notes "Built from ${GITHUB_SHA}. Consumed by process-media.yml." \
               --latest=false

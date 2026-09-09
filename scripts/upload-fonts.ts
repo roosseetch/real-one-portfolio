@@ -12,9 +12,9 @@
  * the copy in the bucket is a copy of exactly the thing the fallback serves,
  * and this is what makes that true rather than hoped.
  *
- * Uploads through Cloudflare's own API with CLOUDFLARE_API_TOKEN, the way
- * scripts/upload-media.py does, so nothing has to be installed on the machine
- * running it. Objects are written with the immutable cache header the bucket's
+ * Uploads through Cloudflare's own API with CLOUDFLARE_API_TOKEN, the way the
+ * upload-media binary does when it is given one, so nothing has to be installed
+ * on the machine running it. Objects are written with the immutable cache header the bucket's
  * ruleset respects: the version is in the filename, so a re-cut family is a new
  * name rather than a new body at an old one.
  *

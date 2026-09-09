@@ -7,7 +7,7 @@
  * serif substitute changes the measure of justified prose enough to reflow it.
  *
  * The files are **not in this repository**. They live under `fonts/` in the
- * public media bucket, uploaded once by scripts/upload-fonts.py, for the reason
+ * public media bucket, uploaded once by scripts/upload-fonts.ts, for the reason
  * every other binary is out of tree (spec §1): a repository meant to be reused
  * carries no assets. What is tracked here is the description of each face — its
  * weights, the characters it covers, its object name, and the Google-hosted
