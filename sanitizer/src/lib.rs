@@ -31,8 +31,21 @@ use manifest::{Entry, Manifest};
 ///
 /// WebP is what the site asks for; AVIF is offered alongside it, since a
 /// browser that understands it gets a smaller file for the same picture.
-pub const WEBP_QUALITY: f32 = 82.0;
-pub const AVIF_QUALITY: f32 = 60.0;
+///
+/// High, and deliberately so. What reaches this program has already been
+/// through one encoder -- Telegram compresses a photo before the Bot API will
+/// serve it -- so the derivative is a second generation over a first, and at 82
+/// the two losses stacked into something the author could see beside the
+/// original in their chat. 95 puts the second generation below what a reader
+/// can pick out, at roughly two to three times the bytes; the derivative of a
+/// 1600px source goes from a couple of hundred kilobytes to something still
+/// well inside what a photograph on a page is worth.
+///
+/// Raising these does nothing for a picture already published. The originals
+/// expire out of the private bucket on the draft-retention lifecycle, so there
+/// is nothing left to encode them from -- this is for what is published next.
+pub const WEBP_QUALITY: f32 = 95.0;
+pub const AVIF_QUALITY: f32 = 80.0;
 
 #[derive(Debug, Clone)]
 pub struct Options {

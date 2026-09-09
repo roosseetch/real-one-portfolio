@@ -351,7 +351,7 @@ describe("what a record renders as", () => {
   /* Media belongs to the page that shows one record, where it is a carousel. A
      listing card shows the mosaic instead — see "the photo stack on a listing
      card" in activity.test.ts. */
-  it("loads a picture lazily, from its thumbnail, with the caption beside it", async () => {
+  it("loads a picture lazily, at full size, with the caption beside it", async () => {
     serve(
       bucketOf([
         record("with a photo", {
@@ -371,7 +371,10 @@ describe("what a record renders as", () => {
     await loaded(section);
 
     const img = section.querySelector("img") as HTMLImageElement;
-    expect(img.getAttribute("src")).toBe("https://media.test/media/activity-1/thumb.webp");
+    // The widest derivative, not the thumbnail. This assertion used to read
+    // `thumb.webp`, which is what put a 320px file in a plate that renders
+    // past 500px.
+    expect(img.getAttribute("src")).toBe("https://media.test/media/activity-1/full.webp");
     expect(img.alt).toBe("A description");
     expect(img.loading).toBe("lazy");
     expect(section.querySelector(".carousel-caption")?.textContent).toBe("A caption");
