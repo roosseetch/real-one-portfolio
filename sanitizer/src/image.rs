@@ -348,7 +348,7 @@ fn try_derivatives(
         }
     }
 
-    let results: Vec<(Vec<Written>, Vec<String>, Vec<String>)> = targets
+    let results: Vec<(Vec<Written>, Vec<String>)> = targets
         .par_iter()
         .map(|&width| {
             let height = ((u64::from(source_height) * u64::from(width)
@@ -365,7 +365,6 @@ fn try_derivatives(
                             "{}: could not resize to {width}px: {err}",
                             naming.stem
                         )],
-                        Vec::new(),
                     )
                 }
             };
@@ -390,13 +389,24 @@ fn try_derivatives(
                 )
             };
 
-            // WebP is required and its absence is a real failure; AVIF is a
-            // bonus, and a build that cannot write one still publishes.
-            let (webp, avif) = rayon::join(|| write("webp"), || write("avif"));
+            // A poster gets no AVIF, and that is not a saving to be clever
+            // about -- it is the only format the thing it stands for can use.
+            // A <video> names its poster in a single `poster` attribute, which
+            // takes one URL and cannot be given a <picture> to choose from, so
+            // a poster AVIF is unreachable by construction. It was being
+            // encoded anyway, four widths at a time, through the slowest step
+            // in the whole pipeline.
+            let wants_avif = naming.role != Role::Poster;
+
+            // Both are required now. The site asks for the AVIF first and only
+            // reaches the WebP when the browser cannot read one, so a missing
+            // AVIF is not a smaller picture -- it is a <source> pointing at a
+            // file that is not there, and a browser that has committed to a
+            // source does not fall back to the <img> beside it.
+            let (webp, avif) = rayon::join(|| write("webp"), || wants_avif.then(|| write("avif")));
 
             let mut written = Vec::new();
             let mut failures = Vec::new();
-            let mut skipped = Vec::new();
 
             match webp {
                 Ok(one) => written.push(one),
@@ -406,21 +416,24 @@ fn try_derivatives(
                 )),
             }
             match avif {
-                Ok(one) => written.push(one),
-                Err(_) => skipped.push("avif".to_string()),
+                Some(Ok(one)) => written.push(one),
+                Some(Err(err)) => failures.push(format!(
+                    "{}: could not write AVIF at {width}px: {err}",
+                    naming.stem
+                )),
+                None => {}
             }
-            (written, failures, skipped)
+            (written, failures)
         })
         .collect();
 
     let mut outcome = Outcome::default();
-    for (written, failures, skipped) in results {
+    for (written, failures) in results {
         for one in written {
             outcome.failures.extend(one.failures);
             outcome.entries.push(one.entry);
         }
         outcome.failures.extend(failures);
-        outcome.skipped_formats.extend(skipped);
     }
     Ok(outcome)
 }

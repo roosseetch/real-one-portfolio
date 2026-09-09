@@ -10,45 +10,45 @@ import { describe, expect, it } from "vitest";
 
 import { avifFrom, avifSrcset, pictureFor } from "./picture";
 
-const WEBP = "https://media.example/media/activity-a/b-1600.webp";
+const WEBP = "https://media.test/media/activity-a/b-1600.webp";
 
 describe("avifFrom", () => {
   it("names the AVIF beside a WebP derivative", () => {
-    expect(avifFrom(WEBP)).toBe("https://media.example/media/activity-a/b-1600.avif");
+    expect(avifFrom(WEBP)).toBe("https://media.test/media/activity-a/b-1600.avif");
   });
 
   it("is case-insensitive about the extension it replaces", () => {
-    expect(avifFrom("https://media.example/a-800.WEBP")).toBe("https://media.example/a-800.avif");
+    expect(avifFrom("https://media.test/a-800.WEBP")).toBe("https://media.test/a-800.avif");
   });
 
   /** The masthead mark and both favicons are PNGs, and no AVIF was ever written. */
   it("refuses anything that is not a WebP", () => {
-    expect(avifFrom("https://media.example/media/profile/mark-730.png")).toBeNull();
-    expect(avifFrom("https://media.example/media/profile/favicon-32.png")).toBeNull();
-    expect(avifFrom("https://media.example/a-1920.mp4")).toBeNull();
-    expect(avifFrom("https://media.example/no-extension")).toBeNull();
+    expect(avifFrom("https://media.test/media/profile/mark-730.png")).toBeNull();
+    expect(avifFrom("https://media.test/media/profile/favicon-32.png")).toBeNull();
+    expect(avifFrom("https://media.test/a-1920.mp4")).toBeNull();
+    expect(avifFrom("https://media.test/no-extension")).toBeNull();
   });
 
   /** Only the end of the name, or a directory called `.webp/` would qualify. */
   it("does not match a .webp anywhere but the end", () => {
-    expect(avifFrom("https://media.example/x.webp/y.png")).toBeNull();
+    expect(avifFrom("https://media.test/x.webp/y.png")).toBeNull();
   });
 });
 
 describe("avifSrcset", () => {
   it("converts every URL and leaves the descriptors alone", () => {
-    expect(avifSrcset("https://m/a-320.webp 320w, https://m/a-800.webp 800w")).toBe(
-      "https://m/a-320.avif 320w, https://m/a-800.avif 800w",
+    expect(avifSrcset("https://media.test/a-320.webp 320w, https://media.test/a-800.webp 800w")).toBe(
+      "https://media.test/a-320.avif 320w, https://media.test/a-800.avif 800w",
     );
   });
 
   it("handles a single entry with no descriptor", () => {
-    expect(avifSrcset("https://m/a-320.webp")).toBe("https://m/a-320.avif");
+    expect(avifSrcset("https://media.test/a-320.webp")).toBe("https://media.test/a-320.avif");
   });
 
   /** All or nothing: a mixed set would let the browser pick the file we do not have. */
   it("returns null when any entry is not a WebP", () => {
-    expect(avifSrcset("https://m/a-320.webp 320w, https://m/a-800.png 800w")).toBeNull();
+    expect(avifSrcset("https://media.test/a-320.webp 320w, https://media.test/a-800.png 800w")).toBeNull();
   });
 
   it("returns null for an empty set", () => {

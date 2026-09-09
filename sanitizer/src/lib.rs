@@ -21,7 +21,6 @@ pub mod video;
 
 use anyhow::Result;
 use rand::Rng;
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use decoy::Decoy;
@@ -29,8 +28,12 @@ use manifest::{Entry, Manifest};
 
 /// How a picture is asked for, and at what qualities.
 ///
-/// WebP is what the site asks for; AVIF is offered alongside it, since a
-/// browser that understands it gets a smaller file for the same picture.
+/// AVIF is what the site asks for first, and WebP is what it falls back to for
+/// a browser that cannot read one. Both are required: the site offers the AVIF
+/// through a `<source>`, and a browser that has chosen a source does not fall
+/// back to the `<img>` beside it when the file turns out not to be there. A
+/// video's poster is the exception and gets no AVIF at all -- the `poster`
+/// attribute takes a single URL and can never be given the choice.
 ///
 /// High, and deliberately so. What reaches this program has already been
 /// through one encoder -- Telegram compresses a photo before the Bot API will
@@ -78,7 +81,6 @@ pub struct MediaSpec {
 pub struct SanitizeResult {
     pub manifest: Manifest,
     pub failures: Vec<String>,
-    pub skipped_formats: BTreeSet<String>,
 }
 
 /// Turns every mapped original into its public derivatives.
@@ -146,7 +148,6 @@ pub fn sanitize(
         };
 
         result.failures.extend(outcome.failures);
-        result.skipped_formats.extend(outcome.skipped_formats);
         if !outcome.entries.is_empty() {
             result.manifest.insert(media_id.clone(), outcome.entries);
         }
@@ -162,7 +163,6 @@ pub fn sanitize(
 pub struct Outcome {
     pub entries: Vec<Entry>,
     pub failures: Vec<String>,
-    pub skipped_formats: BTreeSet<String>,
 }
 
 impl Outcome {

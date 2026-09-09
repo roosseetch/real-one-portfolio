@@ -271,6 +271,20 @@ jobs:
               if [ "$w" -gt "$widest" ]; then
                 widest=$w
               fi
+
+              # The site offers the AVIF through a <source> and only reaches
+              # the WebP when the browser cannot read one -- and a browser that
+              # has chosen a source does not fall back to the <img> beside it.
+              # So a missing AVIF is not a bigger download, it is a broken
+              # photograph, and it has to stop the publish here.
+              #
+              # Pictures only. A video's poster is named in a `poster`
+              # attribute, which takes one URL and can never be given a
+              # <picture>, so the sanitiser deliberately writes no poster AVIF.
+              if [ -z "$infix" ] && [ ! -e "${f%.webp}.avif" ]; then
+                echo "::error::$id has a WebP but no AVIF at ${w}px"
+                return 1
+              fi
             done
 
             if [ -z "$widths" ]; then

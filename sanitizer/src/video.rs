@@ -798,7 +798,6 @@ pub fn derivatives(
     let mut outcome = Outcome {
         entries: vec![entry],
         failures,
-        ..Default::default()
     };
 
     let poster = work_dir.join(format!("{media_id}-poster.png"));
@@ -824,7 +823,6 @@ pub fn derivatives(
 
     outcome.entries.extend(posters.entries);
     outcome.failures.extend(posters.failures);
-    outcome.skipped_formats.extend(posters.skipped_formats);
     outcome
 }
 
