@@ -320,31 +320,46 @@ upload the results under the `media/profile/` prefix. Write a mapping from the
 { "hero": { "file": "portrait.jpeg", "type": "image" } }
 ```
 
-The sanitiser names each derivative `<id>-<width>.webp`, which is exactly what
-the site asks for; the widths it expects per reference are listed in
-`site/src/sections.ts`, and no width above the source's is ever produced,
-because nothing is upscaled.
+The sanitiser names each derivative `<id>-<width>.webp` and writes an AVIF
+beside every one of them; the site asks for the AVIF first and falls back to the
+WebP. The widths it expects per reference are listed in `site/src/sections.ts`,
+and no width above the source's is ever produced, because nothing is upscaled.
 
 ```sh
 podman build -t media-sanitizer-dev sanitizer/
 podman run --rm -v "$PWD":/repo:z -w /repo media-sanitizer-dev \
-  cargo run --manifest-path sanitizer/Cargo.toml -- \
+  cargo run --manifest-path sanitizer/Cargo.toml --bin sanitize-media -- \
   <source-dir> <work-dir> <mapping.json> --widths 1600,800
-CLOUDFLARE_API_TOKEN=... python3 scripts/upload-media.py <work-dir> <media-bucket> media/profile
+CLOUDFLARE_API_TOKEN=... \
+podman run --rm -e CLOUDFLARE_API_TOKEN -v "$PWD":/repo:z -w /repo media-sanitizer-dev \
+  cargo run --manifest-path sanitizer/Cargo.toml --bin upload-media -- \
+  <work-dir> --bucket <media-bucket> --prefix media/profile --cache week
 ```
 
-Run it from the repository root, as here: the decoy values it injects default to
-`config/media-decoy.json` relative to the working directory. The upload step
-re-checks each file with exiftool — the one command in this list that wants a
-host tool — and refuses anything still carrying identifying metadata, so a
-failed sanitisation cannot become a public object.
+Run both from the repository root, as here: the decoy values the sanitiser
+injects default to `config/media-decoy.json` relative to the working directory.
+
+Then add the reference to `PUBLISHED_MEDIA` in `site/src/sections.ts` with its
+widths and `avif: true`. That table is a record of what is actually in the
+bucket rather than of what the sanitiser can produce, and it has to be set
+**after** the upload: the site offers the AVIF through a `<source>`, and a
+browser that has chosen a source does not fall back to the `<img>` beside it, so
+claiming an AVIF that was never uploaded renders a broken photograph.
+
+The uploader refuses the whole run — before it writes anything — if any file
+still carries identifying metadata, or if the directory holds an extension it
+has no content type for. It reads the EXIF with the same reader the sanitiser
+verifies its own output with, so there is one definition of what counts and no
+host tool to install. `--cache week` is what profile media wants: those names
+are stable, so they cannot be cached forever the way an activity derivative can,
+and the token that publishes them cannot purge the CDN.
 
 **The site icon** goes to the same prefix, as `favicon-32.png` and
 `favicon-180.png`. It is a logo rather than a photograph, so it does not go
 through the sanitiser — there is no camera metadata to strip and nothing to
-transcode — but it does go through the same upload script, which re-checks it
-and is why it is a PNG the script now accepts alongside the sanitiser's WebP. A
-tab icon is read by the browser's chrome rather than by its renderer, and
+transcode — but it does go through the same uploader, which re-checks it and is
+why PNG is one of the types it accepts alongside the sanitiser's WebP and AVIF.
+A tab icon is read by the browser's chrome rather than by its renderer, and
 Safari's support for a WebP one is not something a logo should rest on.
 
 ```sh
@@ -352,7 +367,10 @@ magick <logo.png> -crop <square around the mark> +repage -strip \
   -filter Lanczos -resize 32x32 -unsharp 0x0.7+0.8+0 favicon-32.png
 magick <logo.png> -crop <square around the mark> +repage -strip \
   -filter Lanczos -resize 180x180 favicon-180.png
-CLOUDFLARE_API_TOKEN=... python3 scripts/upload-media.py <dir> <media-bucket> media/profile
+CLOUDFLARE_API_TOKEN=... \
+podman run --rm -e CLOUDFLARE_API_TOKEN -v "$PWD":/repo:z -w /repo media-sanitizer-dev \
+  cargo run --manifest-path sanitizer/Cargo.toml --bin upload-media -- \
+  <dir> --bucket <media-bucket> --prefix media/profile --cache week
 ```
 
 Crop to the mark itself rather than scaling the whole logo. A wordmark that

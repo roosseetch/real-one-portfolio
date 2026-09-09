@@ -367,6 +367,36 @@ describe("the photo stack on a listing card", () => {
     expect([...card.querySelectorAll("img")].every((img) => img.alt === "")).toBe(true);
   });
 
+  /* The same poster rule as the filmstrip's, for the same reason: a clip in a
+     mosaic shows its poster, and posters are WebP only. */
+  it("offers a clip's cell no AVIF", () => {
+    const cell = listed([
+      {
+        type: "video",
+        src: "https://media.test/media/activity-1/c.mp4",
+        poster: "https://media.test/media/activity-1/c-poster-1600.webp",
+      },
+    ]).querySelector(".activity-mosaic-cell") as HTMLElement;
+
+    expect(cell.querySelector("img")?.getAttribute("src")).toContain("c-poster-1600.webp");
+    expect(cell.querySelector("source")).toBeNull();
+  });
+
+  /* Three cells on a card that a reader is scrolling past: the smallest files
+     on the page, and the ones there are most of. */
+  it("offers each mosaic cell its AVIF", () => {
+    const cells = listed([image(1), image(2)]).querySelectorAll(".activity-mosaic-cell");
+
+    expect(cells.length).toBeGreaterThan(0);
+    for (const cell of cells) {
+      const img = cell.querySelector("img") as HTMLImageElement;
+      const source = cell.querySelector("source") as HTMLSourceElement;
+      expect(source.type).toBe("image/avif");
+      expect(source.getAttribute("srcset")).toBe(img.getAttribute("src")?.replace(".webp", ".avif"));
+      expect(img.getAttribute("loading")).toBe("lazy");
+    }
+  });
+
   /** The page that shows one record shows every image in full, not a stack of three. */
   it("does not appear on the page that shows the record itself", () => {
     const single = renderRecord({ id: "rec-1", title: "A note", media: [image(1)] as never }, { heading: "h1" });
@@ -604,5 +634,69 @@ describe("the way into the full-screen view", () => {
 
     expect(thumb.getAttribute("src")).toBe("https://media.test/media/activity-1/p1-320.webp");
     expect(thumb.getAttribute("srcset")).toBeNull();
+  });
+
+  /* The AVIF is half the bytes of the WebP for the same picture, and the
+     pipeline has always written one beside every derivative. These four hold
+     that it is actually offered, and that the offer is exact: a source naming a
+     width the pipeline did not write is a 404 the browser renders as a broken
+     image rather than falling back. */
+  it("offers the plate the same ladder in AVIF, width for width", () => {
+    const slide = single([image(1)]).querySelector(".carousel-slide") as HTMLElement;
+    const img = slide.querySelector("img") as HTMLImageElement;
+    const source = slide.querySelector("source") as HTMLSourceElement;
+
+    expect(source.type).toBe("image/avif");
+    expect(source.getAttribute("srcset")).toBe(
+      img.getAttribute("srcset")?.replaceAll(".webp", ".avif"),
+    );
+    expect(source.getAttribute("sizes")).toBe(img.getAttribute("sizes"));
+  });
+
+  it("offers the filmstrip a single AVIF, matching its lack of a ladder", () => {
+    const thumb = single([image(1), image(2)]).querySelector(".carousel-thumb") as HTMLElement;
+    const source = thumb.querySelector("source") as HTMLSourceElement;
+
+    expect(source.getAttribute("srcset")).toBe("https://media.test/media/activity-1/p1-320.avif");
+  });
+
+  /* Caught in a browser, not by a test: the sanitiser writes no poster AVIF,
+     because a <video> names its poster in an attribute that takes one URL and
+     can never be given a <picture>. Offering one anyway pointed a <source> at a
+     file that was never written, and a browser that has chosen a source renders
+     nothing rather than falling back to the <img> — so every clip came out
+     blank. */
+  it("offers the filmstrip no AVIF for a clip, whose picture is a poster", () => {
+    const clip = {
+      type: "video",
+      src: "https://media.test/media/activity-1/c.mp4",
+      poster: "https://media.test/media/activity-1/c-poster-1600.webp",
+      thumbnail: "https://media.test/media/activity-1/c-poster-320.webp",
+    };
+    const thumb = single([clip, image(1)]).querySelector(".carousel-thumb") as HTMLElement;
+
+    // The widest poster rather than the 320px one, which is what the filmstrip
+    // has always done for a clip. What matters here is the absent <source>.
+    expect(thumb.querySelector("img")?.getAttribute("src")).toContain("c-poster-1600.webp");
+    expect(thumb.querySelector("source")).toBeNull();
+  });
+
+  it("puts the source ahead of the image in every plate", () => {
+    const slides = single([image(1), image(2)]).querySelectorAll(".carousel-slide");
+
+    for (const slide of slides) {
+      const picture = slide.querySelector("picture") as HTMLElement;
+      expect(picture.firstElementChild?.tagName).toBe("SOURCE");
+      expect(picture.lastElementChild?.tagName).toBe("IMG");
+    }
+  });
+
+  /* The wrapper must not swallow either attribute: a <source> has no `loading`,
+     and the eager-first arrangement above is what fills the open plate. */
+  it("keeps loading on the image rather than the wrapper", () => {
+    const slide = single([image(1)]).querySelector(".carousel-slide") as HTMLElement;
+
+    expect(slide.querySelector("picture")?.hasAttribute("loading")).toBe(false);
+    expect(slide.querySelector("img")?.getAttribute("loading")).toBe("eager");
   });
 });

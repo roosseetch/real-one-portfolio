@@ -9,6 +9,7 @@
    names one — lives in this module, so the two cannot drift. */
 
 import { openLightbox } from "./lightbox";
+import { avifFrom, pictureFor } from "./picture";
 import { routeById, routeHref } from "./routes";
 
 export interface ActivityMedia {
@@ -332,6 +333,13 @@ function mosaicImage(media: ActivityMedia): HTMLElement {
   const source = media.type === "video" ? (media.poster ?? media.thumbnail) : (media.thumbnail ?? media.src);
   const cell = el("div", "activity-mosaic-cell plate");
   if (!source) return cell;
+  // A clip's picture is its poster, and the sanitiser writes no poster AVIF --
+  // a <video> names its poster in an attribute that takes one URL and can
+  // never be given a <picture> to choose from, so encoding one would be four
+  // rav1e passes for a file nothing could request. Offering an AVIF here
+  // anyway would point a <source> at a file that was never written, which a
+  // browser renders as nothing rather than falling back to the <img>.
+  const avif = media.type === "video" ? null : avifFrom(source);
 
   const img = new Image();
   img.src = source;
@@ -341,7 +349,9 @@ function mosaicImage(media: ActivityMedia): HTMLElement {
   img.alt = "";
   img.loading = "lazy";
   img.decoding = "async";
-  cell.append(img);
+  // One URL rather than a ladder, because the cell is fixed by the mosaic's
+  // grid and always shows the 320px derivative.
+  cell.append(pictureFor(img, avif));
   return cell;
 }
 
@@ -441,14 +451,20 @@ const DERIVATIVE_WIDTHS = [320, 800, 1200, 1600];
  *
  * Null for anything not named `…-{width}.{ext}`, which is every URL this
  * pipeline did not write.
+ *
+ * `format` overrides the extension read out of the filename, which is how the
+ * same ladder is offered twice — once as WebP on the `<img>` and once as AVIF
+ * on the `<source>` in front of it. The two sets have to agree width for width,
+ * and deriving both from one function is what makes that true by construction
+ * rather than by two lists staying in step.
  */
-export function derivativeSrcset(src: string): string | null {
+export function derivativeSrcset(src: string, format?: string): string | null {
   const match = /-(\d+)(\.[a-z0-9]+)$/i.exec(src);
   if (!match) return null;
 
   const widest = Number(match[1]);
   const stem = src.slice(0, match.index);
-  const extension = match[2];
+  const extension = format ? `.${format}` : match[2];
   const widths = [...DERIVATIVE_WIDTHS.filter((width) => width < widest), widest];
   return widths.map((width) => `${stem}-${width}${extension} ${width}w`).join(", ");
 }
@@ -486,16 +502,23 @@ function slideMedia(media: ActivityMedia, first = false): HTMLElement {
   // renders past 500px. The wider files have always been in the bucket.
   img.src = media.src;
   const srcset = derivativeSrcset(media.src);
+  // The plate is height-clamped and contains rather than covers, so however
+  // wide the column gets, the picture inside it stops around 46rem.
+  const sizes = "(max-width: 48rem) 100vw, 46rem";
   if (srcset) {
     img.srcset = srcset;
-    // The plate is height-clamped and contains rather than covers, so however
-    // wide the column gets, the picture inside it stops around 46rem.
-    img.sizes = "(max-width: 48rem) 100vw, 46rem";
+    img.sizes = sizes;
   }
   img.alt = media.alt ?? "";
   img.loading = first ? "eager" : "lazy";
   img.decoding = "async";
-  return img;
+  // The same ladder in AVIF, or the single widest file when there is no ladder
+  // to build — a source that offered fewer widths than the <img> beside it
+  // would hand the browser a worse choice than the one it already had.
+  const avif = srcset
+    ? derivativeSrcset(media.src, "avif")
+    : avifFrom(media.src);
+  return pictureFor(img, avif, srcset ? sizes : undefined);
 }
 
 /**
@@ -621,7 +644,11 @@ function mediaCarousel(record: ActivityRecord): HTMLElement | null {
       // button's face, not a second thing to describe.
       img.alt = "";
       img.loading = "lazy";
-      button.append(img);
+      // No ladder here either: a 6rem button shows the 320px derivative and
+      // nothing else, which is why the <img> carries no srcset of its own.
+      // And no AVIF for a clip, for the reason mosaicImage gives: what stands
+      // in for a video is its poster, and posters are WebP only.
+      button.append(pictureFor(img, item.type === "video" ? null : avifFrom(source)));
     }
     button.addEventListener("click", () => scrollToSlide(index));
     strip.append(button);

@@ -112,6 +112,29 @@ img {
   display: block;
 }
 
+/* Every photograph on the site is wrapped in a <picture> offering the AVIF the
+   pipeline wrote beside the WebP (site/src/picture.ts). This rule is what makes
+   that wrapper free.
+
+   A <picture> is display: inline with an auto height by default, and dropping
+   one between a plate and its image severs every percentage-height chain on
+   this page: .hero-plate and .hobby-plate resolve height: 100% against the
+   plate, .activity-mosaic-cell and .carousel-thumb the same, and
+   .lightbox-figure resolves max-height: 100% — the one that, when it last
+   resolved to none, ran a 1600px photograph off the bottom of the screen. It
+   would also shrink-wrap .carousel-zoom back to the 0x0 box that stopped Chrome
+   fetching the lazy image inside it.
+
+   display: contents makes the wrapper generate no box at all, so the <img>
+   stays the direct layout child of the plate and every one of those chains
+   resolves exactly as it did before the wrapper existed. It is also why a press
+   on a photograph in the lightbox cannot land on the wrapper. <picture> has no
+   ARIA role to lose, so removing its box costs nothing in the accessibility
+   tree. */
+picture {
+  display: contents;
+}
+
 a {
   color: inherit;
 }

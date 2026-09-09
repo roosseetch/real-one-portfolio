@@ -134,14 +134,6 @@ fn run(args: &Args) -> Result<bool> {
         }
     }
 
-    if !result.skipped_formats.is_empty() {
-        let skipped: Vec<&str> = result.skipped_formats.iter().map(String::as_str).collect();
-        println!(
-            "\nSkipped, the encoder would not write one: {}",
-            skipped.join(", ")
-        );
-    }
-
     if !result.failures.is_empty() {
         eprintln!("\nFAILURES:");
         for failure in &result.failures {

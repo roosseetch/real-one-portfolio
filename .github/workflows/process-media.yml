@@ -113,31 +113,41 @@ jobs:
         run: |
           version=$(grep -m1 '^version' sanitizer/Cargo.toml | cut -d'"' -f2)
           tag="sanitizer-v${version}"
-          binary="$HOME/.local/bin/sanitize-media"
           mkdir -p "$HOME/.local/bin"
 
-          usable=0
-          if gh release download "$tag" --pattern sanitize-media --output "$binary" 2>/dev/null; then
-            chmod +x "$binary"
-            if "$binary" --help >/dev/null 2>&1; then
-              usable=1
-              echo "using the prebuilt $tag"
+          # Two binaries out of one crate, so one version names both and they
+          # cannot be fetched from different builds of the same source.
+          usable=1
+          for name in sanitize-media upload-media; do
+            binary="$HOME/.local/bin/$name"
+            if gh release download "$tag" --pattern "$name" --output "$binary" 2>/dev/null; then
+              chmod +x "$binary"
+              if "$binary" --help >/dev/null 2>&1; then
+                echo "using the prebuilt $name from $tag"
+                continue
+              fi
+              echo "::warning::the prebuilt $name from $tag will not run on this image"
             else
-              echo "::warning::the prebuilt $tag will not run on this image; building from source"
+              echo "::warning::$name is not published under $tag yet"
             fi
-          else
-            echo "::warning::$tag is not published yet; building from source"
-          fi
+            usable=0
+          done
 
+          # One build covers both, so a single missing asset is not a reason to
+          # compile twice.
           if [ "$usable" -eq 0 ]; then
+            echo "building from source"
             sudo apt-get install -y -qq nasm
             cargo build --release --locked --manifest-path sanitizer/Cargo.toml
-            cp sanitizer/target/release/sanitize-media "$binary"
-            chmod +x "$binary"
+            for name in sanitize-media upload-media; do
+              cp "sanitizer/target/release/$name" "$HOME/.local/bin/$name"
+              chmod +x "$HOME/.local/bin/$name"
+            done
           fi
 
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$binary" --help >/dev/null
+          "$HOME/.local/bin/sanitize-media" --help >/dev/null
+          "$HOME/.local/bin/upload-media" --help >/dev/null
 
       # Everything below stays under the runner's temp directory, which is
       # discarded with the runner. Never the workspace: the workspace is a git
@@ -271,6 +281,20 @@ jobs:
               if [ "$w" -gt "$widest" ]; then
                 widest=$w
               fi
+
+              # The site offers the AVIF through a <source> and only reaches
+              # the WebP when the browser cannot read one -- and a browser that
+              # has chosen a source does not fall back to the <img> beside it.
+              # So a missing AVIF is not a bigger download, it is a broken
+              # photograph, and it has to stop the publish here.
+              #
+              # Pictures only. A video's poster is named in a `poster`
+              # attribute, which takes one URL and can never be given a
+              # <picture>, so the sanitiser deliberately writes no poster AVIF.
+              if [ -z "$infix" ] && [ ! -e "${f%.webp}.avif" ]; then
+                echo "::error::$id has a WebP but no AVIF at ${w}px"
+                return 1
+              fi
             done
 
             if [ -z "$widths" ]; then
@@ -344,33 +368,29 @@ jobs:
         run: |
           activity=$(jq -r '.activityId' "$WORK/draft.json")
 
-          # One pass per extension, because a single --recursive copy cannot
-          # name more than one content type and the CLI's guess is not good
-          # enough here: R2 serves whatever it was told, and an mp4 delivered as
+          # One pass, not three. The AWS CLI cannot name more than one content
+          # type per --recursive copy, so this was previously one invocation per
+          # extension, run in sequence -- and its guess is not good enough to do
+          # without: R2 serves whatever it was told, and an mp4 delivered as
           # binary/octet-stream makes Safari refuse to play it inline and Chrome
           # download it instead.
-          upload() {
-            aws s3 cp "$WORK/public" "s3://${MEDIA_BUCKET}/media/activity-${activity}/" \
-              --recursive --exclude '*' --include "*.$1" \
-              --content-type "$2" \
-              --cache-control 'public, max-age=31536000, immutable' \
-              --quiet
-          }
+          #
+          # The uploader names the type per file, uploads concurrently, and
+          # refuses an extension it has no type for *before* the first PUT
+          # rather than after the last -- which is what the stray-file check
+          # here used to do, failing the job with the good files already public.
+          #
+          # Credentials come from the environment: the S3 keys set on this step
+          # and the endpoint set at job level. It reads the same EXIF the
+          # sanitiser checks its own output with, so this is a second refusal
+          # point rather than a restatement of the first.
+          #
           # Derivatives are immutable: their names carry the media id and the
           # width, so a changed picture is a new name rather than a new body.
-          upload webp image/webp
-          upload avif image/avif
-          upload mp4 video/mp4
-
-          # What naming the types costs: a new output extension is now skipped
-          # rather than uploaded, and silently. Refuse to finish instead.
-          stray=$(find "$WORK/public" -maxdepth 1 -type f ! -name manifest.json \
-                  ! -name '*.webp' ! -name '*.avif' ! -name '*.mp4' -printf '%f\n')
-          if [ -n "$stray" ]; then
-            echo "::error::no upload pass covers these: $(echo "$stray" | paste -sd' ')"
-            exit 1
-          fi
-          echo "uploaded to media/activity-${activity}/"
+          upload-media "$WORK/public" \
+            --bucket "$MEDIA_BUCKET" \
+            --prefix "media/activity-${activity}" \
+            --cache immutable
 
       # Filenames, sizes and the decoy values only. Never a source path, a
       # bucket name, a signed URL, or anything from the draft's text.

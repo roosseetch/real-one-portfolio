@@ -230,6 +230,45 @@ fn emits_every_requested_width_at_or_below_the_source() {
     assert_eq!(widths, vec![320, 800, 1200, 1600]);
 }
 
+/// The site asks for the AVIF through a `<source>` and only reaches the WebP
+/// when the browser cannot read one. A browser that has chosen a source does
+/// not fall back to the `<img>` beside it, so an AVIF missing at a width the
+/// WebP was written at is not a larger download -- it is a broken photograph.
+#[test]
+fn every_width_that_has_a_webp_has_an_avif_beside_it() {
+    let scratch = Scratch::new("avif-ladder");
+    let source = photo(&scratch, (1400, 900));
+    let run = common::sanitize_one(
+        &scratch,
+        &source,
+        "media0",
+        "image",
+        &[1600, 1200, 800, 320],
+        Options::default(),
+    );
+
+    assert_eq!(run.result.failures, Vec::<String>::new());
+
+    let widths = |format: &str| {
+        let mut widths: Vec<u32> = run
+            .entries("media0")
+            .iter()
+            .filter(|e| e.format == format)
+            .map(|e| e.width)
+            .collect();
+        widths.sort_unstable();
+        widths
+    };
+
+    // 1600 clamps to the 1400px source, so the ladder is 320, 800, 1200, 1400.
+    assert_eq!(widths("webp"), vec![320, 800, 1200, 1400]);
+    assert_eq!(widths("avif"), widths("webp"));
+
+    for entry in run.entries("media0") {
+        assert!(run.file(entry).exists(), "{} is not on disk", entry.file);
+    }
+}
+
 #[test]
 fn never_upscales_and_writes_one_file_per_clamped_width() {
     let scratch = Scratch::new("clamp");
@@ -350,10 +389,7 @@ fn writes_both_formats_and_neither_is_empty() {
         .map(|e| e.format.as_str())
         .collect();
     assert!(formats.contains("webp"), "WebP is required: {formats:?}");
-    assert!(
-        formats.contains("avif"),
-        "AVIF should be written when the encoder is built in"
-    );
+    assert!(formats.contains("avif"), "AVIF is required: {formats:?}");
     for entry in run.entries("media0") {
         assert!(entry.bytes > 0, "{} was written empty", entry.file);
         assert_eq!(

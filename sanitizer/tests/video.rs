@@ -106,6 +106,39 @@ fn an_mp4_publishes_one_video_and_a_poster_set() {
     assert_eq!(widths, vec![320, 640]);
 }
 
+/// A `<video>` names its poster in a `poster` attribute, which takes one URL
+/// and cannot be handed a `<picture>` to choose from. So a poster AVIF is a
+/// file nothing can ever request -- and it was being encoded at every width,
+/// through the slowest step in the pipeline.
+#[test]
+fn a_poster_gets_no_avif_because_nothing_could_ask_for_one() {
+    needs_ffmpeg!();
+    let scratch = Scratch::new("poster-formats");
+    let source = clip(&scratch, VideoSpec::default());
+    let run = sanitize(&scratch, &source, &[1600, 800, 320]);
+
+    let posters = run.by_role("media0", Role::Poster);
+    assert!(!posters.is_empty(), "the poster set should not be empty");
+    assert!(
+        posters.iter().all(|p| p.format == "webp"),
+        "a poster should be WebP and nothing else: {:?}",
+        posters
+            .iter()
+            .map(|p| p.format.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    // Not merely absent from the manifest: absent from the directory, or the
+    // upload would carry it and the bucket would pay for it anyway.
+    let strays: Vec<String> = std::fs::read_dir(&run.work_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("-poster-") && name.ends_with(".avif"))
+        .collect();
+    assert!(strays.is_empty(), "poster AVIFs were written: {strays:?}");
+}
+
 #[test]
 fn no_original_container_metadata_survives() {
     needs_ffmpeg!();
