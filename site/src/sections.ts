@@ -1,3 +1,4 @@
+import { pictureFor } from "./picture";
 import { facts, personality, portfolio, mediaRef, profileLinks } from "./profile";
 import { routeById, routeHref } from "./routes";
 
@@ -22,15 +23,24 @@ const MEDIA_BASE = import.meta.env.VITE_MEDIA_BASE_URL?.replace(/\/$/, "");
 /** "/" on a custom domain, "/<repo>/" on a project-pages deployment. */
 const BASE = import.meta.env.BASE_URL;
 
-/** Widths published by the sanitization pipeline for each media reference.
-    Sources vary in size and the pipeline never upscales, so the available
-    widths differ per image. */
-const PUBLISHED_WIDTHS: Record<string, number[]> = {
-  hero: [800, 991],
-  "hobby-jogging": [800, 1080],
-  "hobby-gym": [738],
-  "hobby-stretching": [800, 1600],
-  "hobby-ballet": [781],
+/** What is published for each media reference.
+
+    `widths` because sources vary in size and the pipeline never upscales, so
+    the available widths differ per image.
+
+    `avif` because profile photographs are published by hand — the Telegram
+    pipeline handles activity media only — and a `<source>` pointing at a file
+    that is not in the bucket renders a broken image rather than falling back to
+    the `<img>` beside it. So this is a record of what was actually uploaded,
+    not a description of what the sanitiser can produce. Anyone adding a
+    photograph here sets it after the upload, never before; the README's
+    publishing recipe says so at the step where it matters. */
+const PUBLISHED_MEDIA: Record<string, { widths: number[]; avif: boolean }> = {
+  hero: { widths: [800, 991], avif: true },
+  "hobby-jogging": { widths: [800, 1080], avif: true },
+  "hobby-gym": { widths: [738], avif: true },
+  "hobby-stretching": { widths: [800, 1600], avif: true },
+  "hobby-ballet": { widths: [781], avif: true },
 };
 
 /** Renders a published photo, or an accent-tinted block carrying the alt text
@@ -38,21 +48,30 @@ const PUBLISHED_WIDTHS: Record<string, number[]> = {
     accessibility real for a deployment whose media pipeline has not run yet. */
 function mediaSlot(refId: string | null, className: string): HTMLElement {
   const ref = refId ? mediaRef(refId) : null;
-  const widths = refId ? PUBLISHED_WIDTHS[refId] : undefined;
+  const published = refId ? PUBLISHED_MEDIA[refId] : undefined;
 
-  if (MEDIA_BASE && refId && widths?.length) {
+  if (MEDIA_BASE && refId && published?.widths.length) {
+    const widths = published.widths;
     const img = new Image();
-    const url = (w: number) => `${MEDIA_BASE}/media/profile/${refId}-${w}.webp`;
+    const url = (w: number, ext = "webp") => `${MEDIA_BASE}/media/profile/${refId}-${w}.${ext}`;
+    const sizes = "(max-width: 48rem) 100vw, 40rem";
     img.className = `${className} media-photo`;
     img.src = url(widths[widths.length - 1]);
     if (widths.length > 1) {
       img.srcset = widths.map((w) => `${url(w)} ${w}w`).join(", ");
-      img.sizes = "(max-width: 48rem) 100vw, 40rem";
+      img.sizes = sizes;
     }
     img.alt = ref?.alt ?? "";
     img.loading = refId === "hero" ? "eager" : "lazy";
     img.decoding = "async";
-    return img;
+    // The class stays on the <img>: `.media-photo` carries object-fit, which is
+    // a property of the replaced element and does nothing on a wrapper.
+    if (!published.avif) return img;
+    const avif =
+      widths.length > 1
+        ? widths.map((w) => `${url(w, "avif")} ${w}w`).join(", ")
+        : url(widths[0], "avif");
+    return pictureFor(img, avif, widths.length > 1 ? sizes : undefined);
   }
 
   const slot = el("div", `${className} media-slot`);

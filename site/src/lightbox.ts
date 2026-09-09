@@ -19,6 +19,7 @@
  * three signatures made worse to avoid a cycle that cannot bite.
  */
 import { counterText, el, longArrow, type ActivityMedia } from "./activity";
+import { avifFrom, avifSupported } from "./picture";
 
 /** A cross, drawn to the same stroke conventions as the carousel's arrows. */
 function closeGlyph(): SVGElement {
@@ -77,7 +78,17 @@ export function openLightbox(photos: ActivityMedia[], index: number): HTMLDialog
   // not choose is a longer attribute for nothing.
   img.sizes = "100vw";
   img.decoding = "async";
-  figure.append(img);
+  // Assembled here rather than through pictureFor, which builds a wrapper once
+  // for an image that never changes its source. This one is retargeted by
+  // show() on every arrow press, so the <source> has to outlive the photograph
+  // in it. An empty srcset matches nothing and the browser falls through to the
+  // <img>, which is the honest fallback for a record image the pipeline did not
+  // write as a WebP.
+  const picture = document.createElement("picture");
+  const avifSource = document.createElement("source");
+  avifSource.type = "image/avif";
+  picture.append(avifSource, img);
+  figure.append(picture);
 
   const caption = document.createElement("figcaption");
   caption.className = "lightbox-caption";
@@ -110,6 +121,10 @@ export function openLightbox(photos: ActivityMedia[], index: number): HTMLDialog
     current = Math.min(Math.max(to, 0), photos.length - 1);
     const item = photos[current];
 
+    // The source before the image, so the browser has both by the time it
+    // picks. Empty when there is no AVIF beside this file, which takes the
+    // source out of the running rather than pointing it at a 404.
+    avifSource.srcset = avifFrom(item.src) ?? "";
     img.src = item.src;
     img.alt = item.alt ?? "";
     caption.textContent = item.caption ?? "";
@@ -123,9 +138,19 @@ export function openLightbox(photos: ActivityMedia[], index: number): HTMLDialog
       // The neighbours, so an arrow press paints instead of waiting on the
       // network. Costs one request each for a file the reader is one keystroke
       // from asking for anyway.
-      for (const neighbour of [photos[current - 1], photos[current + 1]]) {
-        if (neighbour) new Image().src = neighbour.src;
-      }
+      //
+      // A bare Image() has no <source> to choose from, so the format has to be
+      // decided here or the prefetch warms the cache with a file show() will
+      // not read. The probe resolves once per page; until it does, nothing is
+      // prefetched, which is the right way round — a prefetch that arrives
+      // late has still saved the wait, and one in the wrong format never does.
+      const neighbours = [photos[current - 1], photos[current + 1]];
+      void avifSupported().then((avif) => {
+        for (const neighbour of neighbours) {
+          if (!neighbour) continue;
+          new Image().src = (avif ? avifFrom(neighbour.src) : null) ?? neighbour.src;
+        }
+      });
     }
   }
 
@@ -166,7 +191,11 @@ export function openLightbox(photos: ActivityMedia[], index: number): HTMLDialog
   // photograph belongs to the figure, not to the backdrop.
   dialog.addEventListener("click", (event) => {
     const target = event.target as Element | null;
-    if (!target?.closest("img, button, figcaption")) dismiss();
+    // `picture` is in the list for safety rather than because it should ever
+    // match: the wrapper is `display: contents`, so it generates no box and
+    // cannot be a click target. If that rule is ever lost, a press on the
+    // photograph would otherwise dismiss the viewer instead of doing nothing.
+    if (!target?.closest("img, picture, button, figcaption")) dismiss();
   });
 
   dialog.addEventListener("keydown", (event) => {

@@ -36,6 +36,33 @@ describe("the full-screen view", () => {
     expect(img.alt).toBe("Photo 1");
   });
 
+  /* The source outlives the photograph in it, so the one thing that can go
+     wrong here is stepping the image and leaving the source behind — which
+     would show the reader the previous photograph in AVIF and the new one only
+     if their browser could not read one. */
+  it("offers the AVIF and retargets it on every step", () => {
+    const dialog = openLightbox([photo(1), photo(2)], 0);
+    const source = dialog?.querySelector("source") as HTMLSourceElement;
+
+    expect(source.type).toBe("image/avif");
+    expect(source.getAttribute("srcset")).toBe("https://media.test/media/activity-1/p1-1600.avif");
+
+    (dialog?.querySelectorAll(".lightbox-arrow")[1] as HTMLButtonElement).click();
+
+    expect(source.getAttribute("srcset")).toBe("https://media.test/media/activity-1/p2-1600.avif");
+    expect(dialog?.querySelector("img")?.getAttribute("src")).toContain("p2-1600.webp");
+  });
+
+  /* Empty rather than absent: a source matching nothing takes itself out of the
+     running, where a source pointing at a file that was never written is a
+     broken photograph the <img> beside it does not get to rescue. */
+  it("empties the source for a photograph with no AVIF beside it", () => {
+    const dialog = openLightbox([photo(1, { src: "https://media.test/odd.png" })], 0);
+
+    expect(dialog?.querySelector("source")?.getAttribute("srcset")).toBe("");
+    expect(dialog?.querySelector("img")?.getAttribute("src")).toBe("https://media.test/odd.png");
+  });
+
   it("opens on the photograph that was clicked", () => {
     const dialog = openLightbox([photo(1), photo(2), photo(3)], 2);
 

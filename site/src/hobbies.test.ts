@@ -122,6 +122,39 @@ describe("the hobby rail", () => {
   });
 
   /**
+   * The wrapper must not come between the panel and its image. `loading` lives
+   * on the `<img>` and nowhere else — a `<source>` has no such attribute — so if
+   * a future change moved it onto the `<picture>`, the test above would still
+   * pass on a page where every hobby plate stayed empty.
+   */
+  it("keeps the photograph's loading attribute on the image itself", () => {
+    const { panels } = hobbies();
+
+    for (const panel of panels) {
+      const picture = panel.querySelector("picture");
+      expect(picture).not.toBeNull();
+      expect(picture?.hasAttribute("loading")).toBe(false);
+      expect(picture?.querySelector("source")?.hasAttribute("loading")).toBe(false);
+      expect(panel.querySelector("img")?.hasAttribute("loading")).toBe(true);
+    }
+  });
+
+  /** Half the bytes for the same photograph, and the heaviest images on the site. */
+  it("offers every hobby photograph its AVIF, width for width", () => {
+    const { panels } = hobbies();
+
+    for (const panel of panels) {
+      const img = panel.querySelector("img") as HTMLImageElement;
+      const source = panel.querySelector("source") as HTMLSourceElement;
+      expect(source.type).toBe("image/avif");
+
+      const webp = img.getAttribute("srcset") ?? img.getAttribute("src")!;
+      expect(source.getAttribute("srcset")).toBe(webp.replaceAll(".webp", ".avif"));
+      expect(source.getAttribute("sizes")).toBe(img.getAttribute("sizes"));
+    }
+  });
+
+  /**
    * A headline is someone's own words about their own hobby. Where the profile
    * has none the title is the heading and there is no kicker above it, rather
    * than a line invented to fill the space the design leaves for one.
