@@ -8,6 +8,7 @@
    they share — loading, ordering, what a record looks like, and the URL that
    names one — lives in this module, so the two cannot drift. */
 
+import { openLightbox } from "./lightbox";
 import { routeById, routeHref } from "./routes";
 
 export interface ActivityMedia {
@@ -411,13 +412,56 @@ export function longArrow(back: boolean, length = 56): SVGElement {
 }
 
 /** "01 / 05" — padded, so the counter does not change width as it counts. */
-function counterText(index: number, total: number): string {
+export function counterText(index: number, total: number): string {
   const width = String(total).length;
   return `${String(index + 1).padStart(width, "0")} / ${String(total).padStart(width, "0")}`;
 }
 
-/** What a media item shows in the plate: the picture, or the clip itself. */
-function slideMedia(media: ActivityMedia): HTMLElement {
+/**
+ * The widths the sanitiser is asked for.
+ *
+ * A fourth copy of a list that is also in `.github/workflows/process-media.yml`
+ * (DERIVATIVE_WIDTHS, and again in the completeness check beside it) and in
+ * `sanitizer/src/main.rs`. It is here because a record stores two URLs and no
+ * more — the widest derivative and the narrowest — so the widths in between
+ * have to be reconstructed. Changing the ladder means changing it in all three
+ * files; a width added here that the pipeline does not write is a 404 in a
+ * srcset, which browsers report nowhere.
+ */
+const DERIVATIVE_WIDTHS = [320, 800, 1200, 1600];
+
+/**
+ * Every derivative that exists for one picture, from the widest one's URL.
+ *
+ * Derived rather than stored, and it is exact rather than a guess: the
+ * sanitiser clamps each requested width to the source and drops what that
+ * leaves duplicated (`sanitizer/src/image.rs`), so a 960px source produces
+ * 320, 800 and 960 — never a 1200. Reading the widest width out of the
+ * filename and keeping the ladder strictly below it reproduces that set.
+ *
+ * Null for anything not named `…-{width}.{ext}`, which is every URL this
+ * pipeline did not write.
+ */
+export function derivativeSrcset(src: string): string | null {
+  const match = /-(\d+)(\.[a-z0-9]+)$/i.exec(src);
+  if (!match) return null;
+
+  const widest = Number(match[1]);
+  const stem = src.slice(0, match.index);
+  const extension = match[2];
+  const widths = [...DERIVATIVE_WIDTHS.filter((width) => width < widest), widest];
+  return widths.map((width) => `${stem}-${width}${extension} ${width}w`).join(", ");
+}
+
+/**
+ * What a media item shows in the plate: the picture, or the clip itself.
+ *
+ * `first` is the one the plate opens on. It loads eagerly, because it is the
+ * picture the reader came for and deferring it means an empty plate for as long
+ * as the observer takes to notice; the rest are off to the side of a scroller
+ * and lazy is right for them.
+ */
+function slideMedia(media: ActivityMedia, first = false): HTMLElement {
   if (media.type === "video") {
     const video = document.createElement("video");
     video.src = media.src;
@@ -437,11 +481,46 @@ function slideMedia(media: ActivityMedia): HTMLElement {
   }
 
   const img = new Image();
-  img.src = media.thumbnail ?? media.src;
+  // `src`, not `thumbnail`. The thumbnail is the 320px derivative — right for a
+  // 6rem filmstrip button and for a mosaic cell, and a blur in a plate that
+  // renders past 500px. The wider files have always been in the bucket.
+  img.src = media.src;
+  const srcset = derivativeSrcset(media.src);
+  if (srcset) {
+    img.srcset = srcset;
+    // The plate is height-clamped and contains rather than covers, so however
+    // wide the column gets, the picture inside it stops around 46rem.
+    img.sizes = "(max-width: 48rem) 100vw, 46rem";
+  }
   img.alt = media.alt ?? "";
-  img.loading = "lazy";
+  img.loading = first ? "eager" : "lazy";
   img.decoding = "async";
   return img;
+}
+
+/**
+ * The plate's contents, and the way into the full-screen view.
+ *
+ * Only a photograph gets the button. A clip carries its own controls, and a
+ * button laid over them would swallow the press meant for play.
+ */
+function slideZoom(
+  photos: ActivityMedia[],
+  item: ActivityMedia,
+  position: number,
+  first: boolean,
+): HTMLElement {
+  const content = slideMedia(item, first);
+  if (item.type === "video") return content;
+
+  const button = el("button", "carousel-zoom") as HTMLButtonElement;
+  button.type = "button";
+  // Numbered within the photographs, which is what the lightbox counts through
+  // — a set of two photographs either side of a clip reads "1" and "2" here.
+  button.setAttribute("aria-label", `View photo ${position + 1} full size`);
+  button.append(content);
+  button.addEventListener("click", () => openLightbox(photos, position));
+  return button;
 }
 
 /**
@@ -465,6 +544,10 @@ function mediaCarousel(record: ActivityRecord): HTMLElement | null {
 
   const carousel = el("div", "media-carousel");
   const single = media.length === 1;
+  // What the full-screen view steps through. Clips are left out of it: one
+  // already plays in the plate, and arrowing into another here would stack a
+  // second player on the first.
+  const photos = media.filter((item) => item.type !== "video");
 
   const track = el("div", "carousel-track");
   if (!single) {
@@ -485,7 +568,7 @@ function mediaCarousel(record: ActivityRecord): HTMLElement | null {
       slide.setAttribute("aria-roledescription", "slide");
       slide.setAttribute("aria-label", `${index + 1} of ${media.length}`);
     }
-    slide.append(slideMedia(item));
+    slide.append(slideZoom(photos, item, photos.indexOf(item), index === 0));
     track.append(slide);
   });
   carousel.append(track);

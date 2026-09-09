@@ -10,7 +10,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { activityHref, activitySlug, renderActivityPreview, renderRecord, selectRecords } from "./activity";
+import {
+  activityHref,
+  activitySlug,
+  derivativeSrcset,
+  renderActivityPreview,
+  renderRecord,
+  selectRecords,
+} from "./activity";
 import { bucketOf, loaded, record, serve } from "./test-support/activity-bucket";
 
 function mount(): HTMLElement {
@@ -464,5 +471,138 @@ describe("the media carousel", () => {
 
     expect(track?.tabIndex).toBe(0);
     expect(track?.getAttribute("aria-label")).toContain("arrow keys");
+  });
+});
+
+describe("the derivatives a picture's URL implies", () => {
+  const base = "https://media.test/media/activity-1/abc";
+
+  /* The sanitiser clamps every requested width to the source and drops what
+     that leaves duplicated, so the ladder below the widest is exactly what it
+     wrote — no guessing, and no width that would 404. */
+  it("keeps only the ladder widths below the widest one", () => {
+    expect(derivativeSrcset(`${base}-960.webp`)).toBe(
+      `${base}-320.webp 320w, ${base}-800.webp 800w, ${base}-960.webp 960w`,
+    );
+  });
+
+  it("claims no 1200 or 1600 that the source was too small to produce", () => {
+    const srcset = derivativeSrcset(`${base}-960.webp`);
+
+    expect(srcset).not.toContain("1200w");
+    expect(srcset).not.toContain("1600w");
+  });
+
+  it("lists the full ladder when the source reached the top of it", () => {
+    expect(derivativeSrcset(`${base}-1600.webp`)).toBe(
+      `${base}-320.webp 320w, ${base}-800.webp 800w, ${base}-1200.webp 1200w, ${base}-1600.webp 1600w`,
+    );
+  });
+
+  /* A width that is itself a ladder entry must appear once, as the widest, and
+     not a second time from the filter below it. */
+  it("does not repeat a widest that is also a ladder width", () => {
+    expect(derivativeSrcset(`${base}-800.webp`)).toBe(`${base}-320.webp 320w, ${base}-800.webp 800w`);
+  });
+
+  it("handles a poster, whose name carries an infix before the width", () => {
+    expect(derivativeSrcset(`${base}-poster-800.webp`)).toBe(
+      `${base}-poster-320.webp 320w, ${base}-poster-800.webp 800w`,
+    );
+  });
+
+  it("declines a URL this pipeline did not write", () => {
+    expect(derivativeSrcset("https://media.test/media/profile/mark.png")).toBeNull();
+  });
+});
+
+describe("the way into the full-screen view", () => {
+  const image = (n: number, extra: Record<string, unknown> = {}) => ({
+    type: "image" as const,
+    src: `https://media.test/media/activity-1/p${n}-1600.webp`,
+    thumbnail: `https://media.test/media/activity-1/p${n}-320.webp`,
+    alt: `Picture ${n}`,
+    ...extra,
+  });
+
+  const single = (media: unknown[]) =>
+    renderRecord({ id: "rec-1", title: "A note", media: media as never }, { heading: "h1" });
+
+  it("puts a named button around every photograph in the track", () => {
+    const card = single([image(1), image(2)]);
+    const zooms = card.querySelectorAll(".carousel-zoom");
+
+    expect(zooms).toHaveLength(2);
+    expect(zooms[1].getAttribute("aria-label")).toBe("View photo 2 full size");
+    expect(zooms[0].querySelector("img")).not.toBeNull();
+  });
+
+  /* A clip carries its own controls. A button over them would swallow the press
+     meant for play, so it does not get one. */
+  it("leaves a clip alone", () => {
+    const card = single([
+      {
+        type: "video",
+        src: "https://media.test/media/activity-1/clip.mp4",
+        poster: "https://media.test/media/activity-1/poster-800.webp",
+      },
+    ]);
+
+    expect(card.querySelectorAll(".carousel-zoom")).toHaveLength(0);
+    expect(card.querySelector(".carousel-slide video")).not.toBeNull();
+  });
+
+  /* The lightbox steps through photographs only, so the numbering it is opened
+     with counts photographs only — a clip between two of them must not push the
+     second one to "3". */
+  it("numbers photographs past a clip without counting it", () => {
+    const card = single([
+      image(1),
+      { type: "video", src: "https://media.test/media/activity-1/clip.mp4" },
+      image(2),
+    ]);
+    const zooms = card.querySelectorAll(".carousel-zoom");
+
+    expect(zooms).toHaveLength(2);
+    expect(zooms[1].getAttribute("aria-label")).toBe("View photo 2 full size");
+  });
+
+  it("opens the black view on the photograph that was pressed", () => {
+    document.body.replaceChildren();
+    const card = single([image(1), image(2)]);
+    document.body.append(card);
+
+    (card.querySelectorAll(".carousel-zoom")[1] as HTMLButtonElement).click();
+
+    const dialog = document.querySelector("dialog.lightbox");
+    expect(dialog).not.toBeNull();
+    expect(dialog?.querySelector("img")?.getAttribute("src")).toContain("p2-1600");
+  });
+
+  /* The plate opens on the first photograph, so it must not wait on an
+     intersection observer — and the ones off to the side of the scroller must
+     not all be fetched at once. */
+  it("loads the photograph on show eagerly and the rest lazily", () => {
+    const imgs = single([image(1), image(2), image(3)]).querySelectorAll<HTMLImageElement>(
+      ".carousel-slide img",
+    );
+
+    expect([...imgs].map((img) => img.loading)).toEqual(["eager", "lazy", "lazy"]);
+  });
+
+  it("asks the plate for the wider derivatives too", () => {
+    const img = single([image(1)]).querySelector(".carousel-slide img") as HTMLImageElement;
+
+    expect(img.getAttribute("srcset")).toContain("1600w");
+    expect(img.getAttribute("srcset")).toContain("320w");
+    expect(img.getAttribute("sizes")).toBe("(max-width: 48rem) 100vw, 46rem");
+  });
+
+  /* The 320px file keeps the two jobs it is right for. */
+  it("leaves the filmstrip on the thumbnail", () => {
+    const thumb = single([image(1), image(2)]).querySelector(".carousel-thumb img") as HTMLImageElement;
+
+    expect(thumb.getAttribute("src")).toBe("https://media.test/media/activity-1/p1-320.webp");
+    expect(thumb.getAttribute("srcset")).toBeNull();
   });
 });
