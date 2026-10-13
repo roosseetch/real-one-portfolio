@@ -17,36 +17,19 @@
  *
  * Exit code 0 = removed, 1 = not found or failure.
  */
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
-const MANIFEST_KEY = "content/manifest.json";
-const MANIFEST_CACHE_CONTROL = "no-cache";
-const CHUNK_CACHE_CONTROL = "public, max-age=31536000, immutable";
-const CHUNK_ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
-
-interface ManifestEntry {
-  id: string;
-  sha256: string;
-  count: number;
-}
-
-interface Manifest {
-  schemaVersion: number;
-  updatedAt: string;
-  recordsPerFile: number;
-  totalRecords: number;
-  records: ManifestEntry[];
-  latest: string | null;
-}
-
-interface PublicRecord {
-  id: string;
-  title: string;
-}
+import {
+  CHUNK_CACHE_CONTROL,
+  MANIFEST_CACHE_CONTROL,
+  MANIFEST_KEY,
+  type Manifest,
+  type ManifestEntry,
+  type PublicRecord,
+  put as putObject,
+  randomId,
+  readJson as readPublic,
+} from "./content-bucket.js";
 
 const recordId = process.argv[2];
 const bucket = process.env.CONTENT_BUCKET;
@@ -67,38 +50,8 @@ if (!recordId || missing.length > 0) {
   process.exit(1);
 }
 
-function randomChunkId(length = 12): string {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((byte) => CHUNK_ID_ALPHABET[byte % CHUNK_ID_ALPHABET.length]).join("");
-}
-
-/** Read over the public domain: no credentials needed, and it sees exactly what a visitor sees. */
-async function readJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${base}/${path}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`HTTP ${response.status} for ${path}`);
-  return (await response.json()) as T;
-}
-
-function put(key: string, body: string, cacheControl: string): void {
-  const file = join(mkdtempSync(join(tmpdir(), "unpublish-")), "object.json");
-  writeFileSync(file, body);
-  execFileSync(
-    "npx",
-    [
-      "wrangler",
-      "r2",
-      "object",
-      "put",
-      `${bucket}/${key}`,
-      `--file=${file}`,
-      "--content-type=application/json",
-      `--cache-control=${cacheControl}`,
-      "--remote",
-    ],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: process.env },
-  );
-}
+const readJson = <T>(path: string) => readPublic<T>(base!, path);
+const put = (key: string, body: string, cacheControl: string) => putObject(bucket!, key, body, cacheControl);
 
 const manifest = await readJson<Manifest>(MANIFEST_KEY);
 
@@ -129,7 +82,7 @@ if (remaining.length === 0) {
   console.log(`  chunk ${holder.id} held only that record; its entry is removed`);
 } else {
   const body = `${JSON.stringify(remaining, null, 2)}`;
-  const chunkId = randomChunkId();
+  const chunkId = randomId(12);
   put(`content/records-${chunkId}.json`, body, CHUNK_CACHE_CONTROL);
   const sha256 = createHash("sha256").update(body).digest("hex");
   entries = manifest.records.map((entry) =>

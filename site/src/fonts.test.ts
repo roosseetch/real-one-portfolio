@@ -73,6 +73,20 @@ describe("the @font-face block", () => {
     expect(weights["Lora"]).toBe("400");
     expect(weights["Cormorant Garamond"]).toBe("300 700");
   });
+
+  /** Fraunces' italic is a file of its own, and has to be declared as one. */
+  it("declares each face in the style its file was drawn in", () => {
+    const css = fontFaceStyle(MEDIA);
+    const rules = css.split("@font-face").slice(1);
+
+    FONT_FACES.forEach((face, index) => {
+      expect(rules[index]).toContain(`font-style: ${face.style};`);
+    });
+    expect(FONT_FACES.filter((face) => face.style === "italic").map((face) => face.family)).toEqual([
+      "Fraunces",
+      "Fraunces",
+    ]);
+  });
 });
 
 describe("the preload hints", () => {
@@ -81,6 +95,15 @@ describe("the preload hints", () => {
 
     expect(links).toHaveLength(2);
     expect(links.join("\n")).not.toContain("latin-ext");
+  });
+
+  /**
+   * Fraunces sets only the articles. A preload is fetched on every page whether
+   * anything uses it or not, which would put it on the critical path of the
+   * pages that never draw it.
+   */
+  it("leave the article face to be fetched only where it is used", () => {
+    expect(fontPreloadLinks(MEDIA).join("\n")).not.toContain("fraunces");
   });
 
   /** A font preload without crossorigin is a second request, not a warm cache. */

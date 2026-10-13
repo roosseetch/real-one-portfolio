@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "profile:publish": "tsx scripts/publish-profile.ts",
     "profile:fetch": "tsx scripts/fetch-profile.ts",
+    "record:publish": "tsx scripts/publish-record.ts",
     "record:unpublish": "tsx scripts/unpublish-record.ts",
     "logs:read": "bash scripts/read-error-logs.sh",
     "profile:test-fixture": "tsx scripts/install-test-profile.ts",

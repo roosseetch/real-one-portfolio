@@ -1,5 +1,5 @@
 /**
- * The two typefaces the design is drawn in, and where a browser gets them.
+ * The typefaces the design is drawn in, and where a browser gets them.
  *
  * Cormorant Garamond sets every display line and Lora sets every paragraph.
  * Neither is a system font, so the pages either fetch them or render in
@@ -45,8 +45,13 @@ const LATIN_EXT =
   "U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF";
 
 export interface FontFace {
-  /** CSS family name, exactly as `--font-heading` and `--font-body` spell it. */
+  /** CSS family name, exactly as `--font-heading`, `--font-body` and `--font-article` spell it. */
   family: string;
+  /**
+   * The `font-style` descriptor. Italic is its own file: a variable family's
+   * italic is a separate design rather than an axis, so it is a separate face.
+   */
+  style: "normal" | "italic";
   /**
    * The `font-weight` descriptor. A range, because both families are variable:
    * one file answers every weight in it, so a range costs nothing a single
@@ -68,7 +73,8 @@ export interface FontFace {
 }
 
 /**
- * Four files: two families, each in `latin` and `latin-ext`.
+ * Two families set every page, each in `latin` and `latin-ext`; a third sets
+ * only articles, and is described where it is listed.
  *
  * Cormorant Garamond's range is 300–700 rather than the 300–400 the artboards
  * use, because Google serves the identical file for both — the wider range is
@@ -83,6 +89,7 @@ export interface FontFace {
 export const FONT_FACES: FontFace[] = [
   {
     family: "Cormorant Garamond",
+    style: "normal",
     weight: "300 700",
     file: "cormorant-garamond-v21-latin.woff2",
     fallback:
@@ -92,6 +99,7 @@ export const FONT_FACES: FontFace[] = [
   },
   {
     family: "Cormorant Garamond",
+    style: "normal",
     weight: "300 700",
     file: "cormorant-garamond-v21-latin-ext.woff2",
     fallback:
@@ -101,6 +109,7 @@ export const FONT_FACES: FontFace[] = [
   },
   {
     family: "Lora",
+    style: "normal",
     weight: "400",
     file: "lora-v37-latin.woff2",
     fallback: "https://fonts.gstatic.com/s/lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787weuxJBkq0.woff2",
@@ -109,9 +118,59 @@ export const FONT_FACES: FontFace[] = [
   },
   {
     family: "Lora",
+    style: "normal",
     weight: "400",
     file: "lora-v37-latin-ext.woff2",
     fallback: "https://fonts.gstatic.com/s/lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787weuxJPkq1umA.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+  },
+  // Fraunces sets the display lines of an article published in Markdown
+  // (site/src/prose.ts): its section headings, pull quotes, drop cap and list
+  // numerals. Nothing else on the site names it, and a browser fetches a face
+  // only when rendered text asks for it, so every other page costs nothing.
+  //
+  // The weight axis only. Google also serves Fraunces with its optical-size
+  // axis, at 67 KB roman and 82 KB italic for the latin cut against 37 and 46
+  // here; the article sets it at display sizes, where the default optical size
+  // is the one it would have chosen anyway.
+  {
+    family: "Fraunces",
+    style: "normal",
+    weight: "300 700",
+    file: "fraunces-v38-latin.woff2",
+    fallback:
+      "https://fonts.gstatic.com/s/fraunces/v38/6NUu8FyLNQOQZAnv9bYEvDiIdE9Ea92uemAk_WBq8U_9v0c2Wa0K7iN7hzFUPJH58nib14c7qv8.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+  },
+  {
+    family: "Fraunces",
+    style: "normal",
+    weight: "300 700",
+    file: "fraunces-v38-latin-ext.woff2",
+    fallback:
+      "https://fonts.gstatic.com/s/fraunces/v38/6NUu8FyLNQOQZAnv9bYEvDiIdE9Ea92uemAk_WBq8U_9v0c2Wa0K7iN7hzFUPJH58nib14c1qv86Rg.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+  },
+  {
+    family: "Fraunces",
+    style: "italic",
+    weight: "300 700",
+    file: "fraunces-italic-v38-latin.woff2",
+    fallback:
+      "https://fonts.gstatic.com/s/fraunces/v38/6NUs8FyLNQOQZAnv9ZwNjucMHVn85Ni7emAe9lKqZTnbB-gzTK0K1ChJdt9vIVYX9G37lvd9mv0iQg.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+  },
+  {
+    family: "Fraunces",
+    style: "italic",
+    weight: "300 700",
+    file: "fraunces-italic-v38-latin-ext.woff2",
+    fallback:
+      "https://fonts.gstatic.com/s/fraunces/v38/6NUs8FyLNQOQZAnv9ZwNjucMHVn85Ni7emAe9lKqZTnbB-gzTK0K1ChJdt9vIVYX9G37lvd9mvMiQvTm.woff2",
     unicodeRange: LATIN_EXT,
     preload: false,
   },
@@ -153,7 +212,7 @@ export function fontFaceStyle(mediaBase?: string): string {
     return [
       `      @font-face {`,
       `        font-family: "${face.family}";`,
-      `        font-style: normal;`,
+      `        font-style: ${face.style};`,
       `        font-weight: ${face.weight};`,
       // swap, not optional: the page is prose, and a reader who arrives on a
       // slow connection should get the words in a fallback serif rather than

@@ -551,6 +551,25 @@ manifest, leaving the superseded chunk unreferenced. The manifest is written
 last: a chunk nothing points at is invisible, while a record missing from a
 chunk the manifest still points at would be a broken page.
 
+**An article published by hand.** A piece too long for a Telegram message, or
+one that has to appear exactly as written, is a JSON record on disk instead —
+title, summary, body, eventDate, tags, media — published the same append-only
+way:
+
+```sh
+set -a; . ./infrastructure/.env; . ./worker/.env; set +a
+npm run record:publish <record.json> -- --id <record-id>
+```
+
+Set `"bodyFormat": "markdown"` and the body is read as the small Markdown subset
+in `site/src/prose.ts` — sections, lists, pull quotes, and `![alt](media:0)` to
+place one of the record's pictures in the text — and set in Fraunces as well as
+Lora. Without it the body is plain paragraphs, like every Telegram record.
+Upload the media first, sanitised with the binary under **Profile photos** and
+uploaded with `--prefix media/activity-<record-id>` and the default immutable
+cache, and pass that id as `--id` so the record and its pictures agree. The
+script stamps `id` and `publishedAt` itself and refuses a file that sets either.
+
 **What expires.** Drafts, originals and contact messages are deleted after
 `draft_retention_days` (7), error logs after `error_log_retention_days` (14),
 abandoned multipart uploads after a day. The content and media buckets have no

@@ -38,6 +38,13 @@ export interface PublicRecord {
   publishedAt: string;
   tags: string[];
   media: PublicMedia[];
+  /**
+   * "markdown" on an article published by hand (scripts/publish-record.ts),
+   * whose body the site reads with site/src/prose.ts. Never set here: what the
+   * Worker publishes is plain text, and every rewrite of a record copies it with
+   * a spread, so a record that has the field keeps it through an edit.
+   */
+  bodyFormat?: "markdown";
 }
 
 /**
