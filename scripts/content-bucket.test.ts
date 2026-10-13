@@ -52,7 +52,7 @@ describe("a record written by hand", () => {
 
   it("names every problem rather than the first", () => {
     expect(
-      problemsWith({ ...good, title: "", eventDate: "12 Oct", bodyFormat: "html", media: [{ type: "gif", src: "http://x" }] }),
+      problemsWith({ ...good, title: "", eventDate: "12 Oct", bodyFormat: "html", media: [{ type: "gif", src: "http://media.test/x-1024.webp" }] }),
     ).toHaveLength(5);
   });
 
