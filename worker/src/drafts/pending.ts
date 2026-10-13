@@ -42,6 +42,8 @@ export type Pending =
   | { kind: "delete-target" }
   /** The next message names the activity to change the wording of. */
   | { kind: "edit-target" }
+  /** The next message names the article to open in the site's editor. */
+  | { kind: "write-target" }
   /**
    * The next message is the new wording itself, for one field of one published
    * record. Both are carried because the author picked them a message ago and
@@ -142,6 +144,14 @@ export function setPendingEditTarget(
   return setPending(bucket, chatId, { kind: "edit-target" }, now);
 }
 
+export function setPendingWriteTarget(
+  bucket: R2Bucket,
+  chatId: number,
+  now: Date = new Date(),
+): Promise<void> {
+  return setPending(bucket, chatId, { kind: "write-target" }, now);
+}
+
 export function setPendingEditField(
   bucket: R2Bucket,
   chatId: number,
@@ -225,6 +235,7 @@ export async function takePending(
   if (stored.kind === "detach-target") return { kind: "detach-target" };
   if (stored.kind === "delete-target") return { kind: "delete-target" };
   if (stored.kind === "edit-target") return { kind: "edit-target" };
+  if (stored.kind === "write-target") return { kind: "write-target" };
   if (stored.kind === "edit-field") {
     // Both halves or neither. A pointer missing one of them cannot say what the
     // author's next sentence is for, and guessing would put their words in the

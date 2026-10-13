@@ -55,7 +55,10 @@ function profileMetadata(): Plugin {
       const description = route?.description ?? summary;
       const mediaBase = process.env.VITE_MEDIA_BASE_URL?.replace(/\/$/, "");
 
-      const tags = headTags({ pageTitle, description, mediaBase });
+      // The two pages that can show an article written on the editor, and so
+      // the only two that declare the faces its font picker offers.
+      const articleFonts = route?.id === "activities" || route?.id === "editor";
+      const tags = headTags({ pageTitle, description, mediaBase, articleFonts });
 
       return html
         .replace(/<title>[^<]*<\/title>/, `<title>${escape(pageTitle)}</title>`)

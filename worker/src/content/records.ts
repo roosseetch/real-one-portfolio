@@ -40,11 +40,16 @@ export interface PublicRecord {
   media: PublicMedia[];
   /**
    * "markdown" on an article published by hand (scripts/publish-record.ts),
-   * whose body the site reads with site/src/prose.ts. Never set here: what the
-   * Worker publishes is plain text, and every rewrite of a record copies it with
-   * a spread, so a record that has the field keeps it through an edit.
+   * whose body the site reads with site/src/prose.ts. "rich" on an article
+   * written on the site's editor (editor/publish.ts), whose whole text is the
+   * document `doc` names and whose `body` is only its plain-text lead. Never
+   * set by toPublicRecord: what the Telegram pipeline publishes is plain text,
+   * and every rewrite of a record copies it with a spread, so a record that has
+   * the field keeps it through an edit.
    */
-  bodyFormat?: "markdown";
+  bodyFormat?: "markdown" | "rich";
+  /** On a "rich" record: the document under content/articles/<id>-<doc>.json. */
+  doc?: string;
 }
 
 /**

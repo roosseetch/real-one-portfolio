@@ -21,6 +21,7 @@ export const ADD_MEDIA_LABEL = "📎 Add media";
 export const REMOVE_MEDIA_LABEL = "🗑 Remove media";
 export const EDIT_ACTIVITY_LABEL = "✏️ Edit activity";
 export const DELETE_ACTIVITY_LABEL = "❌ Delete activity";
+export const WRITE_LABEL = "🖋 Write on the site";
 
 /**
  * `is_persistent` keeps it open rather than collapsing to an icon after one
@@ -42,7 +43,7 @@ export const DELETE_ACTIVITY_LABEL = "❌ Delete activity";
 export const MAIN_KEYBOARD: ReplyKeyboardMarkup = {
   keyboard: [
     [{ text: NEW_ACTIVITY_LABEL }],
-    [{ text: RAW_LABEL }],
+    [{ text: RAW_LABEL }, { text: WRITE_LABEL }],
     [{ text: REPOST_LABEL }, { text: EDIT_ACTIVITY_LABEL }],
     [{ text: ADD_MEDIA_LABEL }, { text: REMOVE_MEDIA_LABEL }],
     [{ text: DELETE_ACTIVITY_LABEL }],
@@ -72,6 +73,7 @@ export function menuAction(text: string): MenuAction | null {
   if (trimmed === REMOVE_MEDIA_LABEL) return "removemedia";
   if (trimmed === EDIT_ACTIVITY_LABEL) return "editactivity";
   if (trimmed === DELETE_ACTIVITY_LABEL) return "deleteactivity";
+  if (trimmed === WRITE_LABEL) return "write";
 
   return parseCommand(trimmed);
 }
@@ -81,6 +83,8 @@ export const WELCOME =
   "Send me a note, a photo, or a video and I will write it up for the site.\n\n" +
   `Or use the buttons: "${NEW_ACTIVITY_LABEL}" starts one, "${RAW_LABEL}" publishes a note in your own ` +
   `words with nothing rewritten, and "${REPOST_LABEL}" shares something already published.\n\n` +
+  `"${WRITE_LABEL}" gives you a link to write an article on the site itself, with formatting, ` +
+  `fonts and pictures in the text, or to change one already there.\n\n` +
   `"${ADD_MEDIA_LABEL}" and "${REMOVE_MEDIA_LABEL}" change the photos and videos on an activity ` +
   `that is already on the site, "${EDIT_ACTIVITY_LABEL}" changes its wording, and ` +
   `"${DELETE_ACTIVITY_LABEL}" takes one off it for good.`;

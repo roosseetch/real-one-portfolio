@@ -95,11 +95,18 @@ export async function sendMessage(
   chatId: number,
   text: string,
   replyMarkup?: ReplyMarkup,
+  /**
+   * Stops Telegram fetching the first link to draw a preview of it. Set on a
+   * message carrying a link that is itself a credential: the fetch would hand
+   * the key to whatever serves the page, for no picture worth having.
+   */
+  options: { noLinkPreview?: boolean } = {},
 ): Promise<number | null> {
   const result = await call<{ message_id: number }>(env, "sendMessage", {
     chat_id: chatId,
     text,
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    ...(options.noLinkPreview ? { link_preview_options: { is_disabled: true } } : {}),
   });
 
   return result?.message_id ?? null;

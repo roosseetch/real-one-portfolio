@@ -37,6 +37,8 @@ export interface HeadInput {
    * why every tag that needs it is dropped rather than emitted half-built.
    */
   mediaBase?: string;
+  /** Whether the page can show an editor-written article, and so needs its extra faces (fonts.ts). */
+  articleFonts?: boolean;
 }
 
 /**
@@ -54,10 +56,10 @@ export interface HeadInput {
  * (spec §1). The cost is that a build with no media base has no icon, which is
  * a missing tab picture and nothing more.
  */
-export function headTags({ pageTitle, description, mediaBase }: HeadInput): string[] {
+export function headTags({ pageTitle, description, mediaBase, articleFonts = false }: HeadInput): string[] {
   return [
     ...fontPreloadLinks(mediaBase),
-    fontFaceStyle(mediaBase),
+    fontFaceStyle(mediaBase, articleFonts),
     `<meta name="description" content="${escape(description)}">`,
     `<meta property="og:type" content="profile">`,
     `<meta property="og:title" content="${escape(pageTitle)}">`,

@@ -683,3 +683,40 @@ describe("idempotency (spec §13.4)", () => {
     expect(sent).toEqual([]);
   });
 });
+
+describe("a picture uploaded from the article editor", () => {
+  async function editorDraft(): Promise<Draft> {
+    const draft = await processingDraft();
+    const upload: Draft = { ...draft, record: null, editor: { keyHash: "a".repeat(64) } };
+    await saveDraft(storage.bucket, upload);
+    return upload;
+  }
+
+  it("records the picture's address on the draft, publishes nothing and messages nobody", async () => {
+    const draft = await editorDraft();
+    const response = await handleMediaProcessed(await callback(payload(draft)), env());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "recorded" });
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("published");
+    expect(stored?.processed?.media[0].src).toBe(`${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1600.webp`);
+    expect((await readManifest(content.bucket))?.manifest.totalRecords).toBe(0);
+    expect(sent).toEqual([]);
+  });
+
+  it("answers a repeat of the same callback rather than failing the run", async () => {
+    const draft = await editorDraft();
+    await handleMediaProcessed(await callback(payload(draft)), env());
+    const again = await handleMediaProcessed(await callback(payload(draft)), env());
+    expect(again.status).toBe(200);
+  });
+
+  it("refuses a picture outside the folder the upload was filed under", async () => {
+    const draft = await editorDraft();
+    const body = payload(draft, {
+      media: [{ sourceId: "media0", type: "image", src: `${MEDIA_BASE}/media/activity-zzzzzzzzzzzzzzzz/media0-1600.webp` }],
+    });
+    expect((await handleMediaProcessed(await callback(body), env())).status).toBe(400);
+  });
+});

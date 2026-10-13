@@ -28,6 +28,7 @@ import {
   promptForEdit,
   type EditActivityEnv,
 } from "../publishing/edit-activity";
+import { applyWriteTarget, promptForWrite } from "../editor/telegram";
 import { findAlbumDraft } from "./albums";
 import { sendMessage, type TelegramApiEnv } from "../telegram/api";
 import {
@@ -201,6 +202,11 @@ async function applyPending(
     return { status: "unsupported" };
   }
 
+  if (pending.kind === "write-target") {
+    await applyWriteTarget(env, chatId, text);
+    return { status: "unsupported" };
+  }
+
   // The one pointer whose message is the content rather than a reference to it:
   // this text becomes a field of a published record, untouched.
   if (pending.kind === "edit-field") {
@@ -306,6 +312,13 @@ async function runMenuAction(env: IntakeEnv, chatId: number, action: MenuAction)
   // from the link of something already published.
   if (action === "editactivity") {
     await promptForEdit(env, chatId);
+    return;
+  }
+
+  // Not armed yet: the first question is a pair of buttons, and only "Update"
+  // goes on to ask for something typeable.
+  if (action === "write") {
+    await promptForWrite(env, chatId);
     return;
   }
 

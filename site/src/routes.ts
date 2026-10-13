@@ -77,6 +77,17 @@ export const ROUTES: Route[] = [
     title: "Contact",
     description: "Send me a message.",
   },
+  {
+    // The article editor, opened from a link the bot sends (src/editor.ts).
+    // Never in the navigation, which the null navLabel ensures; its HTML keeps
+    // it out of search results and stops it sending a Referer.
+    id: "editor",
+    path: "admin/",
+    entry: "admin/index.html",
+    navLabel: null,
+    title: "Article editor",
+    description: "Where articles for this site are written.",
+  },
 ];
 
 export function routeById(id: string): Route | undefined {

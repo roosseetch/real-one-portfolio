@@ -10,6 +10,7 @@ import {
   RAW_LABEL,
   REMOVE_MEDIA_LABEL,
   REPOST_LABEL,
+  WRITE_LABEL,
   menuAction,
 } from "./menu";
 
@@ -23,6 +24,7 @@ describe("parseCommand", () => {
     expect(parseCommand("/removemedia")).toBe("removemedia");
     expect(parseCommand("/deleteactivity")).toBe("deleteactivity");
     expect(parseCommand("/editactivity")).toBe("editactivity");
+    expect(parseCommand("/write")).toBe("write");
   });
 
   it("ignores the arguments after one", () => {
@@ -73,6 +75,7 @@ describe("menuAction", () => {
     expect(menuAction(REMOVE_MEDIA_LABEL)).toBe("removemedia");
     expect(menuAction(DELETE_ACTIVITY_LABEL)).toBe("deleteactivity");
     expect(menuAction(EDIT_ACTIVITY_LABEL)).toBe("editactivity");
+    expect(menuAction(WRITE_LABEL)).toBe("write");
   });
 
   it("treats a button and its command as the same action", () => {
@@ -82,6 +85,7 @@ describe("menuAction", () => {
     expect(menuAction("/removemedia")).toBe(menuAction(REMOVE_MEDIA_LABEL));
     expect(menuAction("/deleteactivity")).toBe(menuAction(DELETE_ACTIVITY_LABEL));
     expect(menuAction("/editactivity")).toBe(menuAction(EDIT_ACTIVITY_LABEL));
+    expect(menuAction("/write")).toBe(menuAction(WRITE_LABEL));
   });
 
   it("leaves a note that merely mentions a button alone", () => {
@@ -98,6 +102,7 @@ describe("MAIN_KEYBOARD", () => {
     expect(MAIN_KEYBOARD.keyboard.flat().map((button) => button.text)).toEqual([
       NEW_ACTIVITY_LABEL,
       RAW_LABEL,
+      WRITE_LABEL,
       REPOST_LABEL,
       EDIT_ACTIVITY_LABEL,
       ADD_MEDIA_LABEL,

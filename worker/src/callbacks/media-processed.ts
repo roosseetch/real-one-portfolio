@@ -126,6 +126,12 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
     return Response.json({ status: "awaiting-confirmation" });
   }
 
+  // A picture from the article editor that has already been recorded. Answered
+  // for the same reason as the repeats above: the run was right.
+  if ((draft.editor ?? null) !== null && draft.state === "published") {
+    return Response.json({ status: "recorded" });
+  }
+
   // 6. Draft is in processing.
   if (draft.state !== "processing") return refuse(400);
 
@@ -148,6 +154,11 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   const prefix = `${env.MEDIA_BASE_URL.replace(/\/$/, "")}/`;
   const urls = body.media.flatMap((item) => [item.src, item.thumbnail, item.poster].filter(Boolean) as string[]);
   if (!urls.every((url) => url.startsWith(prefix))) return refuse(400);
+
+  // A picture uploaded from the article editor. Nothing is published and nobody
+  // is messaged: the URLs are kept on the draft, and the editor page — which is
+  // asking after this very draft — puts the picture into the text itself.
+  if ((draft.editor ?? null) !== null) return recordEditorPicture(env, draft, body.media);
 
   // An attachment carries no record — the words are already on the site, and
   // this draft exists only to put files beside them — so the two are told apart
@@ -198,6 +209,37 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   }
 
   return Response.json({ status: "published", url: result.url });
+}
+
+async function recordEditorPicture(
+  env: CallbackEnv,
+  draft: Draft,
+  received: CallbackMedia[],
+): Promise<Response> {
+  // In the folder the key it was uploaded with names, and nowhere else: the
+  // publish endpoint accepts a picture only from there.
+  const folder = `${env.MEDIA_BASE_URL.replace(/\/$/, "")}/media/activity-${draft.activityId}/`;
+  if (!received.every((item) => item.type === "image" && item.src.startsWith(folder))) return refuse(400);
+
+  const media: ProcessedMedia[] = received.map((item) => ({
+    sourceId: item.sourceId,
+    type: item.type,
+    src: item.src,
+    ...(item.thumbnail ? { thumbnail: item.thumbnail } : {}),
+    visibleChanges: [],
+  }));
+
+  try {
+    await saveDraft(env.PRIVATE_BUCKET, {
+      ...transition(draft, "published"),
+      processed: { media, at: new Date().toISOString() },
+    });
+  } catch {
+    console.error("Could not record an editor picture's processed media");
+    return new Response("Could not record the processed media", { status: 500 });
+  }
+
+  return Response.json({ status: "recorded" });
 }
 
 /**

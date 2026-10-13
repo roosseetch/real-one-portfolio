@@ -784,3 +784,74 @@ describe("an article written in Markdown", () => {
     expect(card.querySelector(".activity-body")?.textContent).toBe("## not a heading\n- not a list");
   });
 });
+
+describe("an article written on the site's editor", () => {
+  const picture = {
+    type: "image" as const,
+    src: "https://media.test/media/activity-aaaaaaaaaaaaaaaa/pic-1200.webp",
+    thumbnail: "https://media.test/media/activity-aaaaaaaaaaaaaaaa/pic-320.webp",
+    alt: "The room",
+    caption: "Day one",
+  };
+  const clip = { type: "video" as const, src: "https://media.test/media/activity-b/clip-1280.mp4" };
+
+  const article = {
+    id: "rec-r",
+    title: "Written on the site",
+    summary: "A summary.",
+    bodyFormat: "rich" as const,
+    doc: "docid",
+    body: "The lead, in plain text.",
+    media: [picture, clip],
+  };
+
+  const doc = {
+    type: "doc",
+    content: [
+      { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "A section" }] },
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: "Set in Inter", marks: [{ type: "textStyle", attrs: { fontFamily: "Inter" } }] }],
+      },
+      { type: "figure", attrs: { src: picture.src, alt: "The room, from the door", caption: null } },
+    ],
+  };
+
+  it("shows its lead at once, then the whole article from its own document", async () => {
+    const fetchStub = serve({ "content/articles/rec-r-docid.json": doc });
+    const card = renderRecord(article, { heading: "h1" });
+    document.body.append(card);
+
+    expect(card.querySelector(".prose p")?.textContent).toBe("The lead, in plain text.");
+
+    await vi.waitFor(() => expect(card.querySelector(".prose-rich h2")?.textContent).toBe("A section"));
+    expect(fetchStub).toHaveBeenCalledWith("https://content.test/content/articles/rec-r-docid.json");
+    expect((card.querySelector(".prose-rich span") as HTMLElement).style.fontFamily).toContain("Inter");
+    expect(card.querySelector(".prose-rich figure img")?.getAttribute("alt")).toBe("The room, from the door");
+    // Its picture is in the text; only the video is left for the carousel.
+    expect(card.querySelectorAll(".carousel-slide img")).toHaveLength(0);
+    expect(card.querySelectorAll(".carousel-slide video")).toHaveLength(1);
+  });
+
+  it("keeps the lead when the document cannot be read", async () => {
+    serve({});
+    const card = renderRecord(article, { heading: "h1" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(card.querySelector(".prose p")?.textContent).toBe("The lead, in plain text.");
+    expect(card.querySelector(".prose-rich")).toBeNull();
+  });
+
+  it("refuses a document that names a picture on another host", async () => {
+    const hostile = { type: "doc", content: [{ type: "figure", attrs: { src: "https://evil.test/x.webp" } }] };
+    serve({ "content/articles/rec-r-docid.json": hostile });
+    const card = renderRecord(article, { heading: "h1" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(card.querySelector("img[src^='https://evil.test']")).toBeNull();
+  });
+
+  it("gives a listing card its plain-text lead", () => {
+    const card = renderRecord(article, { href: "/activities/?v=x", excerpt: true });
+    expect(card.querySelector(".activity-body")?.textContent).toBe("The lead, in plain text.");
+    expect(card.querySelector(".prose")).toBeNull();
+  });
+});

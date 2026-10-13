@@ -21,6 +21,7 @@ import { ALL_CHUNKS, CHOICES, findByReference, findRecord, loadRecords } from ".
 import type { PublicRecord } from "../content/records";
 import { activityUrl } from "../content/urls";
 import { setPendingDeleteTarget, clearPending } from "../drafts/pending";
+import { isValidId } from "../ids";
 import { deletePublishedItem, locateMedia } from "../media/published";
 import {
   answerCallback,
@@ -348,6 +349,7 @@ async function deleteActivity(
   }
 
   await deleteMedia(env, result.record);
+  await deleteArticleDocuments(env, result.record);
 
   const left =
     result.remaining === 0
@@ -357,6 +359,25 @@ async function deleteActivity(
         : `${result.remaining} activities are left.`;
 
   await sendMessage(env, chatId, `Deleted "${result.record.title}". ${left}`);
+}
+
+/**
+ * Deletes every document an article written on the site's editor was ever
+ * saved as. Each save wrote a new one and left the last; they share the
+ * record's id as a prefix, and the id is minted here and never typed, so the
+ * prefix names this record's documents and nothing else's.
+ */
+async function deleteArticleDocuments(env: DeleteActivityEnv, record: PublicRecord): Promise<void> {
+  if (record.bodyFormat !== "rich" || !isValidId(record.id)) return;
+  try {
+    const listed = await env.CONTENT_BUCKET.list({ prefix: `content/articles/${record.id}-` });
+    const keys = listed.objects.map((object) => object.key);
+    if (keys.length > 0) await env.CONTENT_BUCKET.delete(keys);
+  } catch {
+    // The record is gone, so nothing names these any more: unreachable rather
+    // than unpublished, and worth a line rather than a message.
+    console.error("Deleted an article but could not delete its documents");
+  }
 }
 
 /**

@@ -11,6 +11,8 @@
 import { openLightbox } from "./lightbox";
 import { avifFrom, pictureFor } from "./picture";
 import { parseProse, placedMedia, proseParagraphs, renderProse } from "./prose";
+import { renderRich } from "./rich";
+import { cleanDoc, docKey, type RichDoc } from "./rich-doc";
 import { routeById, routeHref } from "./routes";
 
 export interface ActivityMedia {
@@ -35,9 +37,14 @@ export interface ActivityRecord {
   /**
    * How `body` is written. Absent is plain text, which is every record the
    * Telegram pipeline publishes; "markdown" is the subset in prose.ts, for an
+   * article published by hand; "rich" is an article written on the site's
+   * editor, whose whole text is the document `doc` names (rich-doc.ts) and whose
+   * `body` is only its plain-text lead.
    * article published by hand.
    */
-  bodyFormat?: "markdown" | null;
+  bodyFormat?: "markdown" | "rich" | null;
+  /** On a "rich" record: which document under content/articles/ holds the text. */
+  doc?: string | null;
 }
 
 interface Manifest {
@@ -46,6 +53,7 @@ interface Manifest {
 }
 
 const CONTENT_BASE = import.meta.env.VITE_CONTENT_BASE_URL?.replace(/\/$/, "");
+const MEDIA_BASE = import.meta.env.VITE_MEDIA_BASE_URL?.replace(/\/$/, "");
 
 /** "/" on a custom domain, "/<repo>/" on a project-pages deployment. Vite fixes it at build time. */
 const BASE = import.meta.env.BASE_URL;
@@ -202,6 +210,12 @@ export interface RecordOptions {
    * leave no way to read the rest of it.
    */
   excerpt?: boolean;
+  /**
+   * An editor-written article's document, already in hand. The editor's
+   * preview passes the one being written, which exists nowhere else yet;
+   * without it the page fetches the published one.
+   */
+  doc?: RichDoc;
 }
 
 /**
@@ -233,6 +247,7 @@ interface TextBlock {
 }
 
 const isMarkdown = (record: ActivityRecord) => record.bodyFormat === "markdown";
+const isRich = (record: ActivityRecord) => record.bodyFormat === "rich" && typeof record.doc === "string";
 
 /**
  * A record's prose, in the order and the classes a card shows it in.
@@ -762,6 +777,44 @@ function articleFigure(record: ActivityRecord, index: number, alt: string): HTML
   return figure;
 }
 
+/**
+ * A picture an editor-written article places in its text, found among the
+ * record's media by its address so the lightbox and the srcset work exactly as
+ * they do for a Markdown article's figure.
+ */
+function richFigure(record: ActivityRecord, src: string, alt: string | null): HTMLElement | null {
+  const index = (record.media ?? []).findIndex((item) => item.src === src);
+  return index === -1 ? null : articleFigure(record, index, alt ?? "");
+}
+
+/**
+ * The text of an editor-written article, which lives in its own object rather
+ * than in the chunk every listing downloads.
+ *
+ * The element is returned at once and filled when the document arrives. Until
+ * then — and for good, if it never does — it holds the record's plain-text lead,
+ * so a reader is never left looking at nothing.
+ */
+function richArticle(record: ActivityRecord, doc?: RichDoc): HTMLElement {
+  if (doc) return renderRich(doc, (src, alt) => richFigure(record, src, alt));
+
+  const holder = el("div", "prose");
+  for (const paragraph of paragraphsOf(record.body)) holder.append(el("p", undefined, paragraph));
+
+  if (CONTENT_BASE && record.doc) {
+    fetchJson(`${CONTENT_BASE}/${docKey(record.id, record.doc)}`)
+      .then((data) => {
+        const cleaned = cleanDoc(data, {
+          allowSrc: (src) => Boolean(MEDIA_BASE) && src.startsWith(`${MEDIA_BASE}/media/`),
+        });
+        if (!cleaned.ok) throw new Error(cleaned.problem);
+        holder.replaceWith(renderRich(cleaned.doc, (src, alt) => richFigure(record, src, alt)));
+      })
+      .catch((error) => console.warn("Showing the article's lead only:", error));
+  }
+  return holder;
+}
+
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
 
@@ -802,17 +855,26 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
   const shown = options.excerpt && options.href ? excerptOf(blocks) : { blocks, cut: false };
   // An article shown whole is the one case that is not a run of paragraphs.
   const article = !listing && isMarkdown(record);
+  const rich = !listing && (isRich(record) || options.doc !== undefined);
   for (const block of shown.blocks) {
-    if (article && block.className === "activity-body") continue;
+    if ((article || rich) && block.className === "activity-body") continue;
     text.append(el("p", block.className, block.text));
   }
   if (article) {
     text.append(renderProse(parseProse(record.body), (index, alt) => articleFigure(record, index, alt)));
   }
+  if (rich) text.append(richArticle(record, options.doc));
 
   if (!listing) {
     // What the text has already shown in place is not shown again below it.
-    const placed = article ? placedMedia(record.body) : new Set<number>();
+    // Every picture an editor-written article has is one its text places: the
+    // Worker builds its pictures from the document's figures. A video is kept
+    // from the record it was before, and still has the carousel.
+    const placed = rich
+      ? new Set((record.media ?? []).flatMap((item, index) => (item.type === "image" ? [index] : [])))
+      : article
+        ? placedMedia(record.body)
+        : new Set<number>();
     const carousel = mediaCarousel(
       record,
       (record.media ?? []).filter((_, index) => !placed.has(index)),
