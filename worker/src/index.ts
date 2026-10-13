@@ -5,6 +5,7 @@ import { handleAnalyticsProxy } from "./analytics/proxy";
 import { handleContactSubmission } from "./contact/intake";
 import { handleContactVerify } from "./contact/verify";
 import { sweepStrandedDrafts } from "./drafts/sweep";
+import { handleEditorRequest, isEditorPath } from "./editor/routes";
 import { handleLinkedInConnect } from "./linkedin/connect";
 import { CALLBACK_PATH } from "./linkedin/oauth";
 import {
@@ -101,6 +102,13 @@ async function route(request: Request, env: Env, ctx: ExecutionContext): Promise
   // page before the message is sent, to prove the address is readable.
   if (pathname === "/contact/verify") {
     return handleContactVerify(request, env, ctx);
+  }
+
+  // The site's article editor (/admin/). Every method, like the contact
+  // routes, so a preflight and a wrong method get a CORS answer; the key from
+  // the bot's link is checked inside before anything else is done.
+  if (isEditorPath(pathname)) {
+    return handleEditorRequest(request, env);
   }
 
   // The site's own activities page, reached only through the Cloudflare route

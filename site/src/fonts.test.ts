@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { FONT_FACES, fontFaceStyle, fontPreloadLinks, fontSources } from "./fonts";
+import { ARTICLE_FONTS } from "./rich-doc";
 
 const MEDIA = "https://media.test";
 
@@ -67,11 +68,18 @@ describe("the @font-face block", () => {
    * weight in the stylesheet would be answered with a synthesised bold.
    * Cormorant's range is wider because Google serves one file for all of it.
    */
-  it("ships Lora at 400 only and Cormorant across its whole range", () => {
-    const weights = Object.fromEntries(FONT_FACES.map((face) => [face.family, face.weight]));
+  it("ships Lora at 400, its bold only as a face nothing preloads, and Cormorant across its whole range", () => {
+    const lora = FONT_FACES.filter((face) => face.family === "Lora");
 
-    expect(weights["Lora"]).toBe("400");
-    expect(weights["Cormorant Garamond"]).toBe("300 700");
+    expect(lora.filter((face) => face.preload).map((face) => face.weight)).toEqual(["400"]);
+    expect(lora.filter((face) => face.weight === "700").every((face) => !face.preload)).toBe(true);
+    expect(FONT_FACES.find((face) => face.family === "Cormorant Garamond")?.weight).toBe("300 700");
+  });
+
+  /** The editor's font picker offers nothing the site does not host. */
+  it("hosts every family an article may be set in", () => {
+    const hosted = new Set(FONT_FACES.map((face) => face.family));
+    for (const family of ARTICLE_FONTS) expect(hosted.has(family)).toBe(true);
   });
 
   /** Fraunces' italic is a file of its own, and has to be declared as one. */
@@ -82,10 +90,9 @@ describe("the @font-face block", () => {
     FONT_FACES.forEach((face, index) => {
       expect(rules[index]).toContain(`font-style: ${face.style};`);
     });
-    expect(FONT_FACES.filter((face) => face.style === "italic").map((face) => face.family)).toEqual([
-      "Fraunces",
-      "Fraunces",
-    ]);
+    expect(new Set(FONT_FACES.filter((face) => face.style === "italic").map((face) => face.family))).toEqual(
+      new Set(["Fraunces", "Playfair Display", "Source Serif 4", "Inter"]),
+    );
   });
 });
 

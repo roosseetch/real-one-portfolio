@@ -2313,3 +2313,45 @@ ol.prose-list li::before {
     scroll-behavior: auto !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+ * An article written on the site's editor (site/src/rich.ts).
+ *
+ * The Markdown article's design, with the three things its author can now ask
+ * for that a Markdown article never could. Bold is weight here — Lora has its
+ * 700 face for exactly this (fonts.ts) — rather than the ink the design uses
+ * elsewhere; underline and strikethrough are drawn; and a link looks like one.
+ * -------------------------------------------------------------------------- */
+
+.prose-rich strong {
+  font-weight: 700;
+}
+
+.prose-rich u {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.prose-rich a {
+  color: var(--gold-text);
+  text-decoration: underline;
+  text-decoration-color: var(--gold-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.prose-rich a:hover {
+  color: var(--text);
+}
+
+/* A list item holds its text directly, so a second paragraph inside one is a
+   line break rather than a paragraph's worth of space. */
+.prose-rich li > .prose-list {
+  margin-top: 0.5rem;
+}
+
+.prose-rich .prose-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+}

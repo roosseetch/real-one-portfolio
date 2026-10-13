@@ -70,6 +70,12 @@ export interface FontFace {
    * visitors never see.
    */
   preload: boolean;
+  /**
+   * Declared only on the pages that can show an article written on the editor
+   * — /activities/ and the editor itself. Everywhere else nothing could ever
+   * ask for the face, and its rule would be bytes in a render-blocking head.
+   */
+  articleOnly?: boolean;
 }
 
 /**
@@ -174,6 +180,156 @@ export const FONT_FACES: FontFace[] = [
     unicodeRange: LATIN_EXT,
     preload: false,
   },
+  // Lora's bold, for an article written on the site's editor, where Bold in
+  // the toolbar has to look bold (`.prose-rich strong`). Every other page sets
+  // `strong` in ink rather than weight, so nothing else asks for this file, and
+  // a browser fetches a face only when rendered text does.
+  {
+    family: "Lora",
+    style: "normal",
+    weight: "700",
+    file: "lora-700-v37-latin.woff2",
+    fallback: "https://fonts.gstatic.com/s/lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787z5vBJBkq0.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Lora",
+    style: "normal",
+    weight: "700",
+    file: "lora-700-v37-latin-ext.woff2",
+    fallback: "https://fonts.gstatic.com/s/lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787z5vBJPkq1umA.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+    articleOnly: true,
+  },
+  // The three families the editor's font picker adds to the three above
+  // (site/src/rich-doc.ts, ARTICLE_FONTS). Only an article that picks one ever
+  // names it, so on every other page these rules cost the bytes of the rule
+  // and nothing more. Roman and italic both, because the toolbar's Italic
+  // applies inside any of them; full weight ranges, because Google serves one
+  // variable file for the range and Bold has to land on a real weight.
+  {
+    family: "Playfair Display",
+    style: "normal",
+    weight: "400 900",
+    file: "playfair-display-v40-latin.woff2",
+    fallback: "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFiD-vYSZviVYUb_rj3ij__anPXDTzYgA.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Playfair Display",
+    style: "normal",
+    weight: "400 900",
+    file: "playfair-display-v40-latin-ext.woff2",
+    fallback: "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFiD-vYSZviVYUb_rj3ij__anPXDTLYgFE_.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Playfair Display",
+    style: "italic",
+    weight: "400 900",
+    file: "playfair-display-italic-v40-latin.woff2",
+    fallback: "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFkD-vYSZviVYUb_rj3ij__anPXDTnogkk7.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Playfair Display",
+    style: "italic",
+    weight: "400 900",
+    file: "playfair-display-italic-v40-latin-ext.woff2",
+    fallback: "https://fonts.gstatic.com/s/playfairdisplay/v40/nuFkD-vYSZviVYUb_rj3ij__anPXDTnojEk72xU.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Source Serif 4",
+    style: "normal",
+    weight: "200 900",
+    file: "source-serif-4-v15-latin.woff2",
+    fallback: "https://fonts.gstatic.com/s/sourceserif4/v15/vEFF2_tTDB4M7-auWDN0ahZJW3IX2ih5nk3AucvUHf6kDXr4.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Source Serif 4",
+    style: "normal",
+    weight: "200 900",
+    file: "source-serif-4-v15-latin-ext.woff2",
+    fallback: "https://fonts.gstatic.com/s/sourceserif4/v15/vEFF2_tTDB4M7-auWDN0ahZJW3IX2ih5nk3AucvUHf6kA3r4cXk.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Source Serif 4",
+    style: "italic",
+    weight: "200 900",
+    file: "source-serif-4-italic-v15-latin.woff2",
+    fallback: "https://fonts.gstatic.com/s/sourceserif4/v15/vEFH2_tTDB4M7-auWDN0ahZJW1ge6NmXpVAHV83Bfb_US0r6aX0.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Source Serif 4",
+    style: "italic",
+    weight: "200 900",
+    file: "source-serif-4-italic-v15-latin-ext.woff2",
+    fallback: "https://fonts.gstatic.com/s/sourceserif4/v15/vEFH2_tTDB4M7-auWDN0ahZJW1ge6NmXpVAHV83Bfb_US0r0aX2AzA.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Inter",
+    style: "normal",
+    weight: "100 900",
+    file: "inter-v20-latin.woff2",
+    fallback: "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Inter",
+    style: "normal",
+    weight: "100 900",
+    file: "inter-v20-latin-ext.woff2",
+    fallback: "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7SUc.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Inter",
+    style: "italic",
+    weight: "100 900",
+    file: "inter-italic-v20-latin.woff2",
+    fallback: "https://fonts.gstatic.com/s/inter/v20/UcC53FwrK3iLTcvneQg7Ca725JhhKnNqk6L5UUM.woff2",
+    unicodeRange: LATIN,
+    preload: false,
+    articleOnly: true,
+  },
+  {
+    family: "Inter",
+    style: "italic",
+    weight: "100 900",
+    file: "inter-italic-v20-latin-ext.woff2",
+    fallback: "https://fonts.gstatic.com/s/inter/v20/UcC53FwrK3iLTcvneQg7Ca725JhhKnNqk6L3UUMJng.woff2",
+    unicodeRange: LATIN_EXT,
+    preload: false,
+    articleOnly: true,
+  },
 ];
 
 /**
@@ -204,8 +360,8 @@ export function fontSources(face: FontFace, mediaBase?: string): string[] {
  * second benefit — the browser finds the fonts in the first response instead of
  * a stylesheet round trip later.
  */
-export function fontFaceStyle(mediaBase?: string): string {
-  const rules = FONT_FACES.map((face) => {
+export function fontFaceStyle(mediaBase?: string, articleFaces = true): string {
+  const rules = FONT_FACES.filter((face) => articleFaces || !face.articleOnly).map((face) => {
     const src = fontSources(face, mediaBase)
       .map((url) => `url("${url}") format("woff2")`)
       .join(",\n           ");

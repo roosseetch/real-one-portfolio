@@ -30,6 +30,7 @@ scripts/         generate-wrangler, bootstrap-manifest, validate-profile
 - [Deploying a new instance](#deploying-a-new-instance) — from an empty account to a live site
 - [Publishing: the draft lifecycle](#publishing-the-draft-lifecycle) — what happens between a Telegram message and a record
 - [Changing the media on a published activity](#changing-the-media-on-a-published-activity) — adding and removing photos without editing a chunk
+- [Writing an article on the site](#writing-an-article-on-the-site) — the editor page the bot links to, with fonts and pictures in the text
 - [Reposting to LinkedIn](#reposting-to-linkedin) — sharing something already published, and the token that expires
 - [The contact form](#the-contact-form) — what happens between a stranger writing and a message arriving
 - [Backups and export](#backups-and-export) — what has a second copy and what does not
@@ -551,8 +552,11 @@ manifest, leaving the superseded chunk unreferenced. The manifest is written
 last: a chunk nothing points at is invisible, while a record missing from a
 chunk the manifest still points at would be a broken page.
 
-**An article published by hand.** A piece too long for a Telegram message, or
-one that has to appear exactly as written, is a JSON record on disk instead —
+**An article published by hand.** Superseded for new articles by [Writing an
+article on the site](#writing-an-article-on-the-site), which needs no laptop;
+kept for the Markdown article already published this way, which the editor can
+also open. A piece too long for a Telegram message, or one that has to appear
+exactly as written, is a JSON record on disk instead —
 title, summary, body, eventDate, tags, media — published the same append-only
 way:
 
@@ -592,13 +596,16 @@ actions in Telegram's `/` menu:
 | --- | --- |
 | **📝 New site activity** · `/new` | Prompts for the note, photo or video. The flow above is unchanged — this is the affordance it never had. |
 | **✍️ Publish as written** · `/raw` | Takes the next note exactly as typed, with no model involved. |
+| **🖋 Write on the site** · `/write` | Sends a four-hour link to the site's article editor: a new article, or one already published. See [Writing an article on the site](#writing-an-article-on-the-site). |
 | **🔗 Repost to LinkedIn** · `/repost` | Offers the five most recent published activities, newest first and labelled as the default. |
 | **📎 Add media** · `/addmedia` | Takes the next photos or videos and adds them to an activity that is already on the site. |
 | **🗑 Remove media** · `/removemedia` | Shows an activity's photos and videos one by one, each with its own Remove button. |
 | **✏️ Edit activity** · `/editactivity` | Retypes one field of a published activity — title, text, summary, date or tags. |
 | **❌ Delete activity** · `/deleteactivity` | Takes a published activity off the site altogether, after quoting it back. |
 
-The rows group by what they do: the first two make something, the next two act on
+The rows group by what they do: the first two make something (**🖋 Write on the
+site** sits beside **✍️ Publish as written**, the other way to publish your own
+words), the next two act on
 something that already exists and leave it existing, and the last one destroys.
 **❌ Delete activity** has that row to itself, and the row is the point — it is
 the only button that destroys an entry rather than a file, and sitting it beside
@@ -728,6 +735,72 @@ says rather than what a later one does, and the press that saves it consumes it.
 Renaming moves the page. The slug comes from the title, so the reply says the
 link changed and gives the new one — an older link now resolves to the
 "Activity not found" page, the same one a deleted activity leaves behind.
+
+
+## Writing an article on the site
+
+Telegram carries a note, not an article: rich formatting there needs Premium,
+there are no fonts to choose from, and a picture cannot sit between two
+paragraphs. So for an article the bot hands out a link instead, to an editor
+page on the site itself.
+
+**🖋 Write on the site** (or `/write`) asks one question, **New article** or
+**Update an article**. An update then asks which, with the chooser every other
+flow uses: the newest five as buttons, or a link, slug or id typed by hand. The
+answer is a link:
+
+| Link | Opens |
+| --- | --- |
+| `<site>/admin/?key=crt_…` | A blank article. The first **Publish** creates it; every later one with the same link changes that same article rather than posting a copy. |
+| `<site>/admin/?key=upd_…` | The article picked, and no other. |
+
+Either works for four hours from when the bot sent it, as many times as needed.
+After that the page says so and keeps the unpublished text in the browser; ask
+the bot for a new link and the text is there when it opens. **✏️ Edit activity**
+→ **Text** on an article sends an update link too, because retyping a formatted
+article's text in a message would flatten it.
+
+**The page.** Title, summary, date and tags above; the text below, in the
+article's own typography, with a toolbar for section headings, bold, italic,
+underline, strikethrough, lists, pull quotes, section breaks, links, centre and
+right alignment, three text sizes, six fonts — Fraunces, Cormorant Garamond and
+Lora, which the site already uses, and Playfair Display, Source Serif 4 and
+Inter — and pictures. **Preview** shows the article exactly as the site will,
+drawn by the same code. **Publish** puts it live at once, and the bot sends the
+link as it does for every publication.
+
+**Pictures** go through the same sanitiser as every Telegram photo: the page
+uploads the file to the Worker, the Worker files it privately and dispatches
+`process-media.yml`, and the picture appears in the text when the signed
+callback comes back — a minute or two, during which the page shows a
+placeholder and **Publish** waits. The Worker still never writes the media
+bucket. Select a picture to give it a description and a caption. A picture
+taken out of an article and published is deleted from the media bucket.
+
+**How it is stored.** The article's text is a document — the editor's own JSON,
+cut down to what `site/src/rich-doc.ts` allows — at
+`content/articles/<record-id>-<doc-id>.json`, immutable, written anew on every
+publish. The record says `"bodyFormat": "rich"` and names the document; its
+`body` is a plain-text lead of up to 3,000 characters, which is what a listing
+card, a link preview and a LinkedIn repost read, and its `media` is rebuilt from
+the pictures the text places. The full text stays out of the chunks because
+every chunk is downloaded by every visit to the feed. The Worker runs
+`cleanDoc` on every publish and the site runs it again before drawing: an
+unknown node, a `javascript:` link, a font the site does not host or a picture
+from anywhere but this article's own folders is refused.
+
+**The key.** The link's `key` is the only thing that makes the page yours, so:
+only the allowlisted author can get one; it lives four hours; only its SHA-256 is
+stored (`drafts/editor-keys/`, swept by the drafts lifecycle rule); an update
+key opens one record; the page takes it off the address bar and out of history
+the moment it loads, sends no Referer, loads no analytics, and is `noindex`;
+the bot's message carrying it has its link preview turned off, so Telegram
+never fetches it; and the API takes it only in an `Authorization` header, from
+the site's own origin. Do not forward the bot's message: anyone holding the
+link can publish until it expires.
+
+`site/src/rich-doc.ts` is imported by the Worker as well as the site, which is
+why `deploy-worker.yml` also runs when it changes.
 
 ## Deleting an activity
 

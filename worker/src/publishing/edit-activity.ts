@@ -43,6 +43,7 @@ import {
   type FieldValue,
 } from "./edit-fields";
 import { newEditId, saveProposedEdit, takeProposedEdit } from "./proposed-edit";
+import { sendEditorLink } from "../editor/telegram";
 
 /** Telegram truncates a long button label itself; this keeps the list readable first. */
 const LABEL_MAX = 40;
@@ -400,6 +401,15 @@ async function openField(env: EditActivityEnv, chatId: number, rest: string): Pr
 
   const record = await found(env, chatId, target.recordId);
   if (record === null) return;
+
+  // An article's text is formatted — headings, fonts, pictures in place — and a
+  // message typed here would replace all of it with one flat paragraph. Its
+  // text is changed in the site's editor instead, and this is the link to it.
+  if (target.field === "body" && (record.bodyFormat === "rich" || record.bodyFormat === "markdown")) {
+    await sendMessage(env, chatId, "This is an article, so its text is changed on the site's editor.");
+    await sendEditorLink(env, chatId, record);
+    return;
+  }
 
   await setPendingEditField(env.PRIVATE_BUCKET, chatId, target.recordId, target.field);
   await sendMessage(

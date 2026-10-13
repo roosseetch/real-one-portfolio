@@ -22,6 +22,7 @@ import {
   isEditCallback,
   type EditActivityEnv,
 } from "../publishing/edit-activity";
+import { handleWriteCallback, isWriteCallback, type WriteEnv } from "../editor/telegram";
 import type { TelegramUpdate } from "./types";
 
 /** Telegram echoes the secret given to setWebhook back on every delivery. */
@@ -48,7 +49,8 @@ export interface WebhookEnv
     AttachMediaEnv,
     DetachEnv,
     DeleteActivityEnv,
-    EditActivityEnv {}
+    EditActivityEnv,
+    WriteEnv {}
 
 export type WebhookAuthorization =
   | { status: "authorized"; update: TelegramUpdate; senderId: number }
@@ -199,6 +201,8 @@ export async function handleTelegramWebhook(
         await handleDeleteCallback(callbackQuery, env);
       } else if (isEditCallback(callbackQuery.data)) {
         await handleEditCallback(callbackQuery, env);
+      } else if (isWriteCallback(callbackQuery.data)) {
+        await handleWriteCallback(callbackQuery, env);
       } else {
         await handlePreviewCallback(callbackQuery, env);
       }

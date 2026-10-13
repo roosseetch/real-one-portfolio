@@ -18,6 +18,7 @@ export const COMMANDS = [
   "removemedia",
   "editactivity",
   "deleteactivity",
+  "write",
 ] as const;
 
 export type Command = (typeof COMMANDS)[number];
@@ -32,6 +33,7 @@ export const BOT_COMMANDS: Array<{ command: Command; description: string }> = [
   { command: "removemedia", description: "Remove a photo or video from a published activity" },
   { command: "editactivity", description: "Change the wording of a published activity" },
   { command: "deleteactivity", description: "Delete a published activity from the site" },
+  { command: "write", description: "Write or update an article on the site" },
 ];
 
 /**

@@ -56,6 +56,19 @@ describe("the fonts", () => {
     expect(tags).toContain("https://fonts.gstatic.com/");
     expect(tags).not.toContain("undefined/fonts/");
   });
+
+  /** Only a page that can show an editor-written article declares the faces its font picker offers. */
+  it("declare the article-only faces only where an article can appear", () => {
+    const plain = headTags(INPUT).join("\n");
+    const article = headTags({ ...INPUT, articleFonts: true }).join("\n");
+
+    for (const family of ["Playfair Display", "Source Serif 4", "Inter"]) {
+      expect(plain).not.toContain(`font-family: "${family}"`);
+      expect(article).toContain(`font-family: "${family}"`);
+    }
+    expect(plain).not.toContain("font-weight: 700;");
+    expect(article).toContain("font-weight: 700;");
+  });
 });
 
 describe("the social metadata beside it", () => {

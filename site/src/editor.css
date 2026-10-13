@@ -1,0 +1,324 @@
+/* Only the editor page imports this (src/editor.ts), so the pages visitors
+   read never download it. */
+
+/* --------------------------------------------------------------------------
+ * The article editor, /admin/ (site/src/editor.ts).
+ *
+ * A working page for one person, so it is set for writing rather than reading:
+ * a column the width of the article it produces, the toolbar stuck to the top
+ * of the window, and the text itself in the article's own classes so what is
+ * typed looks like what will be published.
+ * -------------------------------------------------------------------------- */
+
+.editor {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem var(--space) 6rem;
+}
+
+.editor h1 {
+  font-family: var(--font-heading);
+  font-size: var(--size-subhead);
+  font-weight: 400;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.editor-head {
+  margin-bottom: 1.5rem;
+}
+
+.editor-expiry {
+  margin: 0.75rem 0 0;
+  color: var(--meta);
+}
+
+.editor-loading,
+.editor-stop {
+  margin-top: 1.5rem;
+  color: var(--ink-prose);
+}
+
+.editor-status {
+  min-height: 1.5rem;
+  margin: 0 0 1.25rem;
+  font-size: var(--size-small);
+  color: var(--sub);
+}
+
+.editor-status[data-tone="error"] {
+  color: #9b2c1f;
+}
+
+.editor-status[data-tone="done"] {
+  color: var(--gold-text);
+}
+
+.editor-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.editor-field:first-child,
+.editor-field:nth-child(2) {
+  grid-column: 1 / -1;
+}
+
+.editor-label {
+  color: var(--sub);
+}
+
+.editor-hint {
+  font-size: 0.75rem;
+  color: var(--meta);
+}
+
+.editor-field input,
+.editor-field textarea,
+.editor-inspector input,
+.editor-select {
+  font: inherit;
+  font-size: 1rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid rgb(18 17 16 / 0.18);
+  border-radius: 2px;
+  padding: 0.5rem 0.625rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.editor-field textarea {
+  resize: vertical;
+}
+
+.editor-field input:focus-visible,
+.editor-field textarea:focus-visible,
+.editor-inspector input:focus-visible,
+.editor-select:focus-visible,
+.editor-button:focus-visible,
+.editor-action:focus-visible {
+  outline: 2px solid var(--gold-line);
+  outline-offset: 1px;
+}
+
+.editor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-bottom: 0;
+}
+
+.editor-group {
+  display: flex;
+  gap: 0.25rem;
+  padding-right: 0.5rem;
+  border-right: 1px solid var(--rule-soft);
+}
+
+.editor-group:last-child {
+  border-right: 0;
+}
+
+.editor-select {
+  font-size: 0.875rem;
+  padding: 0.3rem 0.4rem;
+}
+
+.editor-button {
+  min-width: 2.25rem;
+  height: 2.25rem;
+  padding: 0 0.5rem;
+  font: inherit;
+  font-size: 0.9375rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.editor-button:hover {
+  background: var(--mat);
+}
+
+.editor-button[aria-pressed="true"] {
+  background: var(--mat);
+  border-color: var(--rule);
+}
+
+.editor-button.is-bold {
+  font-weight: 700;
+}
+
+.editor-button.is-italic {
+  font-style: italic;
+}
+
+.editor-button.is-underline {
+  text-decoration: underline;
+}
+
+.editor-button.is-strike {
+  text-decoration: line-through;
+}
+
+.editor-button--text {
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+}
+
+.editor-inspector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--mat);
+  border: 1px solid var(--rule);
+  border-bottom: 0;
+}
+
+.editor-inspector input {
+  flex: 1 1 12rem;
+  font-size: 0.9375rem;
+}
+
+.editor-inspector[hidden],
+.editor-toolbar[hidden],
+.editor-surface[hidden],
+.editor-preview[hidden] {
+  display: none;
+}
+
+.editor-surface {
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.editor-content {
+  min-height: 24rem;
+  padding: 1.5rem clamp(1rem, 4vw, 2.5rem);
+  outline: none;
+}
+
+/* The placeholder Tiptap marks the empty first paragraph with. */
+.editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+/* No drop cap while writing: it follows the cursor's first letter around and
+   makes the opening line jump as it is typed. The preview shows it. */
+.editor-content > p:first-child::first-letter {
+  all: unset;
+}
+
+.editor-figure {
+  position: relative;
+  cursor: pointer;
+}
+
+.editor-figure.ProseMirror-selectednode {
+  outline: 2px solid var(--gold-line);
+  outline-offset: 4px;
+}
+
+.editor-figure.is-pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 9rem;
+  padding: 1.5rem;
+  background: var(--mat);
+  border: 1px dashed var(--rule);
+  text-align: center;
+}
+
+.editor-figure.is-failed {
+  border-color: #9b2c1f;
+}
+
+.editor-figure-note {
+  font-size: var(--size-small);
+  color: var(--sub);
+}
+
+.editor-preview {
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.editor-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding: 0.75rem 0;
+  background: var(--background);
+  border-top: 1px solid var(--rule-soft);
+}
+
+.editor-view {
+  margin-right: auto;
+  font-size: var(--size-small);
+  color: var(--gold-text);
+}
+
+.editor-view[hidden] {
+  display: none;
+}
+
+.editor-action {
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.06em;
+  padding: 0.7rem 1.25rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--text);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.editor-action--primary {
+  color: var(--surface);
+  background: var(--text);
+}
+
+.editor-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 40rem) {
+  .editor-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-group {
+    padding-right: 0;
+    border-right: 0;
+  }
+}

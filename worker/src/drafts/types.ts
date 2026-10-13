@@ -178,6 +178,16 @@ export interface Draft {
    * seven-day lifecycle.
    */
   processed: { media: ProcessedMedia[]; at: string } | null;
+  /**
+   * Set on a draft that is one picture uploaded from the site's article editor
+   * (editor/media.ts), naming the hash of the key it was uploaded with.
+   *
+   * Such a draft is only a way through the sanitiser: it has no record and no
+   * preview, nothing is published when its callback arrives, and the author is
+   * not messaged about it — the editor page asks after it instead, with the
+   * same key. Absent on every other draft, which is why it is read with `?? null`.
+   */
+  editor?: { keyHash: string } | null;
 }
 
 export const DRAFT_SCHEMA_VERSION = 1;

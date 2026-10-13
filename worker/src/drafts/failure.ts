@@ -123,6 +123,11 @@ export async function failDraft(
     return false;
   }
 
+  // A picture from the article editor. The page asking after it sees the
+  // failure and says so where the author is looking; Retry and Cancel in the
+  // chat would be buttons for a draft nobody there ever saw.
+  if ((draft.editor ?? null) !== null) return true;
+
   const messageId = await sendMessage(
     env,
     draft.source.chatId,
