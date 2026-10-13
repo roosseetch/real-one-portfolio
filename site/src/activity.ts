@@ -10,6 +10,7 @@
 
 import { openLightbox } from "./lightbox";
 import { avifFrom, pictureFor } from "./picture";
+import { parseProse, placedMedia, proseParagraphs, renderProse } from "./prose";
 import { routeById, routeHref } from "./routes";
 
 export interface ActivityMedia {
@@ -31,6 +32,12 @@ export interface ActivityRecord {
   publishedAt?: string | null;
   tags?: string[];
   media?: ActivityMedia[];
+  /**
+   * How `body` is written. Absent is plain text, which is every record the
+   * Telegram pipeline publishes; "markdown" is the subset in prose.ts, for an
+   * article published by hand.
+   */
+  bodyFormat?: "markdown" | null;
 }
 
 interface Manifest {
@@ -225,11 +232,20 @@ interface TextBlock {
   text: string;
 }
 
-/** A record's prose, in the order and the classes a card shows it in. */
+const isMarkdown = (record: ActivityRecord) => record.bodyFormat === "markdown";
+
+/**
+ * A record's prose, in the order and the classes a card shows it in.
+ *
+ * An article's paragraphs arrive here with their markup gone and its headings
+ * and lists left out, which is what a listing card wants from it. The page that
+ * shows the article whole renders the body itself instead (renderRecord).
+ */
 function textOf(record: ActivityRecord): TextBlock[] {
   const blocks: TextBlock[] = [];
   if (record.summary) blocks.push({ className: "activity-summary", text: record.summary });
-  for (const text of paragraphsOf(record.body)) blocks.push({ className: "activity-body", text });
+  const paragraphs = isMarkdown(record) ? proseParagraphs(record.body) : paragraphsOf(record.body);
+  for (const text of paragraphs) blocks.push({ className: "activity-body", text });
   return blocks;
 }
 
@@ -329,7 +345,7 @@ function renderDate(value: string): HTMLElement {
  * and a `<video>` in a 168px cell is a play button over a frame that has not
  * been downloaded.
  */
-function mosaicImage(media: ActivityMedia): HTMLElement {
+function mosaicImage(media: ActivityMedia, sizes?: string): HTMLElement {
   const source = media.type === "video" ? (media.poster ?? media.thumbnail) : (media.thumbnail ?? media.src);
   const cell = el("div", "activity-mosaic-cell plate");
   if (!source) return cell;
@@ -349,8 +365,16 @@ function mosaicImage(media: ActivityMedia): HTMLElement {
   img.alt = "";
   img.loading = "lazy";
   img.decoding = "async";
-  // One URL rather than a ladder, because the cell is fixed by the mosaic's
-  // grid and always shows the 320px derivative.
+  // The large plate gets the ladder: it spans most of the card, and on a record
+  // with one picture all of it — 320 pixels across a 60rem card is a blur. The
+  // cells beside it are fixed by the grid at 5.5rem and keep the 320px file.
+  const srcset = sizes && media.type !== "video" ? derivativeSrcset(media.src) : null;
+  if (srcset && sizes) {
+    img.srcset = srcset;
+    img.sizes = sizes;
+    cell.append(pictureFor(img, derivativeSrcset(media.src, "avif"), sizes));
+    return cell;
+  }
   cell.append(pictureFor(img, avif));
   return cell;
 }
@@ -368,7 +392,10 @@ function mediaMosaic(record: ActivityRecord, href: string): HTMLElement | null {
   if (media.length === 0) return null;
 
   const mosaic = el("div", `activity-mosaic${media.length === 1 ? " is-single" : ""}`);
-  mosaic.append(mosaicImage(media[0]));
+  // The width of the column on a phone, and at most the listing page's one card
+  // to a row past that. The landing page's two cards side by side are half of
+  // it, which this overstates by one rung of the ladder.
+  mosaic.append(mosaicImage(media[0], "(max-width: 48rem) 100vw, 60rem"));
 
   if (media.length > 1) {
     const stack = el("div", "activity-mosaic-stack");
@@ -561,8 +588,7 @@ function slideZoom(
  * picture gets the plate and none of the chrome, since there is nothing to
  * navigate.
  */
-function mediaCarousel(record: ActivityRecord): HTMLElement | null {
-  const media = record.media ?? [];
+function mediaCarousel(record: ActivityRecord, media: ActivityMedia[]): HTMLElement | null {
   if (media.length === 0) return null;
 
   const carousel = el("div", "media-carousel");
@@ -702,6 +728,40 @@ function mediaCarousel(record: ActivityRecord): HTMLElement | null {
   return carousel;
 }
 
+/**
+ * A picture an article places in its own text, full width between paragraphs.
+ *
+ * A button, like the carousel's plate, because the picture this was built for
+ * is an infographic whose small print is only readable full size. The
+ * full-screen view steps through every photograph the record has, from this one.
+ */
+function articleFigure(record: ActivityRecord, index: number, alt: string): HTMLElement | null {
+  const item = record.media?.[index];
+  if (!item) return null;
+
+  const figure = el("figure", "prose-figure");
+  if (item.type === "video") {
+    figure.append(slideMedia(item));
+  } else {
+    // The text's own alt wins: it is written for this spot in the article.
+    const shown = alt ? { ...item, alt } : item;
+    const photos = (record.media ?? []).filter((media) => media.type !== "video");
+    const button = el("button", "prose-zoom") as HTMLButtonElement;
+    button.type = "button";
+    // The label replaces the picture's alt as the button's name, so it carries
+    // the description as well as what pressing it does.
+    const described = (shown.alt ?? "").replace(/[\s.]+$/, "");
+    button.setAttribute("aria-label", described ? `${described}. View full size` : "View full size");
+    // Eager: it sits a paragraph or two into the article, inside a button
+    // whose height is nothing until the picture arrives.
+    button.append(slideMedia(shown, true));
+    button.addEventListener("click", () => openLightbox(photos, photos.indexOf(item)));
+    figure.append(button);
+  }
+  if (item.caption) figure.append(el("figcaption", undefined, item.caption));
+  return figure;
+}
+
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
   const card = el("article", "activity-card");
 
@@ -740,10 +800,23 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
 
   const blocks = textOf(record);
   const shown = options.excerpt && options.href ? excerptOf(blocks) : { blocks, cut: false };
-  for (const block of shown.blocks) text.append(el("p", block.className, block.text));
+  // An article shown whole is the one case that is not a run of paragraphs.
+  const article = !listing && isMarkdown(record);
+  for (const block of shown.blocks) {
+    if (article && block.className === "activity-body") continue;
+    text.append(el("p", block.className, block.text));
+  }
+  if (article) {
+    text.append(renderProse(parseProse(record.body), (index, alt) => articleFigure(record, index, alt)));
+  }
 
   if (!listing) {
-    const carousel = mediaCarousel(record);
+    // What the text has already shown in place is not shown again below it.
+    const placed = article ? placedMedia(record.body) : new Set<number>();
+    const carousel = mediaCarousel(
+      record,
+      (record.media ?? []).filter((_, index) => !placed.has(index)),
+    );
     if (carousel) text.append(carousel);
   }
 

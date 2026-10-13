@@ -384,10 +384,10 @@ describe("the photo stack on a listing card", () => {
 
   /* Three cells on a card that a reader is scrolling past: the smallest files
      on the page, and the ones there are most of. */
-  it("offers each mosaic cell its AVIF", () => {
-    const cells = listed([image(1), image(2)]).querySelectorAll(".activity-mosaic-cell");
+  it("offers each small mosaic cell its AVIF", () => {
+    const cells = [...listed([image(1), image(2), image(3)]).querySelectorAll(".activity-mosaic-stack .activity-mosaic-cell")];
 
-    expect(cells.length).toBeGreaterThan(0);
+    expect(cells.length).toBe(2);
     for (const cell of cells) {
       const img = cell.querySelector("img") as HTMLImageElement;
       const source = cell.querySelector("source") as HTMLSourceElement;
@@ -395,6 +395,19 @@ describe("the photo stack on a listing card", () => {
       expect(source.getAttribute("srcset")).toBe(img.getAttribute("src")?.replace(".webp", ".avif"));
       expect(img.getAttribute("loading")).toBe("lazy");
     }
+  });
+
+  /** The large plate spans the card, and 320 pixels across it is a blur. */
+  it("offers the large plate the whole ladder, in both formats", () => {
+    const plate = listed([
+      { ...image(1), src: "https://media.test/media/activity-1/p-1024.webp", thumbnail: "https://media.test/media/activity-1/p-320.webp" },
+    ]).querySelector(".activity-mosaic-cell") as HTMLElement;
+
+    expect(plate.querySelector("img")?.getAttribute("srcset")).toBe(
+      "https://media.test/media/activity-1/p-320.webp 320w, https://media.test/media/activity-1/p-800.webp 800w, https://media.test/media/activity-1/p-1024.webp 1024w",
+    );
+    expect(plate.querySelector("source")?.getAttribute("srcset")).toContain("p-1024.avif 1024w");
+    expect(plate.querySelector("source")?.getAttribute("sizes")).toBe(plate.querySelector("img")?.getAttribute("sizes"));
   });
 
   /** The page that shows one record shows every image in full, not a stack of three. */
@@ -698,5 +711,76 @@ describe("the way into the full-screen view", () => {
 
     expect(slide.querySelector("picture")?.hasAttribute("loading")).toBe(false);
     expect(slide.querySelector("img")?.getAttribute("loading")).toBe("eager");
+  });
+});
+
+/* An article published by hand, whose body is the Markdown subset in prose.ts.
+   The grammar itself is prose.test.ts's; this is about where the article goes
+   and what every other view of the record takes from it. */
+describe("an article written in Markdown", () => {
+  const infographic = {
+    type: "image" as const,
+    src: "https://media.test/media/activity-1/info-1024.webp",
+    thumbnail: "https://media.test/media/activity-1/info-320.webp",
+    alt: "Infographic",
+    caption: "At a glance",
+  };
+  const photo = { ...infographic, src: "https://media.test/media/activity-1/photo-1024.webp", alt: "Photo", caption: null };
+
+  const article = {
+    id: "rec-a",
+    title: "SCOPE Europe 2026",
+    summary: "Three workshops.",
+    bodyFormat: "markdown" as const,
+    body: "Clinical development is **changing**.\n\n![The three workshops](media:0)\n\n## Workshop 1: Closing the Gaps\n\n*From fragmented data*\n\n- Site selection\n- Feasibility\n\n> Technology alone will not do it.",
+    media: [infographic, photo],
+  };
+
+  it("renders its sections, lists and quotes on its own page", () => {
+    const card = renderRecord(article, { heading: "h1" });
+    document.body.append(card);
+
+    expect(card.querySelector(".prose h2 .prose-eyebrow")?.textContent).toBe("Workshop 1");
+    expect([...card.querySelectorAll(".prose li")].map((li) => li.textContent)).toEqual(["Site selection", "Feasibility"]);
+    expect(card.querySelector(".prose blockquote")?.textContent).toBe("Technology alone will not do it.");
+    expect(card.querySelector(".prose strong")?.textContent).toBe("changing");
+    // The summary still leads, and the body is not also shown as raw paragraphs.
+    expect(card.querySelector(".activity-summary")?.textContent).toBe("Three workshops.");
+    expect(card.querySelector(".activity-body")).toBeNull();
+  });
+
+  it("puts the picture it names in the text, and leaves only the rest to the carousel", () => {
+    const card = renderRecord(article, { heading: "h1" });
+
+    const figure = card.querySelector(".prose figure");
+    expect(figure?.querySelector("img")?.getAttribute("src")).toBe(infographic.src);
+    expect(figure?.querySelector("img")?.getAttribute("alt")).toBe("The three workshops");
+    expect(figure?.querySelector("figcaption")?.textContent).toBe("At a glance");
+    expect([...card.querySelectorAll(".carousel-slide img")].map((img) => img.getAttribute("src"))).toEqual([photo.src]);
+  });
+
+  it("opens the placed picture full size", () => {
+    const card = renderRecord(article, { heading: "h1" });
+    document.body.append(card);
+
+    card.querySelector<HTMLButtonElement>(".prose-zoom")?.click();
+
+    expect(document.querySelector("dialog.lightbox img")?.getAttribute("src")).toBe(infographic.src);
+  });
+
+  it("gives a listing card plain prose, with no markup left in it", () => {
+    const card = renderRecord(article, { href: "/activities/?v=x", excerpt: true });
+    const text = [...card.querySelectorAll(".activity-body")].map((p) => p.textContent).join(" ");
+
+    expect(text).toBe("Clinical development is changing.");
+    expect(card.querySelector(".prose")).toBeNull();
+  });
+
+  /** The format is opted into. A Telegram note that happens to look like a list stays a note. */
+  it("leaves a record without the format exactly as it was", () => {
+    const card = renderRecord({ id: "rec-n", title: "A note", body: "## not a heading\n- not a list" }, { heading: "h1" });
+
+    expect(card.querySelector(".prose, ul, h2")).toBeNull();
+    expect(card.querySelector(".activity-body")?.textContent).toBe("## not a heading\n- not a list");
   });
 });
