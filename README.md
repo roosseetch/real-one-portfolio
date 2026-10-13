@@ -799,6 +799,15 @@ never fetches it; and the API takes it only in an `Authorization` header, from
 the site's own origin. Do not forward the bot's message: anyone holding the
 link can publish until it expires.
 
+**Discard…** at the bottom of the page ends a link early. After a confirmation
+it deletes the key, every picture uploaded with the link that the published
+article does not show (the derivatives in the media bucket, which no lifecycle
+rule would ever remove, and their originals, GPS and all, ahead of the
+seven-day rule), and the text the browser was keeping. An article already
+published from the link stays on the site as it is. It works on an expired link
+too, and a picture still being sanitised when the link goes is deleted as soon
+as its callback arrives.
+
 `site/src/rich-doc.ts` is imported by the Worker as well as the site, which is
 why `deploy-worker.yml` also runs when it changes.
 

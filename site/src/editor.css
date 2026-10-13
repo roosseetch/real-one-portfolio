@@ -183,6 +183,10 @@
   letter-spacing: 0.04em;
 }
 
+.editor-button--danger {
+  color: #9b2c1f;
+}
+
 .editor-inspector {
   display: flex;
   flex-wrap: wrap;
@@ -281,7 +285,6 @@
 }
 
 .editor-view {
-  margin-right: auto;
   font-size: var(--size-small);
   color: var(--gold-text);
 }
@@ -305,6 +308,13 @@
 .editor-action--primary {
   color: var(--surface);
   background: var(--text);
+}
+
+/* Discard sits apart, at the far end from Publish. */
+.editor-action--quiet {
+  margin-right: auto;
+  border-color: transparent;
+  color: var(--sub);
 }
 
 .editor-action:disabled {

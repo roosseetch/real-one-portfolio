@@ -5,6 +5,7 @@
  *   POST /editor/media           a picture for the text (raw bytes)
  *   GET  /editor/media/<id>      whether that picture is ready yet
  *   POST /editor/publish         the article, as JSON
+ *   POST /editor/discard         end the link and remove what was never published
  *
  * Every route needs the key from the bot's link, as `Authorization: Bearer`.
  * Never in this URL: a query string lands in logs that a header does not. The
@@ -15,11 +16,12 @@ import { answer, guard, type ContactOriginEnv, type CorsPolicy } from "../contac
 import { MAX_DOC_BYTES } from "../../../site/src/rich-doc";
 import { ALL_CHUNKS, findRecord } from "../content/recent";
 import { isValidId } from "../ids";
+import { discardKey, type EditorDiscardEnv } from "./discard";
 import { lookupKey, presentedKey } from "./keys";
 import { pictureStatus, uploadPicture, type EditorMediaEnv } from "./media";
 import { publishArticle, type EditorPublishEnv } from "./publish";
 
-export interface EditorEnv extends ContactOriginEnv, EditorMediaEnv, EditorPublishEnv {}
+export interface EditorEnv extends ContactOriginEnv, EditorMediaEnv, EditorPublishEnv, EditorDiscardEnv {}
 
 export const EDITOR_PREFIX = "/editor/";
 
@@ -38,15 +40,22 @@ export async function handleEditorRequest(request: Request, env: EditorEnv): Pro
   const origin = guarded;
   const reply = (status: number, body?: Record<string, unknown>) => answer(status, origin, body, POLICY);
 
+  const path = new URL(request.url).pathname.slice(EDITOR_PREFIX.length);
   const lookup = await lookupKey(env, presentedKey(request));
+
+  // The one thing an expired key may still do: clearing up after itself
+  // destroys only what it made, and the page offers it on an expired link.
+  if (request.method === "POST" && path === "discard" && lookup.status !== "unknown") {
+    const outcome = await discardKey(env, lookup.key, lookup.hash);
+    return outcome.status === "discarded" ? reply(200, outcome) : reply(503, { status: "unavailable" });
+  }
+
   if (lookup.status !== "valid") {
     // Expired is said out loud, because the page's answer to it — ask the bot
     // for a new link — is different from its answer to a key that never was.
     return reply(401, { status: lookup.status });
   }
   const { key, hash } = lookup;
-
-  const path = new URL(request.url).pathname.slice(EDITOR_PREFIX.length);
 
   if (request.method === "GET" && path === "session") {
     let record = null;

@@ -80,7 +80,8 @@ export async function mintKey(
 
 export type KeyLookup =
   | { status: "valid"; key: EditorKey; hash: string }
-  | { status: "expired" }
+  // Carried so a discard can still clear up after a link that has run out.
+  | { status: "expired"; key: EditorKey; hash: string }
   | { status: "unknown" };
 
 /** The key a request presents, read from `Authorization: Bearer …`. */
@@ -121,7 +122,7 @@ export async function lookupKey(
     return { status: "unknown" };
   }
   if (typeof key.expiresAt !== "string" || Date.parse(key.expiresAt) <= now.getTime()) {
-    return { status: "expired" };
+    return { status: "expired", key, hash };
   }
 
   return { status: "valid", key, hash };
@@ -132,4 +133,21 @@ export async function bindKey(env: EditorKeysEnv, hash: string, key: EditorKey, 
   await env.PRIVATE_BUCKET.put(storedKey(hash), JSON.stringify({ ...key, recordId }), {
     httpMetadata: { contentType: "application/json" },
   });
+}
+
+/**
+ * Ends a key before its four hours are up. Every request with it is then
+ * "unknown", exactly as if it had never been handed out.
+ */
+export async function revokeKey(env: EditorKeysEnv, hash: string): Promise<void> {
+  await env.PRIVATE_BUCKET.delete(storedKey(hash));
+}
+
+/**
+ * Whether a key is still on record, expired or not. Gone means discarded: the
+ * bucket's own rule sweeps keys only after seven days, long after anything
+ * uploaded with one has come back.
+ */
+export async function keyExists(env: EditorKeysEnv, hash: string): Promise<boolean> {
+  return (await env.PRIVATE_BUCKET.head(storedKey(hash))) !== null;
 }

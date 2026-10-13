@@ -91,6 +91,11 @@ export function createFakeBucket(): FakeBucket {
       };
     },
 
+    async head(key: string) {
+      const object = stored.get(key);
+      return object === undefined ? null : { key, etag: object.etag };
+    },
+
     // R2 takes either one key or many, and the media cleanup deletes a whole
     // prefix in one call.
     async delete(keys: string | string[]) {
@@ -135,7 +140,7 @@ export function createFakeBucket(): FakeBucket {
   } as unknown as Map<string, string>;
 
   return {
-    // The Worker touches put, get, delete and list; asserting the full R2Bucket
+    // The Worker touches put, get, head, delete and list; asserting the full R2Bucket
     // surface here would be scaffolding nothing reads.
     bucket: bucket as unknown as R2Bucket,
     objects,
