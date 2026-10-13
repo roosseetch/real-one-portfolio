@@ -469,22 +469,30 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
 
   const previewButton = button("Preview", "Show the article as the site will", () => togglePreview(), "editor-action");
   const publishButton = button("Publish", "Publish the article", () => void publish(), "editor-action editor-action--primary");
+  const discardButton = button(
+    "Discard…",
+    "Throw this draft away and end the link",
+    () => askToDiscard(),
+    "editor-action editor-action--quiet",
+  );
   const actions = el("div", "editor-actions");
   const viewLink = el("a", "editor-view") as HTMLAnchorElement;
   viewLink.hidden = true;
   viewLink.textContent = "View it on the site";
   viewLink.target = "_blank";
   viewLink.rel = "noopener";
-  actions.append(viewLink, previewButton, publishButton);
+  actions.append(discardButton, viewLink, previewButton, publishButton);
 
   /* ------------------------------------------------------------ state */
 
   let expired = false;
   let publishing = false;
+  let discarding = false;
 
   function refresh() {
     const { pending, failed } = figureStates(editor);
-    publishButton.disabled = expired || publishing || pending.length > 0;
+    publishButton.disabled = expired || publishing || discarding || pending.length > 0;
+    discardButton.disabled = publishing || discarding;
     publishButton.textContent = publishedId ? "Publish changes" : "Publish";
     if (pending.length > 0) publishButton.title = "Waiting for pictures to finish";
     else if (failed > 0) publishButton.title = "Remove the pictures that failed first";
@@ -522,10 +530,10 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
     refresh();
   };
   tick();
-  window.setInterval(tick, 30_000);
+  const ticking = window.setInterval(tick, 30_000);
 
   /* Pictures being sanitised are asked after until they are ready or have failed. */
-  window.setInterval(async () => {
+  const polling = window.setInterval(async () => {
     for (const uploadId of figureStates(editor).pending) {
       if (uploadId.startsWith("local-")) continue;
       try {
@@ -654,6 +662,58 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
   if (publishedHref) {
     viewLink.href = publishedHref;
     viewLink.hidden = false;
+  }
+
+  /* ------------------------------------------------------------ discard */
+
+  /*
+   * Asked in the status line rather than with confirm(): it says what will and
+   * will not go, which differs once the article is on the site.
+   */
+  function askToDiscard() {
+    say(
+      publishedId
+        ? "Discard? The published article stays on the site as it is. Changes you have not published, and pictures it does not use, are deleted, and this link stops working."
+        : "Discard? The text and the pictures are deleted, nothing is published, and this link stops working.",
+      "error",
+    );
+    const confirmButton = button("Discard", "Discard the draft and end the link", () => void discard(), "editor-button editor-button--text editor-button--danger");
+    const keepButton = button("Keep writing", "Keep the draft", () => say(""), "editor-button editor-button--text");
+    status.append(" ", confirmButton, " ", keepButton);
+    confirmButton.focus();
+  }
+
+  async function discard() {
+    discarding = true;
+    refresh();
+    say("Discarding…");
+    let articleKept = publishedId !== null;
+    try {
+      const answer = await api(key, "discard", { method: "POST" });
+      articleKept = answer.articleKept === true;
+    } catch (error) {
+      // Unknown: discarded already, from another tab. Nothing left to remove
+      // but what this browser holds.
+      if (!(error instanceof ApiError && error.body.status === "unknown")) {
+        discarding = false;
+        refresh();
+        say("Not discarded: the site could not be reached. Try again in a moment.", "error");
+        return;
+      }
+    }
+
+    window.clearTimeout(saveTimer);
+    window.clearInterval(ticking);
+    window.clearInterval(polling);
+    writeDraft(slot, null);
+    forgetKey();
+    editor.destroy();
+    stop(
+      root,
+      articleKept
+        ? "Discarded. The published article is unchanged, and this link no longer works."
+        : "Discarded. Nothing was published, the text and pictures are deleted, and this link no longer works.",
+    );
   }
 
   /* ------------------------------------------------------------ layout */

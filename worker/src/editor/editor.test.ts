@@ -367,6 +367,72 @@ describe("editor routes: pictures", () => {
   });
 });
 
+describe("editor routes: discard", () => {
+  /** The folder a key's pictures go into, as object names and as the address the page sees. */
+  async function folderOf(key: string) {
+    const url = (await call("session", { key })).json.mediaFolder as string;
+    return { url, prefix: new URL(url).pathname.slice(1) };
+  }
+
+  it("ends a link nothing was published from, and removes its pictures and their originals", async () => {
+    const { key } = await mintKey(env(), "create", CHAT, null);
+    const upload = await call("media", { method: "POST", key, body: bodyFor("jpeg") });
+    expect(upload.status).toBe(202);
+    const { prefix } = await folderOf(key);
+    media.objects.set(`${prefix}ffffffffffffffff-1200.webp`, "x");
+    media.objects.set(`${prefix}ffffffffffffffff-320.avif`, "x");
+
+    const { status, json } = await call("discard", { method: "POST", key });
+
+    expect(status).toBe(200);
+    expect(json).toMatchObject({ status: "discarded", removed: 2, articleKept: false });
+    expect([...media.objects.keys()]).toEqual([]);
+    expect([...storage.objects.keys()].some((name) => name.startsWith("originals/"))).toBe(false);
+    expect((await call("session", { key })).json).toEqual({ status: "unknown" });
+  });
+
+  it("leaves a published article and the pictures it shows, and drops the rest", async () => {
+    publish([[record()]]);
+    const { key } = await mintKey(env(), "create", CHAT, null);
+    const { url, prefix } = await folderOf(key);
+    for (const name of ["aaaaaaaaaaaaaaab-1200.webp", "aaaaaaaaaaaaaaab-320.webp", "bbbbbbbbbbbbbbbc-1200.webp"]) {
+      media.objects.set(`${prefix}${name}`, "x");
+    }
+    const doc = { type: "doc", content: [{ type: "figure", attrs: { src: `${url}aaaaaaaaaaaaaaab-1200.webp` } }] };
+    const published = await call("publish", { method: "POST", key, body: JSON.stringify(article({ doc })) });
+
+    const { json } = await call("discard", { method: "POST", key });
+
+    expect(json).toMatchObject({ status: "discarded", removed: 1, articleKept: true });
+    expect(liveRecords().some((entry) => entry.id === published.json.recordId)).toBe(true);
+    expect([...media.objects.keys()].sort()).toEqual([
+      `${prefix}aaaaaaaaaaaaaaab-1200.webp`,
+      `${prefix}aaaaaaaaaaaaaaab-320.webp`,
+    ]);
+  });
+
+  it("still clears up after a link that has expired", async () => {
+    const { key } = await mintKey(env(), "create", CHAT, null, new Date(Date.now() - KEY_TTL_MS - 1000));
+    expect((await call("discard", { method: "POST", key })).status).toBe(200);
+    expect((await lookupKey(env(), key)).status).toBe("unknown");
+  });
+
+  it("refuses a key that was never handed out, or is already discarded", async () => {
+    const { key } = await mintKey(env(), "create", CHAT, null);
+    await call("discard", { method: "POST", key });
+    expect((await call("discard", { method: "POST", key })).json).toEqual({ status: "unknown" });
+  });
+
+  it("keeps the key when the article cannot be read, so nothing it shows is lost", async () => {
+    const { key } = await mintKey(env(), "update", CHAT, RECORD);
+    publish([[record()]]);
+    // Storage refusing the read, as opposed to the article not being there.
+    vi.spyOn(content.bucket, "get").mockRejectedValue(new Error("R2 unavailable"));
+    expect((await call("discard", { method: "POST", key })).status).toBe(503);
+    expect((await lookupKey(env(), key)).status).toBe("valid");
+  });
+});
+
 describe("asking the bot for a link", () => {
   const press = (data: string): TelegramCallbackQuery => ({
     id: "cb-1",

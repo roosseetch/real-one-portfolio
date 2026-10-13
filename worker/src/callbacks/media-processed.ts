@@ -12,7 +12,10 @@
  * would otherwise put their images on her site.
  */
 import { timingSafeEqual } from "../crypto";
+import { keyExists } from "../editor/keys";
 import { randomId } from "../ids";
+import { deleteOriginals } from "../media/originals";
+import { deletePublishedItem, locateMedia } from "../media/published";
 import { attachProcessedMedia, type AttachEnv } from "../publishing/attach-record";
 import { publishProcessedMedia, type MediaPublishEnv } from "../publishing/media-record";
 import { sendMediaGroup, sendMessage, type TelegramApiEnv } from "../telegram/api";
@@ -27,6 +30,8 @@ const CONFIRMATION_TOKEN_LENGTH = 12;
 
 export interface CallbackEnv extends MediaPublishEnv, AttachEnv, TelegramApiEnv, SignedCallbackEnv {
   PRIVATE_BUCKET: R2Bucket;
+  /** Only for deleting a picture whose editor link was discarded while it was being made. */
+  MEDIA_BUCKET: R2Bucket;
   MEDIA_BASE_URL: string;
   SITE_BASE_URL: string;
 }
@@ -220,6 +225,19 @@ async function recordEditorPicture(
   // publish endpoint accepts a picture only from there.
   const folder = `${env.MEDIA_BASE_URL.replace(/\/$/, "")}/media/activity-${draft.activityId}/`;
   if (!received.every((item) => item.type === "image" && item.src.startsWith(folder))) return refuse(400);
+
+  // The link it was uploaded with was discarded while this ran. Nothing can
+  // publish the picture any more, so it goes now rather than sitting in the
+  // public bucket for good.
+  if (!(await keyExists(env, draft.editor!.keyHash))) {
+    for (const item of received) {
+      const location = locateMedia(item.src);
+      if (location !== null) await deletePublishedItem(env.MEDIA_BUCKET, location);
+    }
+    await deleteOriginals(env.PRIVATE_BUCKET, draft.activityId);
+    await saveDraft(env.PRIVATE_BUCKET, transition(draft, "cancelled")).catch(() => undefined);
+    return Response.json({ status: "discarded" });
+  }
 
   const media: ProcessedMedia[] = received.map((item) => ({
     sourceId: item.sourceId,

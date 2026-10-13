@@ -9,6 +9,9 @@
  * at from the other end: the record has stopped naming it, and leaving the file
  * readable would make "remove" mean "hide".
  *
+ * A third is the article editor's Discard: pictures uploaded with a link and
+ * never published, left behind in that link's own folder.
+ *
  * This is the only thing in the Worker that touches the media bucket, and it
  * only ever deletes. Media is written by GitHub Actions, after sanitisation, and
  * that has not changed.
@@ -121,13 +124,56 @@ export async function deletePublishedMedia(bucket: R2Bucket, activityId: string)
 }
 
 /**
+ * Deletes everything under one activity's prefix except the items named.
+ *
+ * For a folder some of whose pictures a published record still shows: those
+ * stay, and whatever else is there goes. Paged by cursor rather than re-listed,
+ * since what is kept is still there on the next list. Never throws.
+ */
+export async function deletePublishedMediaExcept(
+  bucket: R2Bucket,
+  activityId: string,
+  keep: ReadonlySet<string>,
+): Promise<number> {
+  if (keep.size === 0) return deletePublishedMedia(bucket, activityId);
+  if (!isValidId(activityId)) {
+    console.error("Refused to delete media for an activity id that is not one of ours");
+    return 0;
+  }
+
+  const prefix = activityPrefix(activityId);
+  const doomed: string[] = [];
+  try {
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const listed = await bucket.list({ prefix, limit: PAGE_LIMIT, cursor });
+      for (const { key } of listed.objects) {
+        const mediaId = key.slice(prefix.length).split("-", 1)[0];
+        if (!keep.has(mediaId)) doomed.push(key);
+      }
+      if (!listed.truncated) break;
+      cursor = listed.cursor;
+    }
+    // R2 deletes at most 1000 keys a call.
+    for (let start = 0; start < doomed.length; start += PAGE_LIMIT) {
+      await bucket.delete(doomed.slice(start, start + PAGE_LIMIT));
+    }
+  } catch {
+    console.error("Could not remove every unpublished file");
+    return 0;
+  }
+  return doomed.length;
+}
+
+/**
  * Empties one prefix, page by page.
  *
  * Split out because both callers want exactly this and neither wants it to
  * throw. The prefix is built by the callers above, which have already checked
- * every id that goes into it.
+ * every id that goes into it — as does deleteOriginals in originals.ts, the
+ * one caller from outside, which empties a folder of the private bucket.
  */
-async function deleteUnder(bucket: R2Bucket, prefix: string): Promise<number> {
+export async function deleteUnder(bucket: R2Bucket, prefix: string): Promise<number> {
   let removed = 0;
 
   try {

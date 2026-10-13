@@ -21,6 +21,7 @@ const RECORD: DraftRecord = {
 
 let storage: FakeBucket;
 let content: FakeBucket;
+let media: FakeBucket;
 let sent: string[];
 /** Every Telegram call, as {method, body}, for the sends that carry no text. */
 let calls: Array<{ method: string; body: Record<string, unknown> }>;
@@ -28,6 +29,7 @@ let calls: Array<{ method: string; body: Record<string, unknown> }>;
 beforeEach(() => {
   storage = createFakeBucket();
   content = createFakeBucket();
+  media = createFakeBucket();
   sent = [];
   calls = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
@@ -45,6 +47,7 @@ afterEach(() => {
 const env = () => ({
   PRIVATE_BUCKET: storage.bucket,
   CONTENT_BUCKET: content.bucket,
+  MEDIA_BUCKET: media.bucket,
   CALLBACK_HMAC_SECRET: SECRET,
   MEDIA_BASE_URL: MEDIA_BASE,
   SITE_BASE_URL: "https://site.example",
@@ -685,10 +688,14 @@ describe("idempotency (spec §13.4)", () => {
 });
 
 describe("a picture uploaded from the article editor", () => {
+  const KEY_HASH = "a".repeat(64);
+
   async function editorDraft(): Promise<Draft> {
     const draft = await processingDraft();
-    const upload: Draft = { ...draft, record: null, editor: { keyHash: "a".repeat(64) } };
+    const upload: Draft = { ...draft, record: null, editor: { keyHash: KEY_HASH } };
     await saveDraft(storage.bucket, upload);
+    // The link it was uploaded with, still on record.
+    storage.objects.set(`drafts/editor-keys/${KEY_HASH}.json`, "{}");
     return upload;
   }
 
@@ -718,5 +725,26 @@ describe("a picture uploaded from the article editor", () => {
       media: [{ sourceId: "media0", type: "image", src: `${MEDIA_BASE}/media/activity-zzzzzzzzzzzzzzzz/media0-1600.webp` }],
     });
     expect((await handleMediaProcessed(await callback(body), env())).status).toBe(400);
+  });
+
+  it("deletes a picture whose link was discarded while it was being made", async () => {
+    const draft = await editorDraft();
+    await storage.bucket.delete(`drafts/editor-keys/${KEY_HASH}.json`);
+    storage.objects.set(`originals/${draft.activityId}/media0.jpg`, "exif and all");
+    const folder = `media/activity-${draft.activityId}`;
+    for (const name of ["photo0001-1600.webp", "photo0001-320.webp", "photo0001-1600.avif"]) {
+      media.objects.set(`${folder}/${name}`, "bytes");
+    }
+    const body = payload(draft, {
+      media: [{ sourceId: "media0", type: "image", src: `${MEDIA_BASE}/${folder}/photo0001-1600.webp` }],
+    });
+
+    const response = await handleMediaProcessed(await callback(body), env());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "discarded" });
+    expect([...media.objects.keys()]).toEqual([]);
+    expect([...storage.objects.keys()].some((key) => key.startsWith("originals/"))).toBe(false);
+    expect((await loadDraft(storage.bucket, draft.draftId))?.state).toBe("cancelled");
   });
 });

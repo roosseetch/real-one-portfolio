@@ -7,10 +7,11 @@
  * only in the private bucket, under the seven-day lifecycle rule, and nothing
  * public is created until the media pipeline has stripped them.
  */
-import { randomId } from "../ids";
+import { isValidId, randomId } from "../ids";
 import type { TelegramApiEnv } from "../telegram/api";
 import type { DraftOriginal } from "../drafts/types";
 import { sniff, SNIFF_BYTES, type FormatEntry } from "./formats";
+import { deleteUnder } from "./published";
 
 const API_BASE = "https://api.telegram.org";
 
@@ -35,6 +36,16 @@ export interface OriginalsEnv extends TelegramApiEnv {
 
 export function originalKey(activityId: string, mediaId: string, extension: string): string {
   return `originals/${activityId}/${mediaId}.${extension}`;
+}
+
+/**
+ * Deletes every original filed under one activity, ahead of the seven-day rule:
+ * for a discarded draft there is no reason to keep a photo's GPS for a week.
+ * Never throws; returns how many went.
+ */
+export async function deleteOriginals(bucket: R2Bucket, activityId: string): Promise<number> {
+  if (!isValidId(activityId)) return 0;
+  return deleteUnder(bucket, `originals/${activityId}/`);
 }
 
 /**
