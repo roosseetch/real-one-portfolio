@@ -1154,10 +1154,13 @@ main {
   min-height: 0;
 }
 
+/* contain, not cover: the whole photograph, matted, rather than whatever band
+   of it fits the cell. A landscape photo in a tall stack cell kept only a
+   sliver of its middle, which is not a thumbnail of anything. */
 .activity-mosaic-cell img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 /* How many pictures the stack could not show, over the last one it could. */
@@ -1667,10 +1670,11 @@ ol.prose-list li::before {
   transition: opacity 0.18s ease, box-shadow 0.18s ease;
 }
 
+/* Whole, on the mat, for the same reason as the mosaic cells. */
 .carousel-thumb img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .carousel-thumb:hover {
@@ -1947,6 +1951,21 @@ ol.prose-list li::before {
   .activity-mosaic {
     grid-template-columns: minmax(0, 1fr) 10.5rem;
     aspect-ratio: 0.8;
+  }
+
+  /* The listing page's one card to a row. The portrait proportion above is for
+     the landing page's two cards side by side; across a 60rem card it made a
+     plate about 1200px tall. Landscape here, with the stack a third of the
+     width so its two pictures are pictures rather than strips. */
+  .activity-list:not(.activity-preview):not(.activity-single) .activity-mosaic {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    aspect-ratio: 16 / 9;
+  }
+
+  /* Restated, because the rule above outranks .is-single and would leave a
+     lone picture two thirds of the card with an empty column beside it. */
+  .activity-list:not(.activity-preview):not(.activity-single) .activity-mosaic.is-single {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .activity-mosaic-more {
