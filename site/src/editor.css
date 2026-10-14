@@ -266,6 +266,134 @@
   color: var(--sub);
 }
 
+/* The carousel: what the article shows above its text, in order. */
+.editor-carousel {
+  margin-bottom: 1.5rem;
+  padding: 1rem 0 0.25rem;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.editor-carousel[hidden],
+.editor-carousel-empty[hidden] {
+  display: none;
+}
+
+.editor-carousel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.editor-carousel-head h2 {
+  margin: 0;
+  font: inherit;
+}
+
+.editor-carousel .editor-hint {
+  margin: 0.4rem 0 0.75rem;
+}
+
+.editor-carousel-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.editor-carousel-item {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.editor-carousel-item.is-failed .editor-carousel-face {
+  outline: 1px solid #9b2c1f;
+}
+
+/* The whole picture on the mat, as the site's own thumbnails show it. */
+.editor-carousel-face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 6rem;
+  height: 4rem;
+}
+
+.editor-carousel-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.editor-carousel-kind {
+  position: absolute;
+  left: 0.25rem;
+  bottom: 0.25rem;
+  padding: 0 0.25rem;
+  font-size: 0.625rem;
+  color: #fff;
+  background: rgb(18 17 16 / 0.6);
+}
+
+.editor-carousel-text {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.editor-carousel-text input {
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid rgb(18 17 16 / 0.18);
+  border-radius: 2px;
+  padding: 0.35rem 0.5rem;
+  min-width: 0;
+}
+
+.editor-carousel-text input:focus-visible {
+  outline: 2px solid var(--gold-line);
+  outline-offset: 1px;
+}
+
+.editor-carousel-name {
+  font-size: var(--size-small);
+  color: var(--sub);
+  overflow-wrap: anywhere;
+}
+
+.editor-carousel-controls {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.editor-carousel-controls .editor-button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.editor-carousel-empty {
+  margin: 0;
+  font-size: var(--size-small);
+  color: var(--meta);
+}
+
+/* On a phone the controls go under the words rather than squeezing them. */
+@media (max-width: 30rem) {
+  .editor-carousel-item {
+    grid-template-columns: 6rem minmax(0, 1fr);
+  }
+
+  .editor-carousel-controls {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+}
+
 .editor-preview {
   padding-top: 1rem;
   border-top: 1px solid var(--rule);

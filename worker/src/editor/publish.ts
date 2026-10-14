@@ -3,8 +3,8 @@
  *
  * The article's text is a document (site/src/rich-doc.ts) stored as its own
  * object, written once under a fresh name and never edited — the same rule the
- * chunks live by. The record carries its name, the pictures the text places,
- * and a plain-text lead for everything that reads `body`: a listing card, a
+ * chunks live by. The record carries its name, the carousel the page sends
+ * beside the text, the pictures the text places, and a plain-text lead for everything that reads `body`: a listing card, a
  * link preview, a LinkedIn repost. The whole text is not in the record because
  * every chunk is downloaded by every visit to the feed.
  *
@@ -20,7 +20,7 @@ import {
   type RichDoc,
 } from "../../../site/src/rich-doc";
 import { CHUNK_CACHE_CONTROL } from "../content/chunks";
-import { ALL_CHUNKS, findRecord } from "../content/recent";
+import { ALL_CHUNKS, loadRecords } from "../content/recent";
 import type { PublicMedia, PublicRecord } from "../content/records";
 import { activityUrl } from "../content/urls";
 import { randomId } from "../ids";
@@ -47,6 +47,15 @@ export interface ArticleInput {
   doc: RichDoc;
 }
 
+/** More than any article has carried, and few enough that a hostile list costs nothing to read. */
+export const MAX_CAROUSEL = 50;
+
+/** The longest description or caption, the same ceiling a figure in the text has. */
+const MAX_MEDIA_TEXT = 500;
+
+/** What the sanitiser writes for a clip. A picture is never one of these, and a clip never anything else. */
+const isClip = (src: string) => /\.(mp4|mov|webm)$/i.test(src);
+
 export type PublishOutcome =
   | { status: "published"; url: string; recordId: string; created: boolean }
   | { status: "invalid"; problem: string }
@@ -59,6 +68,65 @@ function thumbnailOf(src: string): string | undefined {
   if (!match) return undefined;
   return Number(match[1]) > 320 ? `${src.slice(0, match.index)}-320.${match[2]}` : src;
 }
+
+/**
+ * The carousel the page sends: the pictures and clips shown above the text, in
+ * order. Null when the page sent none at all, which is a page from before the
+ * carousel could be edited; publishArticle then keeps the clips the article
+ * had, as it always did.
+ *
+ * Every address must pass `allowed`: an upload made with this key, or a file
+ * the article already shows. Nothing else can be put on the site from here.
+ */
+export function parseCarousel(
+  raw: unknown,
+  allowed: (url: string) => boolean,
+): { ok: true; items: PublicMedia[] | null } | { ok: false; problem: string } {
+  if (raw === undefined || raw === null) return { ok: true, items: null };
+  if (!Array.isArray(raw)) return { ok: false, problem: "the carousel is not a list" };
+  if (raw.length > MAX_CAROUSEL) return { ok: false, problem: `the carousel holds at most ${MAX_CAROUSEL} items` };
+
+  const url = (value: unknown) =>
+    typeof value === "string" && value !== "" && !/[\s"'<>\\]/.test(value) && allowed(value) ? value : null;
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim().slice(0, MAX_MEDIA_TEXT) : null;
+
+  const items: PublicMedia[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) return { ok: false, problem: "a carousel item is not one" };
+    const item = entry as Record<string, unknown>;
+    const type = item.type;
+    if (type !== "image" && type !== "video") return { ok: false, problem: "a carousel item is neither a picture nor a clip" };
+
+    const src = url(item.src);
+    if (src === null) return { ok: false, problem: "a carousel item is not one uploaded for this article" };
+    if (isClip(src) !== (type === "video")) return { ok: false, problem: "a carousel item is not the kind it says" };
+    if (seen.has(src)) continue;
+    seen.add(src);
+
+    const thumbnail = item.thumbnail === undefined ? undefined : url(item.thumbnail);
+    const poster = item.poster === undefined ? undefined : url(item.poster);
+    if (thumbnail === null || poster === null) return { ok: false, problem: "a carousel item is not one uploaded for this article" };
+
+    const fallback = type === "image" ? thumbnailOf(src) : undefined;
+    items.push({
+      type,
+      src,
+      ...(thumbnail ?? fallback ? { thumbnail: thumbnail ?? fallback } : {}),
+      ...(poster ? { poster } : {}),
+      alt: text(item.alt),
+      caption: text(item.caption),
+    });
+  }
+  return { ok: true, items };
+}
+
+/** One published file, as the folder and media id it is stored under. */
+const fileOf = (url: string | undefined): string | null => {
+  const location = url ? locateMedia(url) : null;
+  return location ? `${location.activityId}/${location.mediaId}` : null;
+};
 
 /** The fields, checked with the same rules a Telegram edit is held to. */
 export function parseArticle(raw: unknown): { ok: true; input: Omit<ArticleInput, "doc">; doc: unknown } | { ok: false; problem: string } {
@@ -110,23 +178,37 @@ export async function publishArticle(
   const parsed = parseArticle(raw);
   if (!parsed.ok) return { status: "invalid", problem: parsed.problem };
 
+  // Every record, not only this one: an update must not delete a file that
+  // another article still shows, and only the whole feed can say which those are.
   let existing: PublicRecord | null = null;
+  let others: PublicRecord[] = [];
   if (key.recordId !== null) {
+    let all: PublicRecord[];
     try {
-      existing = await findRecord(env, key.recordId, ALL_CHUNKS);
+      all = await loadRecords(env, Number.POSITIVE_INFINITY, ALL_CHUNKS);
     } catch {
       return { status: "failed" };
     }
+    existing = all.find((record) => record.id === key.recordId) ?? null;
     if (existing === null) return { status: "gone" };
+    others = all.filter((record) => record.id !== key.recordId);
   }
 
-  // Pictures uploaded with this key, and the ones the article already had.
+  // Uploads made with this key, and the files the article already shows.
   const media = env.MEDIA_BASE_URL.replace(/\/$/, "");
   const folder = `${media}/media/activity-${key.activityId}/`;
   const kept = new Map((existing?.media ?? []).filter((item) => item.type === "image").map((item) => [item.src, item]));
-  const cleaned = cleanDoc(parsed.doc, { allowSrc: (src) => src.startsWith(folder) || kept.has(src) });
+  const existingUrls = new Set(
+    (existing?.media ?? []).flatMap((item) => [item.src, item.thumbnail, item.poster].filter(Boolean) as string[]),
+  );
+  const allowed = (url: string) => url.startsWith(folder) || existingUrls.has(url);
+
+  const cleaned = cleanDoc(parsed.doc, { allowSrc: (src) => !isClip(src) && (src.startsWith(folder) || kept.has(src)) });
   if (!cleaned.ok) return { status: "invalid", problem: cleaned.problem };
   const doc = cleaned.doc;
+
+  const carousel = parseCarousel((raw as Record<string, unknown>).carousel, allowed);
+  if (!carousel.ok) return { status: "invalid", problem: carousel.problem };
 
   const figures = docFigures(doc);
   const seen = new Set<string>();
@@ -156,15 +238,20 @@ export async function publishArticle(
     return { status: "failed" };
   }
 
-  // A video cannot sit in the text, so an article opened for an update keeps
-  // the ones it had, after its pictures, where the page shows them in the
-  // carousel under the article.
-  const videos = (existing?.media ?? []).filter((item) => item.type === "video");
+  // The carousel first, so its first item is the cover a listing card leads
+  // with, then whatever the text places that the carousel does not already
+  // hold. A page that sent no carousel is one from before it could be edited:
+  // that article keeps the clips it had, after its pictures, as it always did.
+  const inCarousel = new Set((carousel.items ?? []).map((item) => item.src));
+  const recordMedia =
+    carousel.items === null
+      ? [...pictures, ...(existing?.media ?? []).filter((item) => item.type === "video")]
+      : [...carousel.items, ...pictures.filter((item) => !inCarousel.has(item.src))];
 
   const fields = {
     ...parsed.input,
     body: docLead(doc) || null,
-    media: [...pictures, ...videos],
+    media: recordMedia,
     bodyFormat: "rich" as const,
     doc: docId,
   };
@@ -192,11 +279,18 @@ export async function publishArticle(
     if (result.status === "failed") return result.reason === "not-found" ? { status: "gone" } : { status: "failed" };
     record = result.record;
 
-    // Pictures the article no longer shows, each by its own media id, so a
-    // picture still in the text is never caught by a folder-wide delete. They
-    // are unreferenced from this moment, which is what makes deleting safe.
+    // Files the article no longer shows, each by its own media id, so one
+    // still shown is never caught by a folder-wide delete. Not one another
+    // article shows either: a record can carry files from any folder, and the
+    // folder a file sits in says nothing about who else uses it.
+    const inUse = new Set(
+      [...recordMedia, ...others.flatMap((record) => record.media ?? [])]
+        .flatMap((item) => [fileOf(item.src), fileOf(item.thumbnail), fileOf(item.poster)])
+        .filter((file): file is string => file !== null),
+    );
     for (const item of existing.media ?? []) {
-      if (item.type !== "image" || seen.has(item.src)) continue;
+      const file = fileOf(item.src);
+      if (file === null || inUse.has(file)) continue;
       const location = locateMedia(item.src);
       if (location) await deletePublishedItem(env.MEDIA_BUCKET, location);
     }

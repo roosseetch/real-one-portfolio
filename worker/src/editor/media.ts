@@ -1,5 +1,7 @@
 /**
- * A picture uploaded from the article editor, on its way through the sanitiser.
+ * A picture or clip uploaded from the article editor, on its way through the
+ * sanitiser. A picture goes into the text or the carousel; a clip only ever
+ * into the carousel, since the text has nowhere to play one.
  *
  * The Worker still never writes the media bucket. A picture from the editor
  * takes the road every Telegram photo takes — the private bucket, a GitHub
@@ -31,7 +33,7 @@ export type UploadResult =
   | { status: "uploaded"; uploadId: string }
   | { status: "too-large" }
   | { status: "length-required" }
-  | { status: "not-a-picture"; label: string | null }
+  | { status: "unsupported"; label: string | null }
   | { status: "unavailable" };
 
 /**
@@ -40,7 +42,7 @@ export type UploadResult =
  * Buffered rather than streamed for the reason storeOriginal gives: the format
  * is read from the first bytes, and nothing is written until it has been.
  */
-export async function uploadPicture(
+export async function uploadMedia(
   env: EditorMediaEnv,
   key: EditorKey,
   keyHash: string,
@@ -63,9 +65,10 @@ export async function uploadPicture(
   if (buffer.byteLength > MAX_UPLOAD_BYTES) return { status: "too-large" };
 
   const format = sniff(new Uint8Array(buffer, 0, Math.min(SNIFF_BYTES, buffer.byteLength)));
-  // Pictures only: a video in an article's text is not something the page draws.
-  if (format === null || !format.open || format.kind !== "image") {
-    return { status: "not-a-picture", label: format?.label ?? null };
+  // Whatever the sanitiser can open: the same formats a Telegram message may
+  // carry. Where it may go — text or carousel — is the publish route's check.
+  if (format === null || !format.open) {
+    return { status: "unsupported", label: format?.label ?? null };
   }
 
   const mediaId = randomId();
@@ -84,7 +87,7 @@ export async function uploadPicture(
     source: { chatId: key.chatId, senderId: 0, messageId: 0 },
     activityId: key.activityId,
     mediaGroupId: null,
-    originals: [{ mediaId, type: "image", fileId: "", key: objectKey, bytes: buffer.byteLength }],
+    originals: [{ mediaId, type: format.kind, fileId: "", key: objectKey, bytes: buffer.byteLength }],
     mediaDeclined: false,
     input: { text: "" },
     record: null,
@@ -116,12 +119,20 @@ export async function uploadPicture(
 
 export type UploadStatus =
   | { status: "processing" }
-  | { status: "ready"; src: string }
+  | {
+      status: "ready";
+      type: "image" | "video";
+      src: string;
+      thumbnail?: string;
+      poster?: string;
+      /** What a clip's transcode visibly changed, in words for the author. Empty for a picture. */
+      changes: string[];
+    }
   | { status: "failed" }
   | { status: "unknown" };
 
-/** Where a picture uploaded with this key has got to. Another key's upload is "unknown". */
-export async function pictureStatus(
+/** Where an upload made with this key has got to. Another key's upload is "unknown". */
+export async function uploadStatus(
   env: EditorMediaEnv,
   keyHash: string,
   uploadId: string,
@@ -130,7 +141,16 @@ export async function pictureStatus(
   if (draft === null || (draft.editor ?? null)?.keyHash !== keyHash) return { status: "unknown" };
 
   if (draft.state === "processing") return { status: "processing" };
-  const src = draft.processed?.media[0]?.src;
-  if (draft.state === "published" && src) return { status: "ready", src };
+  const item = draft.processed?.media[0];
+  if (draft.state === "published" && item?.src) {
+    return {
+      status: "ready",
+      type: item.type,
+      src: item.src,
+      ...(item.thumbnail ? { thumbnail: item.thumbnail } : {}),
+      ...(item.poster ? { poster: item.poster } : {}),
+      changes: item.visibleChanges ?? [],
+    };
+  }
   return { status: "failed" };
 }

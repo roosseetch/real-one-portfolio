@@ -7,10 +7,10 @@
  * converted here, once, when the editor opens them; publishing then stores the
  * result as a document like any other.
  *
- * Nothing on the page is dropped on the way. Every picture the record shows
- * ends up as a figure — where the Markdown placed it, or after the text if
- * nothing did — because publishing rebuilds the record's pictures from the
- * document's figures, and a picture left out of it would leave the site.
+ * Nothing on the page is dropped on the way. A picture the Markdown placed
+ * becomes a figure where it was; every other picture and clip is the
+ * carousel's, which the editor opens beside the text (editor-carousel.ts) and
+ * publishes with it — the same split the page itself shows.
  */
 import type { ActivityMedia, ActivityRecord } from "./activity";
 import { parseProse, type InlineRun } from "./prose";
@@ -96,12 +96,5 @@ function fromPlain(body: string | null | undefined): DocNode[] {
 export function docFromRecord(record: ActivityRecord): RichDoc {
   const placed = new Set<number>();
   const content = record.bodyFormat === "markdown" ? fromMarkdown(record, placed) : fromPlain(record.body);
-
-  // Pictures the text did not place go after it, in the order the record had
-  // them. A video stays where it was, in the carousel under the article.
-  (record.media ?? []).forEach((item, index) => {
-    if (item.type === "image" && !placed.has(index)) content.push(figure(item));
-  });
-
   return { type: "doc", content: content.length > 0 ? content : [{ type: "paragraph" }] };
 }

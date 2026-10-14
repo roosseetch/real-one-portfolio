@@ -2,8 +2,8 @@
  * The article editor's API, called by the site's /admin/ page.
  *
  *   GET  /editor/session         what the key may do, and the article it opens
- *   POST /editor/media           a picture for the text (raw bytes)
- *   GET  /editor/media/<id>      whether that picture is ready yet
+ *   POST /editor/media           a picture or clip, for the text or the carousel (raw bytes)
+ *   GET  /editor/media/<id>      whether it is ready yet
  *   POST /editor/publish         the article, as JSON
  *   POST /editor/discard         end the link and remove what was never published
  *
@@ -18,7 +18,7 @@ import { ALL_CHUNKS, findRecord } from "../content/recent";
 import { isValidId } from "../ids";
 import { discardKey, type EditorDiscardEnv } from "./discard";
 import { lookupKey, presentedKey } from "./keys";
-import { pictureStatus, uploadPicture, type EditorMediaEnv } from "./media";
+import { uploadMedia, uploadStatus, type EditorMediaEnv } from "./media";
 import { publishArticle, type EditorPublishEnv } from "./publish";
 
 export interface EditorEnv extends ContactOriginEnv, EditorMediaEnv, EditorPublishEnv, EditorDiscardEnv {}
@@ -77,7 +77,7 @@ export async function handleEditorRequest(request: Request, env: EditorEnv): Pro
   }
 
   if (request.method === "POST" && path === "media") {
-    const result = await uploadPicture(env, key, hash, request);
+    const result = await uploadMedia(env, key, hash, request);
     switch (result.status) {
       case "uploaded":
         return reply(202, { status: "processing", uploadId: result.uploadId });
@@ -85,8 +85,8 @@ export async function handleEditorRequest(request: Request, env: EditorEnv): Pro
         return reply(413, { status: "too-large" });
       case "length-required":
         return reply(411, { status: "length-required" });
-      case "not-a-picture":
-        return reply(415, { status: "not-a-picture", label: result.label });
+      case "unsupported":
+        return reply(415, { status: "unsupported", label: result.label });
       case "unavailable":
         return reply(503, { status: "unavailable" });
     }
@@ -95,7 +95,7 @@ export async function handleEditorRequest(request: Request, env: EditorEnv): Pro
   if (request.method === "GET" && path.startsWith("media/")) {
     const uploadId = path.slice("media/".length);
     if (!isValidId(uploadId)) return reply(404, { status: "unknown" });
-    const status = await pictureStatus(env, hash, uploadId);
+    const status = await uploadStatus(env, hash, uploadId);
     return reply(status.status === "unknown" ? 404 : 200, status);
   }
 
