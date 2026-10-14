@@ -3,6 +3,13 @@ import "./editor.css";
 import type { Editor, JSONContent } from "@tiptap/core";
 
 import { activityHref, el, renderRecord, type ActivityMedia, type ActivityRecord } from "./activity";
+import {
+  createCarouselPanel,
+  entriesFrom,
+  restoredEntries,
+  type CarouselEntry,
+  type ReadyUpload,
+} from "./editor-carousel";
 import { docFromRecord } from "./editor-doc";
 import { forgetKey, takeKey } from "./editor-key";
 import { createEditor, figureStates, updateFigures } from "./editor-tiptap";
@@ -43,6 +50,8 @@ interface Draft {
   eventDate: string;
   tags: string;
   doc: JSONContent;
+  /** Absent on a draft saved before the carousel could be edited. */
+  carousel?: CarouselEntry[];
   savedAt: string;
 }
 
@@ -245,10 +254,50 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
         eventDate: eventDate.value,
         tags: tags.value,
         doc: editor.getJSON(),
+        carousel: carousel.entries(),
         savedAt: new Date().toISOString(),
       });
     }, 800);
   };
+
+  /* ------------------------------------------------------------ uploads */
+
+  /** One file to the Worker, for the text or the carousel alike. Answers its upload id. */
+  const sendFile = async (file: File): Promise<string> => {
+    const answer = await api(key, "media", {
+      method: "POST",
+      headers: { "content-type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    return String(answer.uploadId);
+  };
+
+  const refusal = (error: unknown) =>
+    error instanceof RangeError || (error instanceof ApiError && error.status === 413)
+      ? "it is larger than 20 MB"
+      : error instanceof ApiError && error.status === 415
+        ? "it is not a photo or video the site can publish"
+        : "it could not be uploaded";
+
+  /* ------------------------------------------------------------ carousel */
+
+  // What the article shows that its text does not place. A draft kept in this
+  // browser wins, as its text does; otherwise the record's own.
+  const placedAtStart = new Set(docFigures(initial).map((figure) => figure.src));
+  const carousel = createCarouselPanel({
+    initial:
+      restoredEntries(restored?.carousel) ?? (record ? entriesFrom(record.media ?? [], placedAtStart) : []),
+    upload: async (file) => {
+      const uploadId = await sendFile(file);
+      say(`"${file.name}" is being prepared. It appears in the carousel when it is ready.`);
+      return uploadId;
+    },
+    onRejected: (file, error) => say(`"${file.name}" was not added: ${refusal(error)}.`, "error"),
+    onChange: () => {
+      scheduleSave();
+      refresh();
+    },
+  });
 
   const editor: Editor = createEditor(surface, restored?.doc ?? (initial as JSONContent), () => {
     scheduleSave();
@@ -410,22 +459,12 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
     const local = `local-${Date.now()}-${uploadCounter++}`;
     chain().insertContent({ type: "figure", attrs: { upload: local } }).run();
     try {
-      const answer = await api(key, "media", {
-        method: "POST",
-        headers: { "content-type": file.type || "application/octet-stream" },
-        body: file,
-      });
-      updateFigures(editor, (attrs) => attrs.upload === local, { upload: answer.uploadId });
+      const uploadId = await sendFile(file);
+      updateFigures(editor, (attrs) => attrs.upload === local, { upload: uploadId });
       say(`"${file.name}" is being prepared. It appears in the text when it is ready.`);
     } catch (error) {
       updateFigures(editor, (attrs) => attrs.upload === local, { failed: true });
-      const reason =
-        error instanceof ApiError && error.status === 413
-          ? "it is larger than 20 MB"
-          : error instanceof ApiError && error.status === 415
-            ? "it is not a picture the site can publish"
-            : "it could not be uploaded";
-      say(`"${file.name}" was not added: ${reason}.`, "error");
+      say(`"${file.name}" was not added: ${refusal(error)}.`, "error");
     }
     refresh();
   };
@@ -490,12 +529,14 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
   let discarding = false;
 
   function refresh() {
-    const { pending, failed } = figureStates(editor);
+    const figures = figureStates(editor);
+    const pending = [...figures.pending, ...carousel.pending()];
+    const failed = figures.failed + carousel.failed();
     publishButton.disabled = expired || publishing || discarding || pending.length > 0;
     discardButton.disabled = publishing || discarding;
     publishButton.textContent = publishedId ? "Publish changes" : "Publish";
-    if (pending.length > 0) publishButton.title = "Waiting for pictures to finish";
-    else if (failed > 0) publishButton.title = "Remove the pictures that failed first";
+    if (pending.length > 0) publishButton.title = "Waiting for photos and videos to finish";
+    else if (failed > 0) publishButton.title = "Remove the photos and videos that failed first";
     else publishButton.title = "Publish the article";
 
     for (const [element, active] of toggles) element.setAttribute("aria-pressed", String(active()));
@@ -532,23 +573,35 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
   tick();
   const ticking = window.setInterval(tick, 30_000);
 
-  /* Pictures being sanitised are asked after until they are ready or have failed. */
+  /* Uploads being sanitised are asked after until they are ready or have failed,
+     in the text and in the carousel alike. */
   const polling = window.setInterval(async () => {
-    for (const uploadId of figureStates(editor).pending) {
+    const inCarousel = new Set(carousel.pending());
+    for (const uploadId of [...figureStates(editor).pending, ...inCarousel]) {
       if (uploadId.startsWith("local-")) continue;
+      const failed = () =>
+        inCarousel.has(uploadId)
+          ? carousel.fail(uploadId)
+          : updateFigures(editor, (attrs) => attrs.upload === uploadId, { failed: true });
       try {
         const answer = await api(key, `media/${uploadId}`);
-        if (answer.status === "ready") {
+        if (answer.status === "ready" && inCarousel.has(uploadId)) {
+          carousel.ready(uploadId, answer as unknown as ReadyUpload);
+          const changes = Array.isArray(answer.changes) ? (answer.changes as string[]) : [];
+          say(
+            changes.length > 0
+              ? `A video is ready, with changes: ${changes.join(" ")} Check it in the preview.`
+              : "Ready in the carousel. Describe it below the picture, or give it a caption.",
+          );
+        } else if (answer.status === "ready") {
           updateFigures(editor, (attrs) => attrs.upload === uploadId, { src: answer.src, upload: null });
           say("A picture is ready. Select it to describe it or give it a caption.");
         } else if (answer.status === "failed") {
-          updateFigures(editor, (attrs) => attrs.upload === uploadId, { failed: true });
-          say("A picture could not be processed. Select it, delete it, and try another.", "error");
+          failed();
+          say("A photo or video could not be processed. Remove it and try another.", "error");
         }
       } catch (error) {
-        if (error instanceof ApiError && error.status === 404) {
-          updateFigures(editor, (attrs) => attrs.upload === uploadId, { failed: true });
-        }
+        if (error instanceof ApiError && error.status === 404) failed();
       }
       refresh();
     }
@@ -556,20 +609,20 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
 
   /* ------------------------------------------------------------ preview and publish */
 
+  /** The record's media as the Worker will build it: the carousel, then what the text places besides. */
   function currentRecord(doc: RichDoc): ActivityRecord {
-    const media: ActivityMedia[] = docFigures(doc).map((figure) => ({
-      type: "image",
-      src: figure.src,
-      alt: figure.alt,
-      caption: figure.caption,
-    }));
+    const shown = carousel.media();
+    const inCarousel = new Set(shown.map((item) => item.src));
+    const placed: ActivityMedia[] = docFigures(doc)
+      .filter((figure) => !inCarousel.has(figure.src))
+      .map((figure) => ({ type: "image", src: figure.src, alt: figure.alt, caption: figure.caption }));
     return {
       id: publishedId ?? "preview",
       title: title.value.trim() || "Untitled",
       summary: summary.value.trim() || null,
       eventDate: eventDate.value || null,
       tags: tags.value.split(",").map((tag) => tag.trim()).filter(Boolean),
-      media: [...media, ...(record?.media ?? []).filter((item) => item.type === "video")],
+      media: [...shown, ...placed],
       bodyFormat: "rich",
       body: null,
     };
@@ -591,12 +644,14 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
       preview.replaceChildren(renderRecord(currentRecord(doc), { heading: "h1", doc }));
       preview.hidden = false;
       surface.hidden = true;
+      carousel.element.hidden = true;
       toolbar.hidden = true;
       inspector.hidden = true;
       previewButton.textContent = "Back to editing";
     } else {
       preview.hidden = true;
       surface.hidden = false;
+      carousel.element.hidden = false;
       toolbar.hidden = false;
       previewButton.textContent = "Preview";
       editor.commands.focus();
@@ -609,9 +664,8 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
       title.focus();
       return;
     }
-    const { failed } = figureStates(editor);
-    if (failed > 0) {
-      say("Remove the pictures that could not be processed before publishing.", "error");
+    if (figureStates(editor).failed + carousel.failed() > 0) {
+      say("Remove the photos and videos that could not be processed before publishing.", "error");
       return;
     }
     const doc = documentForPublish();
@@ -630,6 +684,7 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
           eventDate: eventDate.value,
           tags: tags.value.split(","),
           doc,
+          carousel: carousel.media(),
         }),
       });
       publishedId = answer.recordId as string;
@@ -721,7 +776,7 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
   const head = el("header", "editor-head");
   head.append(heading, expiry);
 
-  root.replaceChildren(head, status, fields, toolbar, inspector, surface, preview, actions);
+  root.replaceChildren(head, status, fields, carousel.element, toolbar, inspector, surface, preview, actions);
 
   if (restored) {
     const discard = button("Discard them", "Discard the unsaved changes and start from the published article", () => {

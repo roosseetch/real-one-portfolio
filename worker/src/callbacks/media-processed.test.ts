@@ -712,6 +712,43 @@ describe("a picture uploaded from the article editor", () => {
     expect(sent).toEqual([]);
   });
 
+  /* A clip for the carousel. The author is looking at it in the editor, so a
+     visible change is told rather than held for approval. */
+  it("records a clip with its poster and what the transcode changed, without holding it", async () => {
+    const draft = await editorDraft();
+    const clip: Draft = {
+      ...draft,
+      originals: [{ mediaId: "media0", type: "video", fileId: "", key: `originals/${draft.activityId}/media0.mov` }],
+    };
+    await saveDraft(storage.bucket, clip);
+
+    const response = await handleMediaProcessed(
+      await callback(videoPayload(clip, { visibleChanges: ["The audio was removed."] })),
+      env(),
+    );
+
+    expect(await response.json()).toEqual({ status: "recorded" });
+    const stored = await loadDraft(storage.bucket, draft.draftId);
+    expect(stored?.state).toBe("published");
+    expect(stored?.processed?.media[0]).toMatchObject({
+      type: "video",
+      src: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-1280.mp4`,
+      poster: `${MEDIA_BASE}/media/activity-${draft.activityId}/media0-poster-1280.webp`,
+      visibleChanges: ["The audio was removed."],
+    });
+  });
+
+  it("refuses a clip whose poster is outside the upload's folder", async () => {
+    const draft = await editorDraft();
+    const clip: Draft = {
+      ...draft,
+      originals: [{ mediaId: "media0", type: "video", fileId: "", key: `originals/${draft.activityId}/media0.mov` }],
+    };
+    await saveDraft(storage.bucket, clip);
+    const body = videoPayload(clip, { poster: `${MEDIA_BASE}/media/activity-zzzzzzzzzzzzzzzz/media0-poster-1280.webp` });
+    expect((await handleMediaProcessed(await callback(body), env())).status).toBe(400);
+  });
+
   it("answers a repeat of the same callback rather than failing the run", async () => {
     const draft = await editorDraft();
     await handleMediaProcessed(await callback(payload(draft)), env());

@@ -317,6 +317,107 @@ describe("editor routes: publishing", () => {
     expect(media.objects.has("media/activity-cccccccccccccccc/eeeeeeeeeeeeeeee-800.webp")).toBe(false);
   });
 
+  it("puts the carousel first, then what the text places that the carousel does not hold", async () => {
+    publish([[record()]]);
+    const { key } = await mintKey(env(), "create", CHAT, null);
+    const folder = (await call("session", { key })).json.mediaFolder as string;
+    const placed = `${folder}abcdefghjkmnpqrs-1200.webp`;
+    const doc = { type: "doc", content: [paragraph("Before."), { type: "figure", attrs: { src: placed, alt: "In the text" } }] };
+    const carousel = [
+      { type: "video", src: `${folder}cccccccccccccccc-1280.mp4`, poster: `${folder}cccccccccccccccc-poster-1280.webp`, alt: "The hall" },
+      { type: "image", src: `${folder}dddddddddddddddd-1600.webp`, alt: " The stand ", caption: "Day two" },
+    ];
+
+    const { status, json } = await call("publish", { method: "POST", key, body: JSON.stringify(article({ doc, carousel })) });
+    expect(status).toBe(200);
+
+    const live = liveRecords().find((entry) => entry.id === json.recordId)!;
+    expect(live.media).toEqual([
+      {
+        type: "video",
+        src: `${folder}cccccccccccccccc-1280.mp4`,
+        poster: `${folder}cccccccccccccccc-poster-1280.webp`,
+        alt: "The hall",
+        caption: null,
+      },
+      {
+        type: "image",
+        src: `${folder}dddddddddddddddd-1600.webp`,
+        thumbnail: `${folder}dddddddddddddddd-320.webp`,
+        alt: "The stand",
+        caption: "Day two",
+      },
+      { type: "image", src: placed, thumbnail: `${folder}abcdefghjkmnpqrs-320.webp`, alt: "In the text", caption: null },
+    ]);
+  });
+
+  it("refuses a carousel item from outside the article's own folders, and a clip in the text", async () => {
+    publish([[record()]]);
+    const { key } = await mintKey(env(), "create", CHAT, null);
+    const folder = (await call("session", { key })).json.mediaFolder as string;
+    const foreign = [{ type: "image", src: `${MEDIA}/media/activity-zzzzzzzzzzzzzzzz/x-800.webp` }];
+    const clipInText = { type: "doc", content: [{ type: "figure", attrs: { src: `${folder}cccccccccccccccc-1280.mp4` } }] };
+    const mislabelled = [{ type: "image", src: `${folder}cccccccccccccccc-1280.mp4` }];
+
+    expect((await call("publish", { method: "POST", key, body: JSON.stringify(article({ carousel: foreign })) })).status).toBe(422);
+    expect((await call("publish", { method: "POST", key, body: JSON.stringify(article({ doc: clipInText })) })).status).toBe(422);
+    expect((await call("publish", { method: "POST", key, body: JSON.stringify(article({ carousel: mislabelled })) })).status).toBe(422);
+    expect(liveRecords()).toHaveLength(1);
+  });
+
+  /* The record that found this: three pictures from other activities' folders,
+     none of them in its text. Republishing it used to drop all three and delete
+     their files. Listed in the carousel, they are kept where they are. */
+  it("keeps the pictures an update lists in its carousel, from whatever folder", async () => {
+    const urls = ["eeeeeeeeeeeeeeee", "ffffffffffffffff"].map((id) => `${MEDIA}/media/activity-${id}/${id}-960.webp`);
+    publish([[record({ media: urls.map((src) => ({ type: "image", src, alt: null, caption: null })) })]]);
+    media.objects.set("media/activity-eeeeeeeeeeeeeeee/eeeeeeeeeeeeeeee-960.webp", "x");
+    media.objects.set("media/activity-ffffffffffffffff/ffffffffffffffff-960.webp", "x");
+    const { key } = await mintKey(env(), "update", CHAT, RECORD);
+
+    const carousel = [{ type: "image", src: urls[1] }, { type: "image", src: urls[0] }];
+    await call("publish", { method: "POST", key, body: JSON.stringify(article({ carousel })) });
+
+    expect(liveRecords()[0].media.map((item) => item.src)).toEqual([urls[1], urls[0]]);
+    expect(media.objects.has("media/activity-eeeeeeeeeeeeeeee/eeeeeeeeeeeeeeee-960.webp")).toBe(true);
+    expect(media.objects.has("media/activity-ffffffffffffffff/ffffffffffffffff-960.webp")).toBe(true);
+  });
+
+  it("deletes a clip an update takes out of the carousel, but never a file another article shows", async () => {
+    const clip = `${MEDIA}/media/activity-cccccccccccccccc/dddddddddddddddd-1280.mp4`;
+    const shared = `${MEDIA}/media/activity-cccccccccccccccc/eeeeeeeeeeeeeeee-800.webp`;
+    publish([
+      [
+        record({
+          media: [
+            { type: "video", src: clip, alt: null, caption: null },
+            { type: "image", src: shared, alt: null, caption: null },
+          ],
+        }),
+        record({ id: "bbbbbbbbbbbbbbbb", title: "Another", media: [{ type: "image", src: shared, alt: null, caption: null }] }),
+      ],
+    ]);
+    media.objects.set("media/activity-cccccccccccccccc/dddddddddddddddd-1280.mp4", "x");
+    media.objects.set("media/activity-cccccccccccccccc/eeeeeeeeeeeeeeee-800.webp", "x");
+    const { key } = await mintKey(env(), "update", CHAT, RECORD);
+
+    await call("publish", { method: "POST", key, body: JSON.stringify(article({ carousel: [] })) });
+
+    expect(liveRecords().find((entry) => entry.id === RECORD)?.media).toEqual([]);
+    expect(media.objects.has("media/activity-cccccccccccccccc/dddddddddddddddd-1280.mp4")).toBe(false);
+    expect(media.objects.has("media/activity-cccccccccccccccc/eeeeeeeeeeeeeeee-800.webp")).toBe(true);
+  });
+
+  it("keeps an article's clips when the page sends no carousel at all", async () => {
+    const clip = `${MEDIA}/media/activity-cccccccccccccccc/dddddddddddddddd-1280.mp4`;
+    publish([[record({ media: [{ type: "video", src: clip, alt: null, caption: null }] })]]);
+    const { key } = await mintKey(env(), "update", CHAT, RECORD);
+
+    await call("publish", { method: "POST", key, body: JSON.stringify(article()) });
+
+    expect(liveRecords()[0].media.map((item) => item.src)).toEqual([clip]);
+  });
+
   it("refuses an article with no title", async () => {
     publish([[record()]]);
     const { key } = await mintKey(env(), "create", CHAT, null);
@@ -349,7 +450,7 @@ describe("editor routes: pictures", () => {
       processed: { media: [{ sourceId: "x", type: "image", src, visibleChanges: [] }], at: "now" },
     });
 
-    expect((await call(`media/${json.uploadId}`, { key })).json).toEqual({ status: "ready", src });
+    expect((await call(`media/${json.uploadId}`, { key })).json).toEqual({ status: "ready", type: "image", src, changes: [] });
 
     const other = await mintKey(env(), "create", CHAT, null);
     expect((await call(`media/${json.uploadId}`, { key: other.key })).status).toBe(404);
@@ -360,10 +461,42 @@ describe("editor routes: pictures", () => {
     expect((await call("media", { method: "POST", key, body: bodyFor("png"), noLength: true })).status).toBe(411);
   });
 
-  it("refuses something that is not a picture", async () => {
+  it("refuses something that is neither a picture nor a clip", async () => {
     const { key } = await mintKey(env(), "create", CHAT, null);
-    expect((await call("media", { method: "POST", key, body: bodyFor("mp4") })).status).toBe(415);
     expect((await call("media", { method: "POST", key, body: bodyFor("pdf") })).status).toBe(415);
+  });
+
+  it("files a clip for the carousel as a video, and reports its poster when it is ready", async () => {
+    const { key } = await mintKey(env(), "create", CHAT, null);
+    const { status, json } = await call("media", { method: "POST", key, body: bodyFor("mp4") });
+    expect(status).toBe(202);
+
+    const draft = (await loadDraft(storage.bucket, json.uploadId))!;
+    expect(draft.originals[0].type).toBe("video");
+    const base = `${MEDIA}/media/activity-${draft.activityId}`;
+    await saveDraft(storage.bucket, {
+      ...transition(draft, "published"),
+      processed: {
+        media: [
+          {
+            sourceId: "x",
+            type: "video",
+            src: `${base}/x-1280.mp4`,
+            poster: `${base}/x-poster-1280.webp`,
+            visibleChanges: ["The audio was removed."],
+          },
+        ],
+        at: "now",
+      },
+    });
+
+    expect((await call(`media/${json.uploadId}`, { key })).json).toEqual({
+      status: "ready",
+      type: "video",
+      src: `${base}/x-1280.mp4`,
+      poster: `${base}/x-poster-1280.webp`,
+      changes: ["The audio was removed."],
+    });
   });
 });
 

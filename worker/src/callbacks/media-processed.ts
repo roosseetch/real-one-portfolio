@@ -163,7 +163,7 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   // A picture uploaded from the article editor. Nothing is published and nobody
   // is messaged: the URLs are kept on the draft, and the editor page — which is
   // asking after this very draft — puts the picture into the text itself.
-  if ((draft.editor ?? null) !== null) return recordEditorPicture(env, draft, body.media);
+  if ((draft.editor ?? null) !== null) return recordEditorMedia(env, draft, body.media);
 
   // An attachment carries no record — the words are already on the site, and
   // this draft exists only to put files beside them — so the two are told apart
@@ -216,15 +216,18 @@ export async function handleMediaProcessed(request: Request, env: CallbackEnv): 
   return Response.json({ status: "published", url: result.url });
 }
 
-async function recordEditorPicture(
+async function recordEditorMedia(
   env: CallbackEnv,
   draft: Draft,
   received: CallbackMedia[],
 ): Promise<Response> {
   // In the folder the key it was uploaded with names, and nowhere else: the
-  // publish endpoint accepts a picture only from there.
+  // publish endpoint accepts an upload only from there. A clip's poster too.
   const folder = `${env.MEDIA_BASE_URL.replace(/\/$/, "")}/media/activity-${draft.activityId}/`;
-  if (!received.every((item) => item.type === "image" && item.src.startsWith(folder))) return refuse(400);
+  const inFolder = (url: string | undefined) => url === undefined || url.startsWith(folder);
+  if (!received.every((item) => inFolder(item.src) && inFolder(item.thumbnail) && inFolder(item.poster))) {
+    return refuse(400);
+  }
 
   // The link it was uploaded with was discarded while this ran. Nothing can
   // publish the picture any more, so it goes now rather than sitting in the
@@ -244,7 +247,10 @@ async function recordEditorPicture(
     type: item.type,
     src: item.src,
     ...(item.thumbnail ? { thumbnail: item.thumbnail } : {}),
-    visibleChanges: [],
+    ...(item.poster ? { poster: item.poster } : {}),
+    // Kept to be told, not to be approved: the author is looking at the clip in
+    // the editor, which is the final look the Telegram flow holds a draft for.
+    visibleChanges: item.visibleChanges,
   }));
 
   try {

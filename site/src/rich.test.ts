@@ -81,16 +81,16 @@ describe("renderRich", () => {
 describe("docFromRecord", () => {
   const picture = (n: number) => ({ type: "image" as const, src: `https://media.test/m/${n}-800.webp`, alt: `Picture ${n}`, caption: null });
 
-  it("turns a plain note into paragraphs, and puts its pictures after the text", () => {
+  /* Its pictures are the carousel's, which the editor opens beside the text. */
+  it("turns a plain note into paragraphs, and leaves its pictures to the carousel", () => {
     const doc = docFromRecord({
       id: "r",
       title: "t",
       body: "First paragraph\nsame paragraph\n\nSecond",
       media: [picture(1), { type: "video", src: "https://media.test/m/v.mp4" }],
     });
-    expect(doc.content.map((node) => node.type)).toEqual(["paragraph", "paragraph", "figure"]);
+    expect(doc.content.map((node) => node.type)).toEqual(["paragraph", "paragraph"]);
     expect(doc.content[0].content?.map((node) => node.type)).toEqual(["text", "hardBreak", "text"]);
-    expect(doc.content[2].attrs?.src).toBe("https://media.test/m/1-800.webp");
   });
 
   it("turns a Markdown article into blocks, keeping a figure where the text placed it", () => {
@@ -108,12 +108,11 @@ describe("docFromRecord", () => {
       "bulletList",
       "blockquote",
       "horizontalRule",
-      "figure",
     ]);
     expect(doc.content[0].content?.[0].text).toBe("Workshop 1: ");
     expect(doc.content[1].content?.[1]).toEqual({ type: "text", text: "bold", marks: [{ type: "bold" }] });
     expect(doc.content[2].attrs).toEqual({ src: "https://media.test/m/1-800.webp", alt: "The room", caption: null });
-    // The picture the text did not place still ends up in the article.
-    expect(doc.content[6].attrs?.src).toBe("https://media.test/m/0-800.webp");
+    // The picture the text did not place is the carousel's, not the text's.
+    expect(doc.content.filter((node) => node.type === "figure")).toHaveLength(1);
   });
 });
