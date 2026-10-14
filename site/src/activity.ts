@@ -12,7 +12,7 @@ import { openLightbox } from "./lightbox";
 import { avifFrom, pictureFor } from "./picture";
 import { parseProse, placedMedia, proseParagraphs, renderProse } from "./prose";
 import { renderRich } from "./rich";
-import { cleanDoc, docKey, type RichDoc } from "./rich-doc";
+import { cleanDoc, docFigures, docKey, type RichDoc } from "./rich-doc";
 import { routeById, routeHref } from "./routes";
 
 export interface ActivityMedia {
@@ -380,9 +380,9 @@ function mosaicImage(media: ActivityMedia, sizes?: string): HTMLElement {
   img.alt = "";
   img.loading = "lazy";
   img.decoding = "async";
-  // The large plate gets the ladder: it spans most of the card, and on a record
-  // with one picture all of it — 320 pixels across a 60rem card is a blur. The
-  // cells beside it are fixed by the grid at 5.5rem and keep the 320px file.
+  // Every cell gets the ladder, sized for where it sits: 320 pixels across the
+  // large plate is a blur, and so is it across a stack cell on the listing
+  // page, where the stack column is a third of a 60rem card.
   const srcset = sizes && media.type !== "video" ? derivativeSrcset(media.src) : null;
   if (srcset && sizes) {
     img.srcset = srcset;
@@ -407,14 +407,18 @@ function mediaMosaic(record: ActivityRecord, href: string): HTMLElement | null {
   if (media.length === 0) return null;
 
   const mosaic = el("div", `activity-mosaic${media.length === 1 ? " is-single" : ""}`);
-  // The width of the column on a phone, and at most the listing page's one card
-  // to a row past that. The landing page's two cards side by side are half of
-  // it, which this overstates by one rung of the ladder.
-  mosaic.append(mosaicImage(media[0], "(max-width: 48rem) 100vw, 60rem"));
+  // The width of the column on a phone, and past that the listing page's one
+  // card to a row — up to about 75rem inside the 80rem content width — or the
+  // two thirds of it the stack column leaves. The landing page's two cards side
+  // by side are narrower, which this overstates by a rung of the ladder.
+  const plate = media.length === 1 ? "75rem" : "50rem";
+  mosaic.append(mosaicImage(media[0], `(max-width: 48rem) 100vw, ${plate}`));
 
   if (media.length > 1) {
     const stack = el("div", "activity-mosaic-stack");
-    for (const item of media.slice(1, 3)) stack.append(mosaicImage(item));
+    // A third of that card: wide enough on the listing page that the 320px
+    // thumbnail is a blur on a 2x screen, so these get the ladder too.
+    for (const item of media.slice(1, 3)) stack.append(mosaicImage(item, "(max-width: 48rem) 5.5rem, 25rem"));
 
     const hidden = media.length - 3;
     if (hidden > 0) {
@@ -795,24 +799,52 @@ function richFigure(record: ActivityRecord, src: string, alt: string | null): HT
  * then — and for good, if it never does — it holds the record's plain-text lead,
  * so a reader is never left looking at nothing.
  */
-function richArticle(record: ActivityRecord, doc?: RichDoc): HTMLElement {
-  if (doc) return renderRich(doc, (src, alt) => richFigure(record, src, alt));
-
+function richArticle(record: ActivityRecord, onDoc: (doc: RichDoc | null) => void): HTMLElement {
   const holder = el("div", "prose");
   for (const paragraph of paragraphsOf(record.body)) holder.append(el("p", undefined, paragraph));
 
-  if (CONTENT_BASE && record.doc) {
-    fetchJson(`${CONTENT_BASE}/${docKey(record.id, record.doc)}`)
-      .then((data) => {
-        const cleaned = cleanDoc(data, {
-          allowSrc: (src) => Boolean(MEDIA_BASE) && src.startsWith(`${MEDIA_BASE}/media/`),
-        });
-        if (!cleaned.ok) throw new Error(cleaned.problem);
-        holder.replaceWith(renderRich(cleaned.doc, (src, alt) => richFigure(record, src, alt)));
-      })
-      .catch((error) => console.warn("Showing the article's lead only:", error));
+  if (!CONTENT_BASE || !record.doc) {
+    onDoc(null);
+    return holder;
   }
+
+  fetchJson(`${CONTENT_BASE}/${docKey(record.id, record.doc)}`)
+    .then((data) => {
+      const cleaned = cleanDoc(data, {
+        allowSrc: (src) => Boolean(MEDIA_BASE) && src.startsWith(`${MEDIA_BASE}/media/`),
+      });
+      if (!cleaned.ok) throw new Error(cleaned.problem);
+      holder.replaceWith(renderRich(cleaned.doc, (src, alt) => richFigure(record, src, alt)));
+      onDoc(cleaned.doc);
+    })
+    .catch((error) => {
+      console.warn("Showing the article's lead only:", error);
+      onDoc(null);
+    });
   return holder;
+}
+
+/**
+ * The record's pictures and clips that its text does not already show.
+ *
+ * Which ones the text shows is read from the text itself: the indexes a
+ * Markdown body names, or the pictures a rich document places — and none, for
+ * a rich document that never arrived, since the lead it falls back to places
+ * nothing. A rich record is not assumed to place every picture it has. One
+ * published by hand can carry pictures its document never mentions, and that
+ * assumption is what left such a record's page with no pictures at all.
+ */
+function unplacedMedia(record: ActivityRecord, doc: RichDoc | null): ActivityMedia[] {
+  const media = record.media ?? [];
+  if (doc) {
+    const placed = new Set(docFigures(doc).map((figure) => figure.src));
+    return media.filter((item) => item.type === "video" || !placed.has(item.src));
+  }
+  if (isMarkdown(record)) {
+    const placed = placedMedia(record.body);
+    return media.filter((_, index) => !placed.has(index));
+  }
+  return media;
 }
 
 export function renderRecord(record: ActivityRecord, options: RecordOptions = {}): HTMLElement {
@@ -856,30 +888,41 @@ export function renderRecord(record: ActivityRecord, options: RecordOptions = {}
   // An article shown whole is the one case that is not a run of paragraphs.
   const article = !listing && isMarkdown(record);
   const rich = !listing && (isRich(record) || options.doc !== undefined);
-  for (const block of shown.blocks) {
+
+  // A record shown on its own puts its pictures under the title and summary and
+  // ahead of the text, so they are the first thing seen rather than something
+  // found after reading everything. The summary is the first block when there
+  // is one; everything after it is the body.
+  const summary = shown.blocks.filter((block) => block.className === "activity-summary");
+  const rest = shown.blocks.filter((block) => block.className !== "activity-summary");
+  for (const block of summary) text.append(el("p", block.className, block.text));
+
+  // Filled once what the text places is known. That is at once for everything
+  // but a rich article being fetched, whose pictures wait for its document:
+  // putting all of them up first and taking back the ones the text places would
+  // move the whole page under the reader just as the text arrives.
+  const slot = el("div", "media-slot-carousel");
+  const fill = (doc: RichDoc | null) => {
+    const carousel = mediaCarousel(record, unplacedMedia(record, doc));
+    if (carousel) slot.replaceWith(carousel);
+    else slot.remove();
+  };
+  if (!listing) text.append(slot);
+
+  for (const block of rest) {
     if ((article || rich) && block.className === "activity-body") continue;
     text.append(el("p", block.className, block.text));
   }
   if (article) {
     text.append(renderProse(parseProse(record.body), (index, alt) => articleFigure(record, index, alt)));
   }
-  if (rich) text.append(richArticle(record, options.doc));
-
-  if (!listing) {
-    // What the text has already shown in place is not shown again below it.
-    // Every picture an editor-written article has is one its text places: the
-    // Worker builds its pictures from the document's figures. A video is kept
-    // from the record it was before, and still has the carousel.
-    const placed = rich
-      ? new Set((record.media ?? []).flatMap((item, index) => (item.type === "image" ? [index] : [])))
-      : article
-        ? placedMedia(record.body)
-        : new Set<number>();
-    const carousel = mediaCarousel(
-      record,
-      (record.media ?? []).filter((_, index) => !placed.has(index)),
-    );
-    if (carousel) text.append(carousel);
+  if (rich && options.doc) {
+    text.append(renderRich(options.doc, (src, alt) => richFigure(record, src, alt)));
+    fill(options.doc);
+  } else if (rich) {
+    text.append(richArticle(record, fill));
+  } else if (!listing) {
+    fill(null);
   }
 
   if (record.tags?.length) {

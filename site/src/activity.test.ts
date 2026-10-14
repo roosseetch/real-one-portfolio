@@ -382,19 +382,36 @@ describe("the photo stack on a listing card", () => {
     expect(cell.querySelector("source")).toBeNull();
   });
 
-  /* Three cells on a card that a reader is scrolling past: the smallest files
-     on the page, and the ones there are most of. */
-  it("offers each small mosaic cell its AVIF", () => {
-    const cells = [...listed([image(1), image(2), image(3)]).querySelectorAll(".activity-mosaic-stack .activity-mosaic-cell")];
+  /* A third of a 60rem card on the listing page, where the 320px thumbnail is
+     a blur on a 2x screen: the small cells get the ladder too, in both formats,
+     sized for the column they sit in. */
+  it("offers each small mosaic cell the ladder, in both formats", () => {
+    const ladder = (n: number) => ({
+      ...image(n),
+      src: `https://media.test/media/activity-1/s${n}-1200.webp`,
+      thumbnail: `https://media.test/media/activity-1/s${n}-320.webp`,
+    });
+    const cells = [...listed([ladder(1), ladder(2), ladder(3)]).querySelectorAll(".activity-mosaic-stack .activity-mosaic-cell")];
 
     expect(cells.length).toBe(2);
-    for (const cell of cells) {
+    for (const [index, cell] of cells.entries()) {
       const img = cell.querySelector("img") as HTMLImageElement;
       const source = cell.querySelector("source") as HTMLSourceElement;
+      const n = index + 2;
+      expect(img.getAttribute("srcset")).toBe(
+        `https://media.test/media/activity-1/s${n}-320.webp 320w, https://media.test/media/activity-1/s${n}-800.webp 800w, https://media.test/media/activity-1/s${n}-1200.webp 1200w`,
+      );
+      expect(img.getAttribute("sizes")).toBe("(max-width: 48rem) 5.5rem, 25rem");
       expect(source.type).toBe("image/avif");
-      expect(source.getAttribute("srcset")).toBe(img.getAttribute("src")?.replace(".webp", ".avif"));
+      expect(source.getAttribute("srcset")).toContain(`s${n}-1200.avif 1200w`);
+      expect(source.getAttribute("sizes")).toBe(img.getAttribute("sizes"));
       expect(img.getAttribute("loading")).toBe("lazy");
     }
+  });
+
+  it("sizes the large plate to the two thirds the stack leaves it", () => {
+    const img = listed([image(1), image(2)]).querySelector(".activity-mosaic > .activity-mosaic-cell img");
+    expect(img?.getAttribute("sizes")).toBe("(max-width: 48rem) 100vw, 50rem");
   });
 
   /** The large plate spans the card, and 320 pixels across it is a blur. */
@@ -407,6 +424,8 @@ describe("the photo stack on a listing card", () => {
       "https://media.test/media/activity-1/p-320.webp 320w, https://media.test/media/activity-1/p-800.webp 800w, https://media.test/media/activity-1/p-1024.webp 1024w",
     );
     expect(plate.querySelector("source")?.getAttribute("srcset")).toContain("p-1024.avif 1024w");
+    // A lone picture spans the listing page's whole card.
+    expect(plate.querySelector("img")?.getAttribute("sizes")).toBe("(max-width: 48rem) 100vw, 75rem");
     expect(plate.querySelector("source")?.getAttribute("sizes")).toBe(plate.querySelector("img")?.getAttribute("sizes"));
   });
 
@@ -759,6 +778,13 @@ describe("an article written in Markdown", () => {
     expect([...card.querySelectorAll(".carousel-slide img")].map((img) => img.getAttribute("src"))).toEqual([photo.src]);
   });
 
+  it("puts the carousel under the summary and ahead of the article", () => {
+    const card = renderRecord(article, { heading: "h1" });
+    const order = [...card.querySelectorAll(".activity-summary, .media-carousel, .prose")].map((node) => node.className);
+
+    expect(order).toEqual(["activity-summary", "media-carousel", "prose"]);
+  });
+
   it("opens the placed picture full size", () => {
     const card = renderRecord(article, { heading: "h1" });
     document.body.append(card);
@@ -833,12 +859,51 @@ describe("an article written on the site's editor", () => {
     expect(card.querySelectorAll(".carousel-slide video")).toHaveLength(1);
   });
 
-  it("keeps the lead when the document cannot be read", async () => {
+  it("keeps the lead when the document cannot be read, and shows every picture above it", async () => {
     serve({});
     const card = renderRecord(article, { heading: "h1" });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await vi.waitFor(() => expect(card.querySelector(".media-carousel")).not.toBeNull());
     expect(card.querySelector(".prose p")?.textContent).toBe("The lead, in plain text.");
     expect(card.querySelector(".prose-rich")).toBeNull();
+    // The lead places nothing, so nothing is left out of the carousel.
+    expect(card.querySelectorAll(".carousel-slide img")).toHaveLength(1);
+    expect(card.querySelectorAll(".carousel-slide video")).toHaveLength(1);
+  });
+
+  /* The live record that found this: published by hand as rich, three pictures
+     on the record and none in its document. Its page showed no pictures at all,
+     because every picture of a rich record was taken to be one its text placed. */
+  it("shows the pictures its document does not place", async () => {
+    const other = { ...picture, src: "https://media.test/media/activity-c/other-960.webp", alt: "Another" };
+    serve({
+      "content/articles/rec-r-docid.json": { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Words only." }] }] },
+    });
+    const card = renderRecord({ ...article, media: [picture, other] }, { heading: "h1" });
+
+    await vi.waitFor(() => expect(card.querySelector(".prose-rich")).not.toBeNull());
+    expect([...card.querySelectorAll(".carousel-slide img")].map((img) => img.getAttribute("src"))).toEqual([
+      picture.src,
+      other.src,
+    ]);
+    const order = [...card.querySelectorAll(".activity-summary, .media-carousel, .prose-rich")].map((node) => node.classList[0]);
+    expect(order).toEqual(["activity-summary", "media-carousel", "prose"]);
+  });
+
+  it("leaves out only the pictures its document places", async () => {
+    const other = { ...picture, src: "https://media.test/media/activity-c/other-960.webp", alt: "Another" };
+    serve({ "content/articles/rec-r-docid.json": doc });
+    const card = renderRecord({ ...article, media: [picture, other] }, { heading: "h1" });
+
+    await vi.waitFor(() => expect(card.querySelector(".prose-rich")).not.toBeNull());
+    expect([...card.querySelectorAll(".carousel-slide img")].map((img) => img.getAttribute("src"))).toEqual([other.src]);
+    expect(card.querySelector(".prose-rich figure img")?.getAttribute("src")).toBe(picture.src);
+  });
+
+  it("reads what a document in hand places, for the editor's preview", () => {
+    const other = { ...picture, src: "https://media.test/media/activity-c/other-960.webp", alt: "Another" };
+    const card = renderRecord({ ...article, media: [picture, other] }, { heading: "h1", doc: doc as never });
+
+    expect([...card.querySelectorAll(".carousel-slide img")].map((img) => img.getAttribute("src"))).toEqual([other.src]);
   });
 
   it("refuses a document that names a picture on another host", async () => {
