@@ -70,6 +70,17 @@ function fromMarkdown(record: ActivityRecord, placed: Set<number>): DocNode[] {
       case "break":
         nodes.push({ type: "horizontalRule" });
         break;
+      case "table": {
+        const row = (cells: InlineRun[][], type: "tableHeader" | "tableCell"): DocNode => ({
+          type: "tableRow",
+          content: cells.map((cell) => ({ type, content: [paragraph(runs(cell))] })),
+        });
+        nodes.push({
+          type: "table",
+          content: [...(block.header ? [row(block.header, "tableHeader")] : []), ...block.rows.map((cells) => row(cells, "tableCell"))],
+        });
+        break;
+      }
       case "figure": {
         const item = media[block.media];
         if (item && item.type === "image") {

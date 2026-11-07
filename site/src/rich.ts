@@ -13,6 +13,7 @@
  * an unknown node is already gone; the `default` branches are for the editor's
  * preview, which draws whatever the editor holds at that moment.
  */
+import { tableElement, type CellFiller } from "./prose";
 import { FONT_STACKS, type ArticleFont, type DocMark, type DocNode, type RichDoc } from "./rich-doc";
 
 function node(tag: string, className?: string): HTMLElement {
@@ -141,6 +142,27 @@ function block(item: DocNode, figure: FigureBuilder): HTMLElement | null {
         if (built) quote.append(built);
       }
       return quote;
+    }
+    case "table": {
+      // A cell's paragraphs run on with a line break between them, as a list
+      // item's do; a cell whose text is centred or right-aligned takes that
+      // from its first paragraph.
+      const fill =
+        (cell: DocNode): CellFiller =>
+        (element) => {
+          const paragraphs = cell.content ?? [];
+          paragraphs.forEach((paragraph, index) => {
+            if (index > 0) element.append(node("br"));
+            inline(element, paragraph.content);
+          });
+          aligned(element, paragraphs[0]?.attrs);
+        };
+      const rows = item.content ?? [];
+      const headed = rows[0]?.content?.[0]?.type === "tableHeader";
+      return tableElement(
+        headed ? (rows[0].content ?? []).map(fill) : null,
+        rows.slice(headed ? 1 : 0).map((row) => (row.content ?? []).map(fill)),
+      );
     }
     case "horizontalRule":
       return node("hr", "prose-break");

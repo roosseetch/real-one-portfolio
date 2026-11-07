@@ -19,6 +19,9 @@
  *   #### Heading          a point within one
  *   - item / 1. item      a list, one line per item
  *   > text                a pull quote
+ *   | a | b |             a table: a header row, a |---|---| line, then rows;
+ *   |---|---|             every line starts and ends with a pipe, \| is a
+ *   | 1 | 2 |             pipe in a cell, and a header of empty cells is none
  *   ---                   a section break
  *   ![alt](media:0)       the record's first media item, here in the text
  *   **strong**, *em*      inside any of the above
@@ -38,6 +41,7 @@ export type ProseBlock =
   | { type: "paragraph"; runs: InlineRun[]; deck: boolean }
   | { type: "list"; ordered: boolean; short: boolean; items: InlineRun[][] }
   | { type: "quote"; runs: InlineRun[] }
+  | { type: "table"; header: InlineRun[][] | null; rows: InlineRun[][][] }
   | { type: "break" }
   | { type: "figure"; media: number; alt: string };
 
@@ -61,6 +65,16 @@ const QUOTE = /^> ?(.*)$/;
 const BREAK = /^-{3,}$/;
 const FIGURE = /^!\[([^\]]*)\]\(media:(\d+)\)$/;
 const EYEBROW = /^([^:]+): +(.+)$/;
+const TABLE_ROW = /^\|.*\|$/;
+const TABLE_DELIMITER = /^\|(?:\s*:?-+:?\s*\|)+$/;
+
+/** A table line's cells: the outer pipes off, split on the rest, `\|` kept as a pipe. */
+function tableCells(line: string): string[] {
+  return line
+    .slice(1, -1)
+    .split(/(?<!\\)\|/)
+    .map((cell) => cell.replace(/\\\|/g, "|").trim());
+}
 
 /**
  * `**strong**` and `*em*`, in the order they appear.
@@ -122,8 +136,9 @@ export function parseProse(body: string | null | undefined): ProseBlock[] {
     }
   };
 
-  for (const raw of body.split("\n")) {
-    const line = raw.trim();
+  const lines = body.split("\n");
+  for (let at = 0; at < lines.length; at++) {
+    const line = lines[at].trim();
 
     if (line === "") {
       flush();
@@ -144,6 +159,31 @@ export function parseProse(body: string | null | undefined): ProseBlock[] {
       flush();
       blocks.push({ type: "break" });
       continue;
+    }
+
+    // A table is its header line and the dashes under it, as in GitHub's
+    // Markdown; a line of pipes without the dashes is text.
+    const delimiter = lines[at + 1]?.trim() ?? "";
+    if (TABLE_ROW.test(line) && TABLE_DELIMITER.test(delimiter)) {
+      const header = tableCells(line);
+      if (header.length === tableCells(delimiter).length) {
+        flush();
+        const width = header.length;
+        const rows: InlineRun[][][] = [];
+        at += 1;
+        while (at + 1 < lines.length && TABLE_ROW.test(lines[at + 1].trim())) {
+          at += 1;
+          // Short rows are filled and long ones cut to the header's width.
+          const cells = tableCells(lines[at].trim()).slice(0, width);
+          while (cells.length < width) cells.push("");
+          rows.push(cells.map(parseInline));
+        }
+        const named = header.some((cell) => cell !== "");
+        // A header of empty cells is a table with no header; with no rows
+        // either, it is nothing at all.
+        if (named || rows.length > 0) blocks.push({ type: "table", header: named ? header.map(parseInline) : null, rows });
+        continue;
+      }
     }
 
     const figure = FIGURE.exec(line);
@@ -222,6 +262,59 @@ function appendRuns(parent: HTMLElement, runs: InlineRun[]): HTMLElement {
   return parent;
 }
 
+/** Fills one cell of a table. */
+export type CellFiller = (cell: HTMLElement) => void;
+
+/**
+ * A table as the article page draws it, for a Markdown article and an editor
+ * one alike: the structure is here once, and each renderer fills the cells.
+ *
+ * The roles are spelled out because a two-column table stacks into blocks on a
+ * narrow screen, and an element whose `display` the stylesheet changes stops
+ * being announced as a table cell. A wider table scrolls sideways instead, so its
+ * wrapper is a labelled region a keyboard can focus and scroll.
+ */
+export function tableElement(header: CellFiller[] | null, rows: CellFiller[][]): HTMLElement {
+  const columns = header?.length ?? rows[0]?.length ?? 0;
+  const pairs = columns === 2;
+  const wrapper = node("div", "prose-table-wrap");
+  const table = node("table", pairs ? "prose-table prose-table--pairs" : "prose-table");
+  table.setAttribute("role", "table");
+
+  const row = (cells: CellFiller[], tag: "th" | "td") => {
+    const tr = node("tr");
+    tr.setAttribute("role", "row");
+    for (const fill of cells) {
+      const cell = node(tag);
+      if (tag === "th") cell.setAttribute("scope", "col");
+      cell.setAttribute("role", tag === "th" ? "columnheader" : "cell");
+      fill(cell);
+      tr.append(cell);
+    }
+    return tr;
+  };
+
+  if (header) {
+    const thead = node("thead");
+    thead.setAttribute("role", "rowgroup");
+    thead.append(row(header, "th"));
+    table.append(thead);
+  }
+  const tbody = node("tbody");
+  tbody.setAttribute("role", "rowgroup");
+  for (const cells of rows) tbody.append(row(cells, "td"));
+  table.append(tbody);
+
+  if (!pairs) {
+    wrapper.tabIndex = 0;
+    wrapper.setAttribute("role", "region");
+    const names = header ? [...table.querySelectorAll("th")].map((th) => th.textContent?.trim()).filter(Boolean) : [];
+    wrapper.setAttribute("aria-label", names.length > 0 ? `Table: ${names.join(", ")}` : "Table");
+  }
+  wrapper.append(table);
+  return wrapper;
+}
+
 /**
  * The article, as one element.
  *
@@ -269,6 +362,11 @@ export function renderProse(
       case "break": {
         const rule = node("hr", "prose-break");
         root.append(rule);
+        break;
+      }
+      case "table": {
+        const fill = (runs: InlineRun[]): CellFiller => (cell) => appendRuns(cell, runs);
+        root.append(tableElement(block.header?.map(fill) ?? null, block.rows.map((cells) => cells.map(fill))));
         break;
       }
       case "figure": {

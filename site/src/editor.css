@@ -266,6 +266,52 @@
   color: var(--sub);
 }
 
+/* A table while it is written: every cell outlined, so an empty one is still
+   somewhere to click. The page's look (prose-table in styles.css) is what the
+   preview shows; here the grid matters more than the finish. */
+.editor-table {
+  width: 100%;
+  margin: 2rem 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.94em;
+  line-height: 1.6;
+}
+
+.editor-table th,
+.editor-table td {
+  position: relative;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--rule);
+  vertical-align: top;
+  text-align: left;
+}
+
+.editor-table th {
+  background: var(--mat);
+  font-weight: 400;
+  color: var(--gold-text);
+}
+
+.editor-table p {
+  margin: 0;
+  text-align: left;
+  hyphens: manual;
+}
+
+.editor-table p + p {
+  margin-top: 0.5rem;
+}
+
+/* prosemirror-tables marks the cells a drag across the table selects. */
+.editor-table .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(197 143 30 / 0.16);
+  pointer-events: none;
+}
+
 /* The carousel: what the article shows above its text, in order. */
 .editor-carousel {
   margin-bottom: 1.5rem;
