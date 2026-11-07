@@ -35,16 +35,14 @@ import {
   isRecordId,
   manifestWith,
   problemsWith,
+  publishArgs,
   put,
   randomId,
   readJson,
   rolls,
 } from "./content-bucket.js";
 
-const args = process.argv.slice(2);
-const idFlag = args.indexOf("--id");
-const givenId = idFlag >= 0 ? args[idFlag + 1] : undefined;
-const file = args.find((arg, index) => !arg.startsWith("--") && index !== idFlag + 1);
+const { file, idFlag, id: givenId } = publishArgs(process.argv.slice(2));
 
 const bucket = process.env.CONTENT_BUCKET;
 const base = process.env.CONTENT_BASE_URL?.replace(/\/$/, "");
@@ -54,10 +52,10 @@ const missing = Object.entries({ CONTENT_BUCKET: bucket, CONTENT_BASE_URL: base,
   .filter(([, value]) => !value)
   .map(([name]) => name);
 
-if (!file || missing.length > 0 || (idFlag >= 0 && !(givenId && isRecordId(givenId)))) {
+if (!file || missing.length > 0 || (idFlag && !(givenId && isRecordId(givenId)))) {
   console.error("Cannot publish the record.");
   if (!file) console.error("  no record file given");
-  if (idFlag >= 0 && !(givenId && isRecordId(givenId))) console.error("  --id must be 16 Crockford base32 characters");
+  if (idFlag && !(givenId && isRecordId(givenId))) console.error("  --id must be 16 Crockford base32 characters");
   for (const name of missing) console.error(`  ${name} is not set`);
   console.error("\nUsage: npx tsx scripts/publish-record.ts <record.json> [--id <record-id>]");
   console.error("CONTENT_BUCKET and CONTENT_BASE_URL live in worker/.env,");

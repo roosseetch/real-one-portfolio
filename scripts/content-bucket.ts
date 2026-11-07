@@ -152,3 +152,17 @@ export function problemsWith(record: unknown): string[] {
 export function isRecordId(value: string): boolean {
   return RECORD_ID.test(value);
 }
+
+/**
+ * publish-record's arguments: the record file, and the id `--id` gives, if any.
+ *
+ * The word after `--id` is its value, never the file. Only when `--id` is
+ * there: with no flag every position is free, and the file may come first.
+ */
+export function publishArgs(args: string[]): { file?: string; idFlag: boolean; id?: string } {
+  const at = args.indexOf("--id");
+  const idFlag = at >= 0;
+  const id = idFlag ? args[at + 1] : undefined;
+  const file = args.find((arg, index) => !arg.startsWith("--") && !(idFlag && index === at + 1));
+  return { file, idFlag, id };
+}

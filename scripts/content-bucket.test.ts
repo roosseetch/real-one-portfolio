@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type Manifest, isRecordId, manifestWith, problemsWith, rolls } from "./content-bucket.js";
+import { type Manifest, isRecordId, manifestWith, problemsWith, publishArgs, rolls } from "./content-bucket.js";
 
 const manifest = (counts: number[]): Manifest => ({
   schemaVersion: 1,
@@ -65,5 +65,25 @@ describe("a record written by hand", () => {
     expect(isRecordId("0123456789abcdef")).toBe(true);
     expect(isRecordId("0123456789abcdei")).toBe(false);
     expect(isRecordId("short")).toBe(false);
+  });
+});
+
+describe("publish-record's arguments", () => {
+  it("finds the file when no --id is given", () => {
+    expect(publishArgs(["record.json"])).toEqual({ file: "record.json", idFlag: false, id: undefined });
+  });
+
+  it("finds the file and the id whichever comes first", () => {
+    const expected = { file: "record.json", idFlag: true, id: "0123456789abcdef" };
+    expect(publishArgs(["record.json", "--id", "0123456789abcdef"])).toEqual(expected);
+    expect(publishArgs(["--id", "0123456789abcdef", "record.json"])).toEqual(expected);
+  });
+
+  it("never takes the id for the file", () => {
+    expect(publishArgs(["--id", "0123456789abcdef"]).file).toBeUndefined();
+  });
+
+  it("reports a --id with nothing after it", () => {
+    expect(publishArgs(["record.json", "--id"])).toEqual({ file: "record.json", idFlag: true, id: undefined });
   });
 });
