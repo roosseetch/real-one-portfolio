@@ -67,16 +67,55 @@ export const MAX_DOC_BYTES = 512 * 1024;
 const MAX_NODES = 20_000;
 const MAX_DEPTH = 12;
 
+/**
+ * A table's bounds. Eight columns is past what the 42rem measure can show even
+ * scrolling sideways comfortably; a hundred rows is a long reference table, and
+ * keeps one from being the whole node budget.
+ */
+export const MAX_TABLE_COLUMNS = 8;
+export const MAX_TABLE_ROWS = 100;
+
 /** Which children each container may hold. Anything not a key here is a leaf or not allowed. */
 const CHILDREN: Record<string, ReadonlySet<string>> = {
-  doc: new Set(["paragraph", "heading", "bulletList", "orderedList", "blockquote", "horizontalRule", "figure"]),
+  doc: new Set(["paragraph", "heading", "bulletList", "orderedList", "blockquote", "horizontalRule", "figure", "table"]),
   paragraph: new Set(["text", "hardBreak"]),
   heading: new Set(["text", "hardBreak"]),
   bulletList: new Set(["listItem"]),
   orderedList: new Set(["listItem"]),
   listItem: new Set(["paragraph", "bulletList", "orderedList"]),
   blockquote: new Set(["paragraph"]),
+  // Paragraphs only in a cell: a heading, a list or a picture inside a table
+  // is a layout the page has no design for.
+  table: new Set(["tableRow"]),
+  tableRow: new Set(["tableHeader", "tableCell"]),
+  tableHeader: new Set(["paragraph"]),
+  tableCell: new Set(["paragraph"]),
 };
+
+/**
+ * A table's rows, checked for a shape the page can draw: every row the same
+ * width, within the bounds, and header cells only as a whole first row.
+ *
+ * Header cells anywhere else — a header column pasted from a word processor —
+ * become ordinary cells rather than refusing the document: the words are the
+ * same, only the emphasis goes. Merged cells are refused before this, since
+ * unmerging one would change what the table says.
+ */
+function shapeTable(rows: DocNode[], fail: (problem: string) => never): DocNode[] {
+  if (rows.length > MAX_TABLE_ROWS) fail(`a table has more than ${MAX_TABLE_ROWS} rows`);
+  const width = rows[0].content!.length;
+  if (width > MAX_TABLE_COLUMNS) fail(`a table has more than ${MAX_TABLE_COLUMNS} columns`);
+  if (rows.some((row) => row.content!.length !== width)) fail("a table's rows do not all have the same number of cells");
+
+  const headed = rows[0].content!.every((cell) => cell.type === "tableHeader");
+  return rows.map((row, index) => ({
+    type: "tableRow",
+    content: row.content!.map((cell) => ({
+      ...cell,
+      type: headed && index === 0 ? "tableHeader" : "tableCell",
+    })),
+  }));
+}
 
 export type CleanResult = { ok: true; doc: RichDoc } | { ok: false; problem: string };
 
@@ -196,6 +235,13 @@ export function cleanDoc(input: unknown, options: CleanOptions): CleanResult {
         attrs.textAlign = align;
       }
     }
+    if (node.type === "tableHeader" || node.type === "tableCell") {
+      // Widths are the editor's to keep, not the page's (the column split is
+      // the stylesheet's); a span is refused because dropping it would move
+      // every cell after it into the wrong column.
+      const span = (value: unknown) => value === undefined || value === null || value === 1;
+      if (!span(node.attrs?.colspan) || !span(node.attrs?.rowspan)) fail("merged table cells are not supported");
+    }
     if (node.type === "orderedList") {
       const start = node.attrs?.start;
       if (typeof start === "number" && Number.isInteger(start) && start > 1 && start < 10_000) attrs.start = start;
@@ -208,6 +254,13 @@ export function cleanDoc(input: unknown, options: CleanOptions): CleanResult {
     if ((node.type === "bulletList" || node.type === "orderedList" || node.type === "listItem") && cleaned.length === 0) {
       fail("an empty list");
     }
+    if ((node.type === "table" || node.type === "tableRow") && cleaned.length === 0) fail("an empty table");
+    if (node.type === "tableHeader" || node.type === "tableCell") {
+      // The editor always holds a paragraph in a cell, even an empty one; a
+      // cell with nothing at all is given one so every cell stays a cell.
+      return { type: node.type, content: cleaned.length > 0 ? cleaned : [{ type: "paragraph" }] };
+    }
+    if (node.type === "table") return { type: "table", content: shapeTable(cleaned, fail) };
 
     return {
       type: node.type,
@@ -242,8 +295,10 @@ function inlineText(node: DocNode): string {
 /**
  * The document as plain paragraphs, one string each, top to bottom.
  *
- * Headings are kept as their own paragraph and list items as "- item", so the
- * text still reads in order; pictures and rules leave nothing behind.
+ * Headings are kept as their own paragraph, list items as "- item" and a
+ * table's rows as "cell — cell", so the text still reads in order; a header row
+ * is left out, since "Practice — What it means" says nothing a row does not.
+ * Pictures and rules leave nothing behind.
  */
 export function docParagraphs(doc: RichDoc): string[] {
   const out: string[] = [];
@@ -264,6 +319,15 @@ export function docParagraphs(doc: RichDoc): string[] {
         break;
       case "blockquote":
         for (const child of node.content ?? []) block(child, bullet);
+        break;
+      case "table":
+        for (const row of node.content ?? []) {
+          if (row.content?.[0]?.type === "tableHeader") continue;
+          const cells = (row.content ?? [])
+            .map((cell) => (cell.content ?? []).map((child) => inlineText(child).replace(/\s+/g, " ").trim()).filter(Boolean).join(" "))
+            .filter(Boolean);
+          if (cells.length > 0) out.push(cells.join(" — "));
+        }
         break;
     }
   };

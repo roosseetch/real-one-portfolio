@@ -12,8 +12,17 @@ import {
 } from "./editor-carousel";
 import { docFromRecord } from "./editor-doc";
 import { forgetKey, takeKey } from "./editor-key";
-import { createEditor, figureStates, updateFigures } from "./editor-tiptap";
-import { ARTICLE_FONTS, FONT_SIZES, cleanDoc, docFigures, docKey, type RichDoc } from "./rich-doc";
+import { createEditor, figureStates, tableShape, updateFigures } from "./editor-tiptap";
+import {
+  ARTICLE_FONTS,
+  FONT_SIZES,
+  MAX_TABLE_COLUMNS,
+  MAX_TABLE_ROWS,
+  cleanDoc,
+  docFigures,
+  docKey,
+  type RichDoc,
+} from "./rich-doc";
 import { applyDesignTokens } from "./shell";
 
 /**
@@ -415,6 +424,7 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
       }
       if (event.key === "Escape") inspector.hidden = true;
     });
+    inspector.dataset.kind = "link";
     inspector.replaceChildren(
       el("span", "editor-label label", "Link"),
       input,
@@ -440,6 +450,7 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
       chain().updateAttributes("figure", { alt: alt.value.trim() || null, caption: caption.value.trim() || null }).run();
       inspector.hidden = true;
     };
+    inspector.dataset.kind = "figure";
     inspector.replaceChildren(
       el("span", "editor-label label", "Picture"),
       alt,
@@ -448,6 +459,51 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
     );
     inspector.hidden = false;
     alt.focus();
+  };
+
+  /*
+   * A table's controls, shown while the cursor is in one. Built once and kept,
+   * so a button keeps its focus while the cursor moves from cell to cell; only
+   * what each can do is refreshed.
+   */
+  const tableButton = (label: string, title: string, run: () => void) =>
+    button(label, title, run, "editor-button editor-button--text");
+  const rowAbove = tableButton("Row above", "Add a row above this one", () => chain().addRowBefore().run());
+  const rowBelow = tableButton("Row below", "Add a row below this one", () => chain().addRowAfter().run());
+  const rowDelete = tableButton("Delete row", "Delete this row", () => chain().deleteRow().run());
+  const columnLeft = tableButton("Column left", "Add a column to the left", () => chain().addColumnBefore().run());
+  const columnRight = tableButton("Column right", "Add a column to the right", () => chain().addColumnAfter().run());
+  const columnDelete = tableButton("Delete column", "Delete this column", () => chain().deleteColumn().run());
+  const headerRow = tableButton("Header row", "Make the first row the table's header", () => chain().toggleHeaderRow().run());
+  headerRow.setAttribute("aria-pressed", "false");
+  const tableDelete = tableButton("Delete table", "Delete the whole table", () => {
+    chain().deleteTable().run();
+    inspector.hidden = true;
+  });
+  const tableControls = [
+    el("span", "editor-label label", "Table"),
+    rowAbove,
+    rowBelow,
+    rowDelete,
+    columnLeft,
+    columnRight,
+    columnDelete,
+    headerRow,
+    tableDelete,
+  ];
+
+  const showTableInspector = (shape: { rows: number; columns: number; headerRow: boolean }) => {
+    if (inspector.dataset.kind !== "table" || inspector.hidden) {
+      inspector.dataset.kind = "table";
+      inspector.replaceChildren(...tableControls);
+      inspector.hidden = false;
+    }
+    rowAbove.disabled = rowBelow.disabled = shape.rows >= MAX_TABLE_ROWS;
+    columnLeft.disabled = columnRight.disabled = shape.columns >= MAX_TABLE_COLUMNS;
+    // The last row or column goes with Delete table, so nothing is left as an empty frame.
+    rowDelete.disabled = shape.rows <= 1;
+    columnDelete.disabled = shape.columns <= 1;
+    headerRow.setAttribute("aria-pressed", String(shape.headerRow));
   };
 
   /* Pictures: a hidden file input behind the button, one upload per file. */
@@ -497,6 +553,12 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
       toggle("Link", "Link", openLinkInspector, () => editor.isActive("link"), "editor-button--text"),
       button("Picture", "Add a picture", () => fileInput.click(), "editor-button editor-button--text"),
       fileInput,
+      button(
+        "Table",
+        "Add a table: a header row and two columns, to change from the table's own controls",
+        () => chain().insertTable({ rows: 3, cols: 2, withHeaderRow: true }).run(),
+        "editor-button editor-button--text",
+      ),
     ),
     group(
       button("↶", "Undo", () => chain().undo().run()),
@@ -556,6 +618,11 @@ function mount(root: HTMLElement, key: string, session: Session, initial: RichDo
     sizePicker.value = style.fontSize ?? "";
 
     if (editor.isActive("figure") && inspector.hidden) openFigureInspector();
+    // The table's controls follow the cursor in and out of a table, but never
+    // replace a link being typed in a cell.
+    const shape = tableShape(editor);
+    if (shape && (inspector.hidden || inspector.dataset.kind === "table")) showTableInspector(shape);
+    else if (!shape && inspector.dataset.kind === "table") inspector.hidden = true;
   }
   editor.on("selectionUpdate", refresh);
   editor.on("transaction", () => {

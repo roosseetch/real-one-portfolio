@@ -1472,6 +1472,115 @@ ol.prose-list li::before {
   margin-top: 0;
 }
 
+/* A table: gold rules above and below, the header set as the eyebrow is, and
+   every other row on the mat, so a row reads across without a grid of lines.
+   Not justified: a cell is too narrow for justification to do anything but
+   open holes. */
+.prose > .prose-table-wrap {
+  margin: 2.25rem 0;
+}
+
+/* The article sits in grid tracks sized by their content, so a wide table
+   would widen the whole page rather than scroll. Containing the wrapper's
+   inline size takes the table out of that sum: the wrapper is as wide as the
+   column, and the table scrolls inside it. */
+.prose-table-wrap {
+  overflow-x: auto;
+  contain: inline-size;
+}
+
+.prose-table-wrap:focus-visible {
+  outline: 2px solid var(--gold-line);
+  outline-offset: 4px;
+}
+
+.prose-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--gold-line);
+  border-bottom: 1px solid var(--gold-line);
+  font-size: 0.94em;
+  line-height: 1.6;
+  text-align: left;
+  hyphens: manual;
+}
+
+.prose-table th,
+.prose-table td {
+  padding: 0.875rem 1rem;
+  vertical-align: top;
+}
+
+.prose-table th {
+  padding-top: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: var(--size-label);
+  line-height: 1.3;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold-text);
+}
+
+.prose-table tbody tr:nth-child(odd) {
+  background: var(--mat);
+}
+
+/* A column of names beside a column of what they mean: the names are set as
+   the headings are, so the left column is what the eye runs down. */
+.prose-table--pairs td:first-child {
+  width: 34%;
+  font-family: var(--font-article);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+/* Wider than two columns, a narrow screen scrolls the table sideways rather
+   than crushing each column to a word a line. */
+@media (max-width: 47.999rem) {
+  .prose-table:not(.prose-table--pairs) th,
+  .prose-table:not(.prose-table--pairs) td {
+    min-width: 9rem;
+  }
+
+  /* Two columns stack instead: each row a block, its name above its meaning.
+     The header row stays in the document for a screen reader (the roles in
+     prose.ts keep it a table) and leaves the screen. */
+  .prose-table--pairs,
+  .prose-table--pairs tbody,
+  .prose-table--pairs tr,
+  .prose-table--pairs td {
+    display: block;
+    width: auto;
+  }
+
+  .prose-table--pairs thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .prose-table--pairs tr {
+    padding: 0.875rem 1rem;
+  }
+
+  .prose-table--pairs td,
+  .prose-table--pairs td:first-child {
+    width: auto;
+    padding: 0;
+  }
+
+  .prose-table--pairs td + td {
+    margin-top: 0.25rem;
+  }
+}
+
 /* A section break: a small gold lozenge rather than another full rule, since
    every section heading already draws one. */
 .prose > .prose-break {
